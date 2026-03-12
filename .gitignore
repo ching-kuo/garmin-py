@@ -54,6 +54,9 @@ dmypy.json
 *.swo
 *~
 
+# Claude Code plans
+.claude/
+
 # Garth session (credentials)
 .garth/
 
