@@ -281,7 +281,7 @@ class TestGetAllThresholds:
             {
                 "sport": "running",
                 "lactateThresholdHeartRate": 172,
-                "lactateThresholdPace": 255,
+                "lactateThresholdPace": "4:15",
                 "functionalThresholdPower": 315,
                 "weight": 70.5,
             }
@@ -343,7 +343,7 @@ class TestGetAllThresholds:
             {
                 "sport": "running",
                 "lactateThresholdHeartRate": 171,
-                "lactateThresholdPace": 250,
+                "lactateThresholdPace": "4:10",
                 "functionalThresholdPower": 310,
                 "weight": 68.0,
             },

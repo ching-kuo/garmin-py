@@ -98,7 +98,7 @@ def sample_hrv_raw() -> dict:
         "hrvSummary": {
             "calendarDate": "2026-03-11",
             "weeklyAvg": 52,
-            "lastNight": 48,
+            "lastNightAvg": 48,
             "status": "BALANCED",
         }
     }
@@ -244,6 +244,55 @@ def sample_workout_raw() -> dict:
 
 
 @pytest.fixture()
+def sample_workout_alt_raw() -> dict:
+    return {
+        "workoutId": 987654,
+        "workoutName": "Tempo Run",
+        "sportType": {"displayName": "Running"},
+        "estimatedDuration": 3600,
+        "description": "4x10min at threshold pace",
+    }
+
+
+@pytest.fixture()
+def sample_workout_detail_raw() -> dict:
+    return {
+        "workoutId": 987654,
+        "workoutName": "Tempo Run",
+        "sportType": {"sportTypeKey": "running"},
+        "estimatedDurationInSecs": 3600,
+        "description": "4x10min at threshold pace",
+        "workoutSegments": [
+            {
+                "workoutSteps": [
+                    {
+                        "stepOrder": 1,
+                        "stepType": {"stepTypeKey": "warmup"},
+                        "durationType": "time",
+                        "durationValue": 600,
+                    },
+                    {
+                        "stepOrder": 2,
+                        "stepType": {"stepTypeKey": "interval"},
+                        "durationType": "time",
+                        "durationValue": 300,
+                        "targetType": "heart.rate.zone",
+                        "targetValueOne": 160,
+                        "targetValueTwo": 170,
+                    },
+                    {
+                        "stepOrder": 3,
+                        "stepType": {"stepTypeKey": "cooldown"},
+                        "durationType": "time",
+                        "durationValue": 600,
+                    },
+                ]
+            }
+        ],
+    }
+
+
+@pytest.fixture()
 def sample_workouts_list_raw() -> list[dict]:
     return [
         {
@@ -269,6 +318,7 @@ def sample_calendar_raw() -> dict:
         "calendarItems": [
             {
                 "date": "2026-03-12",
+                "workoutId": 987654,
                 "title": "Tempo Run",
                 "workoutTypeKey": "running",
                 "durationInSeconds": 3600,
@@ -276,6 +326,7 @@ def sample_calendar_raw() -> dict:
             },
             {
                 "date": "2026-03-14",
+                "id": 987655,
                 "title": "Long Ride",
                 "workoutTypeKey": "cycling",
                 "durationInSeconds": 7200,
@@ -295,6 +346,32 @@ def sample_lactate_threshold_raw() -> dict:
 
 
 @pytest.fixture()
+def sample_lactate_threshold_live_raw() -> list[dict]:
+    return [
+        {
+            "userProfilePK": 75253976,
+            "version": 1772777901901,
+            "calendarDate": "2026-03-06T15:18:21.866",
+            "sequence": 1772777901901,
+            "speed": 0.37499895,
+            "hearRate": None,
+            "heartRateCycling": None,
+            "rowSpeed": None,
+        },
+        {
+            "userProfilePK": 75253976,
+            "version": 1772777901901,
+            "calendarDate": "2026-03-06T15:18:21.866",
+            "sequence": 1772777901901,
+            "speed": None,
+            "hearRate": 177,
+            "heartRateCycling": None,
+            "rowSpeed": None,
+        },
+    ]
+
+
+@pytest.fixture()
 def sample_ftp_raw() -> dict:
     return {
         "functionalThresholdPower": 280,
@@ -310,6 +387,41 @@ def sample_vo2max_raw() -> dict:
         "vo2MaxValue": 52.0,
         "sport": "running",
     }
+
+
+@pytest.fixture()
+def sample_vo2max_wrapped_raw() -> dict:
+    return {
+        "maxMetData": {
+            "calendarDate": "2026-03-11",
+            "vo2MaxValue": 52.0,
+            "sport": "running",
+        }
+    }
+
+
+@pytest.fixture()
+def sample_vo2max_live_raw() -> list[dict]:
+    return [
+        {
+            "userId": 75253976,
+            "generic": {
+                "calendarDate": "2026-03-10",
+                "vo2MaxPreciseValue": 54.1,
+                "vo2MaxValue": 54.0,
+                "maxMetCategory": 0,
+            },
+            "cycling": {
+                "calendarDate": "2026-03-10",
+                "vo2MaxPreciseValue": 55.0,
+                "vo2MaxValue": 55.0,
+                "maxMetCategory": 1,
+            },
+            "heatAltitudeAcclimation": {
+                "calendarDate": "2026-03-10",
+            },
+        }
+    ]
 
 
 @pytest.fixture()

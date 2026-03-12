@@ -6,6 +6,7 @@ import pytest
 from tests.e2e.conftest import (
     assert_envelope_ok,
     assert_exit_ok,
+    assert_row_has_keys,
 )
 
 
@@ -14,6 +15,17 @@ def test_vo2max(run_cli):
     result, parsed = run_cli(["performance", "vo2max"])
     assert_exit_ok(result)
     assert_envelope_ok(parsed)
+    assert parsed is not None
+    assert parsed["data"], "Expected at least one VO2 max row"
+
+    dates = set()
+    for row in parsed["data"]:
+        assert_row_has_keys(row, ["date", "vo2max", "sport"])
+        dates.add(row["date"])
+
+    assert len(dates) == 1, (
+        "performance vo2max should only return rows from the latest measurement day"
+    )
 
 
 @pytest.mark.e2e

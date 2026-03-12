@@ -1,8 +1,9 @@
 """Health endpoint helpers backed by Garmin Connect APIs."""
 from __future__ import annotations
 
-from datetime import date
-from typing import Any
+from datetime import date, timedelta
+import time
+from typing import Any, Callable
 
 import garth
 
@@ -11,6 +12,21 @@ from garmin_cli.endpoints._base import _make_request
 
 def _request(url: str, *, params: dict[str, Any] | None = None) -> Any:
     return _make_request(garth.connectapi, url, params=params)
+
+
+def _collect_daily_range(
+    getter: Callable[[date], Any],
+    start: date,
+    end: date,
+) -> list[Any]:
+    items: list[Any] = []
+    current = start
+    while current <= end:
+        items.append(getter(current))
+        current += timedelta(days=1)
+        if current <= end:
+            time.sleep(0.5)
+    return items
 
 
 def get_sleep(start: date, end: date) -> Any:
@@ -39,22 +55,42 @@ def get_body_battery(day: date) -> Any:
     return _request(f"/wellness-service/wellness/bodyBattery/{day.isoformat()}")
 
 
+def get_body_battery_range(start: date, end: date) -> list[Any]:
+    return _collect_daily_range(get_body_battery, start, end)
+
+
 def get_stress(day: date) -> Any:
     return _request(f"/wellness-service/wellness/dailyStress/{day.isoformat()}")
+
+
+def get_stress_range(start: date, end: date) -> list[Any]:
+    return _collect_daily_range(get_stress, start, end)
 
 
 def get_spo2(day: date) -> Any:
     return _request(f"/wellness-service/wellness/daily/spo2/{day.isoformat()}")
 
 
+def get_spo2_range(start: date, end: date) -> list[Any]:
+    return _collect_daily_range(get_spo2, start, end)
+
+
 def get_resting_hr(day: date) -> Any:
     return _request(f"/wellness-service/wellness/dailyHeartRate/{day.isoformat()}")
+
+
+def get_resting_hr_range(start: date, end: date) -> list[Any]:
+    return _collect_daily_range(get_resting_hr, start, end)
 
 
 def get_training_readiness(day: date) -> Any:
     return _request(
         f"/training-info-service/training-info/daily-readiness/{day.isoformat()}"
     )
+
+
+def get_training_readiness_range(start: date, end: date) -> list[Any]:
+    return _collect_daily_range(get_training_readiness, start, end)
 
 
 def get_training_status(day: date) -> Any:

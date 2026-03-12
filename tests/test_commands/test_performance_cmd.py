@@ -177,14 +177,13 @@ class TestPerformanceVo2maxCommand:
 
     def test_vo2max_default_to_today(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
-        mock_vo2 = mocker.patch(
-            "garmin_cli.commands.performance.get_vo2max",
-            return_value={"vo2MaxValue": 52.0},
+        mock_latest = mocker.patch(
+            "garmin_cli.commands.performance.get_latest_vo2max",
+            return_value=[{"generic": {"calendarDate": "2026-03-10", "vo2MaxValue": 52.0}}],
         )
         runner = CliRunner(mix_stderr=False)
         runner.invoke(cli, ["--json", "performance", "vo2max"])
-        # Should be called with today's date by default
-        assert mock_vo2.called
+        assert mock_latest.called
 
     def test_vo2max_auth_failure_exit_1(self, mocker: Any) -> None:
         from garmin_cli.exceptions import GarminCliError

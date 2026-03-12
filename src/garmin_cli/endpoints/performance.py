@@ -1,13 +1,18 @@
 """Performance endpoint helpers backed by Garmin Connect APIs."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import garth
 
 from garmin_cli.endpoints._base import _make_request
 from garmin_cli.exceptions import GarminCliError
+from garmin_cli.serializers import (
+    _format_pace_seconds,
+    _pace_from_speed,
+    _parse_flat_lactate,
+)
 
 
 def _request(url: str, *, params: dict[str, Any] | None = None) -> Any:
@@ -34,6 +39,15 @@ def get_vo2max(measurement_date: date) -> Any:
     return result if result is not None else []
 
 
+def get_latest_vo2max(days_back: int = 30) -> Any:
+    end = date.today()
+    start = end - timedelta(days=days_back)
+    result = _request(
+        f"/metrics-service/metrics/maxmet/daily/{start.isoformat()}/{end.isoformat()}"
+    )
+    return result if result is not None else []
+
+
 def _optional_ftp(sport: str) -> Any:
     try:
         return get_ftp(sport)
@@ -42,19 +56,6 @@ def _optional_ftp(sport: str) -> Any:
             return []
         raise
 
-
-def _pace_from_speed(speed: Any) -> str | None:
-    if speed is None:
-        return None
-    try:
-        speed_value = float(speed)
-    except (TypeError, ValueError):
-        return None
-    if speed_value <= 0:
-        return None
-    total_seconds = int(1000 / speed_value)
-    minutes, seconds = divmod(total_seconds, 60)
-    return f"{minutes}:{seconds:02d}"
 
 
 def _merge_threshold(
@@ -73,7 +74,10 @@ def _merge_threshold(
         },
     )
     normalized_payload = dict(payload)
-    if normalized_payload.get("lactateThresholdPace") is None:
+    pace_value = normalized_payload.get("lactateThresholdPace")
+    if isinstance(pace_value, (int, float)):
+        normalized_payload["lactateThresholdPace"] = _format_pace_seconds(pace_value)
+    elif normalized_payload.get("lactateThresholdPace") is None:
         normalized_payload["lactateThresholdPace"] = _pace_from_speed(
             normalized_payload.get("lactateThresholdSpeed")
         )
@@ -90,6 +94,8 @@ def _merge_threshold(
 
 def _iter_dict_items(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, dict):
+        if isinstance(payload.get("value"), dict):
+            return [payload["value"]]
         return [payload] if payload else []
     if isinstance(payload, list):
         return [item for item in payload if isinstance(item, dict) and item]
@@ -109,9 +115,14 @@ def get_all_thresholds() -> dict[str, Any]:
 
     thresholds_by_sport: dict[str, dict[str, Any]] = {}
 
-    for item in _iter_dict_items(lactate):
-        sport = _normalize_sport(item.get("sport"), "running")
-        _merge_threshold(thresholds_by_sport, sport, item)
+    lactate_items = _iter_dict_items(lactate)
+    if lactate_items and all(item.get("sport") is None for item in lactate_items):
+        for sport, payload in _parse_flat_lactate(lactate_items).items():
+            _merge_threshold(thresholds_by_sport, sport, payload)
+    else:
+        for item in lactate_items:
+            sport = _normalize_sport(item.get("sport"), "running")
+            _merge_threshold(thresholds_by_sport, sport, item)
 
     for fallback_sport, ftp in (("cycling", cycling_ftp), ("running", running_ftp)):
         for item in _iter_dict_items(ftp):

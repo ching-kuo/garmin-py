@@ -14,8 +14,10 @@ from garmin_cli.endpoints.workouts import (
 from garmin_cli.output import render_output
 from garmin_cli.serializers import (
     COLUMNS_CALENDAR_WORKOUT,
+    COLUMNS_WORKOUT_DETAIL,
     COLUMNS_WORKOUT,
     serialize_calendar_workout,
+    serialize_workout_detail,
     serialize_workout_summary,
 )
 
@@ -50,8 +52,8 @@ def get_cmd(ctx: click.Context, workout_id: str) -> None:
     """Get a single workout by ID."""
     ensure_authenticated(ctx.obj["config"])
     raw = get_workout(workout_id)
-    data = serialize_workout_summary(raw)
-    render_output(ctx.obj["config"].output_format, "workout get", data, COLUMNS_WORKOUT)
+    data = serialize_workout_detail(raw)
+    render_output(ctx.obj["config"].output_format, "workout get", data, COLUMNS_WORKOUT_DETAIL)
 
 
 @workout.command("calendar")
@@ -69,6 +71,9 @@ def calendar_cmd(
 ) -> None:
     """Get workout calendar for a date range."""
     from garmin_cli.date_utils import resolve_date_range
+
+    if all(value is None for value in (date_from, date_to, days, ahead)):
+        ahead = 7
 
     start, end = resolve_date_range(
         None,
