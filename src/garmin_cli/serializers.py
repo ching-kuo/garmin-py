@@ -64,7 +64,10 @@ def serialize_sleep(raw: Any) -> list[dict[str, Any]]:
     items = raw if isinstance(raw, list) else [raw]
     rows: list[dict[str, Any]] = []
     for item in items:
-        dto = item.get("dailySleepDTO", {}) if isinstance(item, dict) else {}
+        if not isinstance(item, dict):
+            continue
+        # Real API returns flat items; test mocks may use dailySleepDTO wrapper
+        dto = item.get("dailySleepDTO") or item
         rows.append(
             {
                 "date": dto.get("calendarDate"),

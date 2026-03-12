@@ -9,6 +9,31 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
+# E2E skip gating (registered at root so --e2e works from any collection path)
+# ---------------------------------------------------------------------------
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--e2e",
+        action="store_true",
+        default=False,
+        help=(
+            "run end-to-end tests against real Garmin Connect API; some live "
+            "tests expect an account with HRV, VO2 max, and threshold data"
+        ),
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--e2e", default=False):
+        return
+    skip_e2e = pytest.mark.skip(reason="need --e2e option to run")
+    for item in items:
+        if "e2e" in item.keywords:
+            item.add_marker(skip_e2e)
+
+
+# ---------------------------------------------------------------------------
 # Garth mock
 # ---------------------------------------------------------------------------
 
