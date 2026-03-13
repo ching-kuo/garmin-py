@@ -1,3 +1,10 @@
+---
+name: garmin-cli
+description: Extract health, activity, workout, and performance data from Garmin Connect. Use when users need Garmin fitness data including sleep, HRV, weight, stress, activities, workouts, and performance metrics.
+argument-hint: [command] [options]
+allowed-tools: Bash
+---
+
 # garmin-cli
 
 Extract health, activity, workout, and performance data from Garmin Connect.
