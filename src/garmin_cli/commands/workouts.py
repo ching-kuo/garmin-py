@@ -1,25 +1,36 @@
 """Workout commands."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 import click
 
 from garmin_cli.auth import ensure_authenticated
 from garmin_cli.endpoints.workouts import (
+    create_workout,
+    delete_workout,
     get_calendar_range,
     get_workout,
     list_workouts,
+    schedule_workout,
+    update_workout,
 )
+from garmin_cli.exceptions import GarminCliError
+from garmin_cli.input_reader import read_workout_input
 from garmin_cli.output import render_output
 from garmin_cli.serializers import (
     COLUMNS_CALENDAR_WORKOUT,
-    COLUMNS_WORKOUT_DETAIL,
     COLUMNS_WORKOUT,
+    COLUMNS_WORKOUT_DETAIL,
+    COLUMNS_WORKOUT_MUTATE,
     serialize_calendar_workout,
     serialize_workout_detail,
+    serialize_workout_mutate,
     serialize_workout_summary,
 )
+from garmin_cli.workout_builder import build_garmin_payload, merge_workout_payload
+from garmin_cli.workout_schema import validate_workout_input
 
 
 @click.group()
@@ -32,8 +43,6 @@ def workout() -> None:
 @click.pass_context
 def list_cmd(ctx: click.Context, limit: int) -> None:
     """List workouts."""
-    from garmin_cli.exceptions import GarminCliError
-
     if limit <= 0:
         raise GarminCliError(
             error="--limit must be greater than 0",
@@ -93,4 +102,102 @@ def calendar_cmd(
         data,
         COLUMNS_CALENDAR_WORKOUT,
         date_range=(start, end),
+    )
+
+
+@workout.command("create")
+@click.argument("file_path", required=False, metavar="FILE")
+@click.option("--stdin", "use_stdin", is_flag=True, default=False)
+@click.option("--input-format", type=click.Choice(["json", "yaml"]), default=None)
+@click.pass_context
+def create_cmd(
+    ctx: click.Context,
+    file_path: str | None,
+    use_stdin: bool,
+    input_format: str | None,
+) -> None:
+    """Create a new workout from a JSON or YAML file."""
+    ensure_authenticated(ctx.obj["config"])
+    user_data = read_workout_input(file_path, use_stdin, input_format)
+    errors = validate_workout_input(user_data)
+    if errors:
+        raise GarminCliError(error="; ".join(errors), error_code="INVALID_INPUT")
+    garmin_payload = build_garmin_payload(user_data)
+    raw = create_workout(garmin_payload)
+    if raw is None:
+        raise GarminCliError(error="Workout creation returned no data.", error_code="SERVER_ERROR")
+    data = serialize_workout_mutate(raw, "created")
+    render_output(ctx.obj["config"].output_format, "workout create", data, COLUMNS_WORKOUT_MUTATE)
+
+
+@workout.command("update")
+@click.argument("workout_id")
+@click.argument("file_path", required=False, metavar="FILE")
+@click.option("--stdin", "use_stdin", is_flag=True, default=False)
+@click.option("--input-format", type=click.Choice(["json", "yaml"]), default=None)
+@click.pass_context
+def update_cmd(
+    ctx: click.Context,
+    workout_id: str,
+    file_path: str | None,
+    use_stdin: bool,
+    input_format: str | None,
+) -> None:
+    """Update an existing workout by ID."""
+    ensure_authenticated(ctx.obj["config"])
+    user_data = read_workout_input(file_path, use_stdin, input_format)
+    errors = validate_workout_input(user_data, partial=True)
+    if errors:
+        raise GarminCliError(error="; ".join(errors), error_code="INVALID_INPUT")
+    existing = get_workout(workout_id)
+    merged, warnings = merge_workout_payload(existing, user_data)
+    for w in warnings:
+        click.echo(f"WARNING: {w}", err=True)
+    update_workout(workout_id, merged)
+    data = serialize_workout_mutate(merged, "updated")
+    render_output(ctx.obj["config"].output_format, "workout update", data, COLUMNS_WORKOUT_MUTATE)
+
+
+@workout.command("delete")
+@click.argument("workout_id")
+@click.option("--confirm", is_flag=True, default=False)
+@click.pass_context
+def delete_cmd(ctx: click.Context, workout_id: str, confirm: bool) -> None:
+    """Delete a workout by ID."""
+    ensure_authenticated(ctx.obj["config"])
+    if not confirm:
+        click.confirm(f"Delete workout {workout_id}?", abort=True)
+    delete_workout(workout_id)
+    data: list[dict[str, Any]] = [{"id": workout_id, "status": "deleted"}]
+    render_output(ctx.obj["config"].output_format, "workout delete", data, ("id", "status"))
+
+
+@workout.command("schedule")
+@click.argument("workout_id")
+@click.argument("date_str", metavar="DATE")
+@click.pass_context
+def schedule_cmd(ctx: click.Context, workout_id: str, date_str: str) -> None:
+    """Schedule a workout on a specific date (YYYY-MM-DD)."""
+    try:
+        schedule_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        raise GarminCliError(
+            error=f"Invalid date format: {date_str}. Use YYYY-MM-DD.",
+            error_code="INVALID_INPUT",
+        )
+    ensure_authenticated(ctx.obj["config"])
+    raw = schedule_workout(workout_id, schedule_date)
+    raw_dict = raw if isinstance(raw, dict) else {}
+    data: list[dict[str, Any]] = [
+        {
+            "workoutScheduleId": raw_dict.get("workoutScheduleId"),
+            "date": raw_dict.get("calendarDate"),
+            "status": "scheduled",
+        }
+    ]
+    render_output(
+        ctx.obj["config"].output_format,
+        "workout schedule",
+        data,
+        ("workoutScheduleId", "date", "status"),
     )

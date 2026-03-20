@@ -11,6 +11,7 @@ dependencies = [
     "garth>=0.4",
     "click>=8.0",
     "tabulate>=0.9",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

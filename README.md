@@ -128,12 +128,22 @@ garmin-cli activity weather ACTIVITY_ID
 ### Workouts
 
 ```bash
+# Read
 garmin-cli workout list     [--limit N]
 garmin-cli workout get      WORKOUT_ID
 garmin-cli workout calendar [--from DATE --to DATE | --days N | --ahead N]
+
+# Write
+garmin-cli workout create   FILE                   # JSON or YAML file
+garmin-cli workout create   --stdin                # read JSON from stdin
+garmin-cli workout update   WORKOUT_ID FILE        # partial update (only fields provided change)
+garmin-cli workout delete   WORKOUT_ID [--confirm] # --confirm skips interactive prompt
+garmin-cli workout schedule WORKOUT_ID DATE        # DATE = YYYY-MM-DD
 ```
 
 `--ahead N` shows the next N days of planned workouts (future-facing). `--days N` shows past N days.
+
+YAML input requires `pyyaml`: `pip install pyyaml`. See [SKILL.md](SKILL.md) for the full workout JSON schema reference and step/target types.
 
 ### Performance
 
@@ -179,6 +189,16 @@ garmin-cli --format csv activity list --limit 10 --type running
 # Upcoming planned workouts
 garmin-cli workout calendar --ahead 7
 
+# Create a workout from a JSON file
+garmin-cli --json workout create my_workout.json
+
+# Create and schedule a workout via stdin
+echo '{"name":"Easy Run","sport":"running","steps":[{"type":"interval","duration":{"type":"time","value":1800},"target":{"type":"heart.rate.zone","zone":2}}]}' \
+  | garmin-cli --json workout create --stdin
+
+# Schedule an existing workout
+garmin-cli --json workout schedule 12345678901 2026-04-01
+
 # All performance thresholds
 garmin-cli performance thresholds
 
@@ -204,7 +224,7 @@ garmin-cli --json activity list --limit 5
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/            # unit tests (450+ tests, 96% coverage)
+pytest tests/            # unit tests (640+ tests, 96% coverage)
 pytest tests/ --e2e      # unit + e2e tests (requires garth session)
 ```
 

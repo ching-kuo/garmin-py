@@ -6,12 +6,16 @@ from typing import Any
 
 import garth
 
-from garmin_cli.endpoints._base import _make_request, _validate_numeric_id
+from garmin_cli.endpoints._base import _make_request, _make_write_request, _validate_numeric_id
 from garmin_cli.exceptions import GarminCliError
 
 
 def _request(url: str, *, params: dict[str, Any] | None = None) -> Any:
     return _make_request(garth.connectapi, url, params=params)
+
+
+def _write_request(url: str, *, method: str, json: dict[str, Any] | None = None) -> Any:
+    return _make_write_request(garth.connectapi, method, url, json=json)
 
 
 def list_workouts(limit: int) -> list:
@@ -28,6 +32,35 @@ def get_workout(workout_id: Any) -> dict:
     validated = _validate_numeric_id(workout_id, "workout_id")
     result = _request(f"/workout-service/workout/{validated}")
     return result if result is not None else {}
+
+
+def create_workout(payload: dict) -> dict:
+    """POST /workout-service/workout with Garmin-format payload."""
+    return _write_request("/workout-service/workout", method="POST", json=payload)
+
+
+def update_workout(workout_id: Any, merged_payload: dict) -> None:
+    """PUT /workout-service/workout/{id} with pre-merged Garmin-format payload."""
+    validated = _validate_numeric_id(workout_id, "workout_id")
+    _write_request(f"/workout-service/workout/{validated}", method="PUT", json=merged_payload)
+    return None
+
+
+def delete_workout(workout_id: Any) -> None:
+    """DELETE /workout-service/workout/{id}."""
+    validated = _validate_numeric_id(workout_id, "workout_id")
+    _write_request(f"/workout-service/workout/{validated}", method="DELETE")
+    return None
+
+
+def schedule_workout(workout_id: Any, schedule_date: date) -> dict:
+    """POST /workout-service/schedule/{id} with date."""
+    validated = _validate_numeric_id(workout_id, "workout_id")
+    return _write_request(
+        f"/workout-service/schedule/{validated}",
+        method="POST",
+        json={"date": schedule_date.isoformat()},
+    )
 
 
 def get_calendar_range(start: date, end: date) -> list:

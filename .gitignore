@@ -67,3 +67,7 @@ dmypy.json
 
 # Logs
 *.log
+
+# Phase 0 smoke test (local-only, contains personal data)
+scripts/smoke_test_workout_api.py
+scripts/api_samples/

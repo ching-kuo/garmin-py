@@ -135,9 +135,191 @@ garmin-cli --json workout get 12345678901
 garmin-cli --json workout calendar --ahead 7
 garmin-cli --json workout calendar --from 2026-03-01 --to 2026-03-14
 garmin-cli --json workout calendar --days 7
+
+# Create a workout from JSON file -- fields: id, name, sport, duration_min, status
+garmin-cli --json workout create workout.json
+
+# Create from stdin (pipe from LLM output)
+echo '{"name":"Easy Run","sport":"running","steps":[{"type":"warmup","duration":{"type":"time","value":300},"target":{"type":"no.target"}}]}' | garmin-cli --json workout create --stdin
+
+# Create from YAML file (requires: pip install pyyaml)
+garmin-cli --json workout create workout.yaml
+
+# Update an existing workout (partial -- only fields provided are changed)
+garmin-cli --json workout update 12345678901 changes.json
+
+# Delete a workout (--confirm skips interactive prompt)
+garmin-cli --json workout delete 12345678901 --confirm
+
+# Schedule a workout to a calendar date
+garmin-cli --json workout schedule 12345678901 2026-04-01
 ```
 
 `workout get` includes a `steps` array with structured step data (step_order, step_type, duration_type, duration_value, target_type, target_value_low, target_value_high) and a `steps_summary` string.
+
+`workout create` / `workout update` output fields: `id, name, sport, duration_min, status`
+
+`workout delete` output fields: `id, status`
+
+`workout schedule` output fields: `workoutScheduleId, date, status`
+
+---
+
+## Workout JSON Schema Reference
+
+The simplified input schema for `workout create` and `workout update`. All fields use human-readable string keys — no numeric IDs needed.
+
+### Top-level structure
+
+```json
+{
+  "name": "string (required on create, max 256 chars)",
+  "sport": "string (required on create, see sport types)",
+  "description": "string (optional)",
+  "steps": [ "...step objects (required on create, non-empty)" ]
+}
+```
+
+### Sport types
+
+| Key | Description |
+|-----|-------------|
+| `running` | Running / jogging |
+| `cycling` | Road / mountain cycling |
+| `swimming` | Pool / open water swimming |
+| `walking` | Walking |
+| `hiking` | Hiking |
+| `fitness_equipment` | Gym / strength / treadmill |
+| `multi_sport` | Triathlon / duathlon |
+| `other` | Any other sport |
+
+### Step types
+
+| Type | Purpose | Example |
+|------|---------|---------|
+| `warmup` | Warm-up period | `{"type":"warmup","duration":{"type":"time","value":600},"target":{"type":"heart.rate.zone","zone":1}}` |
+| `interval` | High-intensity work | `{"type":"interval","duration":{"type":"distance","value":400},"target":{"type":"speed.zone","min":3.5,"max":4.0}}` |
+| `recovery` | Low-intensity recovery | `{"type":"recovery","duration":{"type":"time","value":90},"target":{"type":"no.target"}}` |
+| `rest` | Complete rest | `{"type":"rest","duration":{"type":"time","value":60}}` |
+| `cooldown` | Cool-down | `{"type":"cooldown","duration":{"type":"time","value":300},"target":{"type":"open"}}` |
+| `repeat` | Repeat group N times | `{"type":"repeat","count":4,"steps":[...]}` |
+
+Max nesting: 2 levels (no repeats inside repeats).
+
+### Duration types
+
+| Type | Value unit | Example |
+|------|-----------|---------|
+| `time` | seconds | `{"type":"time","value":600}` — 600 = 10 min |
+| `distance` | meters | `{"type":"distance","value":1000}` — 1000 = 1 km |
+
+### Target types
+
+| Type | Fields | Example |
+|------|--------|---------|
+| `no.target` | *(none)* | `{"type":"no.target"}` |
+| `open` | *(none)* | `{"type":"open"}` |
+| `heart.rate.zone` | `zone` (1-5) | `{"type":"heart.rate.zone","zone":3}` |
+| `speed.zone` | `min`, `max` (m/s) | `{"type":"speed.zone","min":3.33,"max":4.17}` |
+| `power.zone` | `zone` (1-7) | `{"type":"power.zone","zone":4}` |
+| `cadence.zone` | `min`, `max` (spm) | `{"type":"cadence.zone","min":170,"max":180}` |
+
+### Pace/speed reference (running)
+
+| Pace (min/km) | Speed (m/s) | Use |
+|---------------|-------------|-----|
+| 7:00 | 2.38 | Easy / recovery |
+| 6:00 | 2.78 | Easy / base |
+| 5:30 | 3.03 | Tempo |
+| 5:00 | 3.33 | Threshold |
+| 4:30 | 3.70 | Interval / VO2max |
+| 4:00 | 4.17 | Fast interval |
+| 3:30 | 4.76 | Sprint |
+
+Formula: `speed_ms = 1000 / (pace_min * 60)`
+
+---
+
+## Complete Workout Examples
+
+### Easy 30-minute run
+
+```json
+{
+  "name": "Easy 30min Run",
+  "sport": "running",
+  "description": "Recovery run at easy pace",
+  "steps": [
+    {"type":"warmup","duration":{"type":"time","value":300},"target":{"type":"heart.rate.zone","zone":1}},
+    {"type":"interval","duration":{"type":"time","value":1500},"target":{"type":"heart.rate.zone","zone":2}},
+    {"type":"cooldown","duration":{"type":"time","value":300},"target":{"type":"heart.rate.zone","zone":1}}
+  ]
+}
+```
+
+### 5x1km intervals
+
+```json
+{
+  "name": "5x1km Intervals",
+  "sport": "running",
+  "description": "VO2max interval session",
+  "steps": [
+    {"type":"warmup","duration":{"type":"time","value":600},"target":{"type":"heart.rate.zone","zone":1}},
+    {
+      "type":"repeat","count":5,
+      "steps": [
+        {"type":"interval","duration":{"type":"distance","value":1000},"target":{"type":"speed.zone","min":3.70,"max":4.17}},
+        {"type":"recovery","duration":{"type":"time","value":120},"target":{"type":"no.target"}}
+      ]
+    },
+    {"type":"cooldown","duration":{"type":"time","value":600},"target":{"type":"heart.rate.zone","zone":1}}
+  ]
+}
+```
+
+### Cycling power workout
+
+```json
+{
+  "name": "Sweet Spot Cycling",
+  "sport": "cycling",
+  "description": "Sweet spot intervals at power zone 3-4",
+  "steps": [
+    {"type":"warmup","duration":{"type":"time","value":600},"target":{"type":"power.zone","zone":2}},
+    {
+      "type":"repeat","count":3,
+      "steps": [
+        {"type":"interval","duration":{"type":"time","value":600},"target":{"type":"power.zone","zone":4}},
+        {"type":"recovery","duration":{"type":"time","value":300},"target":{"type":"power.zone","zone":1}}
+      ]
+    },
+    {"type":"cooldown","duration":{"type":"time","value":300},"target":{"type":"open"}}
+  ]
+}
+```
+
+---
+
+## Workflow for LLM agents
+
+```
+1. Check auth:      garmin-cli --json login status
+2. Create workout:  echo '<json>' | garmin-cli --json workout create --stdin
+3. Parse response:  extract "id" from response data[0]
+4. Schedule:        garmin-cli --json workout schedule <id> 2026-04-01
+5. Verify:          garmin-cli --json workout calendar --from 2026-04-01 --to 2026-04-01
+```
+
+---
+
+### Write-specific error codes
+
+| Code | Context | Meaning |
+|------|---------|---------|
+| `INVALID_INPUT` | `workout create/update` | JSON schema validation failed — check required fields and enum values |
+| `NOT_FOUND` | `workout update/delete/schedule` | Workout ID does not exist |
+| `AUTH_FAILED` | Any write command | Session expired (401) or insufficient permissions (403) — re-login |
 
 ### Performance
 

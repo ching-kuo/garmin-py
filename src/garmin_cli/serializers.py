@@ -51,6 +51,7 @@ COLUMNS_ACTIVITY_WEATHER = (
 )
 COLUMNS_VO2MAX = ("date", "vo2max", "sport")
 COLUMNS_ZONES = ("sport", "lt_hr_bpm", "lt_pace")
+COLUMNS_WORKOUT_MUTATE = ("id", "name", "sport", "duration_min", "status")
 
 
 def _minutes(value: Any) -> float | None:
@@ -463,6 +464,12 @@ def serialize_zones(raw: Any) -> list[dict[str, Any]]:
             }
         )
     return rows
+
+
+def serialize_workout_mutate(raw: Any, status: str) -> list[dict[str, Any]]:
+    """Serialize a create/update response with a status field."""
+    row = _normalize_workout_base(raw if isinstance(raw, dict) else {})
+    return [{**row, "status": status}]
 
 
 def serialize_thresholds(raw: Any) -> list[dict[str, Any]]:
