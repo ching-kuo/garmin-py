@@ -19,7 +19,7 @@ def _validate_numeric_id(value: Any, name: str) -> int:
         ) from exc
 
 
-def _status_code(exc: Exception) -> int | None:
+def extract_status_code(exc: Exception) -> int | None:
     if hasattr(exc, "response") and hasattr(exc.response, "status_code"):
         return exc.response.status_code
     # GarthHTTPError stores the HTTPError at exc.error.response.status_code
@@ -28,34 +28,31 @@ def _status_code(exc: Exception) -> int | None:
     return None
 
 
-def _make_write_request(
-    connectapi_fn: Callable[..., Any],
-    method: str,
-    url: str,
+def _retry_loop(
+    call: Callable[[], Any],
     *,
-    json: dict[str, Any] | None = None,
+    immediate_errors: dict[int, tuple[str, str]] | None = None,
 ) -> Any:
-    """Execute a write operation (POST/PUT/DELETE) via connectapi_fn with retry on 429/5xx."""
+    """Execute *call* with retry on 429/5xx.
+
+    Garth's urllib3 transport retries GET/PUT/DELETE automatically, but not
+    POST.  This loop provides retry coverage for POST write operations and
+    acts as a safety net for the other methods.
+
+    Args:
+        call: Zero-arg callable that performs the API request.
+        immediate_errors: Maps HTTP status codes to (error_message, error_code)
+            tuples for errors that should raise immediately without retry.
+    """
     for attempt in range(len(_RETRY_DELAYS) + 1):
         try:
-            return connectapi_fn(url, method=method, json=json)
+            return call()
         except Exception as exc:
-            code = _status_code(exc)
+            code = extract_status_code(exc)
 
-            if code == 400 or code == 409:
-                raise GarminCliError(
-                    error="Invalid input.", error_code="INVALID_INPUT"
-                ) from exc
-
-            if code == 401 or code == 403:
-                raise GarminCliError(
-                    error="Authentication failed.", error_code="AUTH_FAILED"
-                ) from exc
-
-            if code == 404:
-                raise GarminCliError(
-                    error="Not found.", error_code="NOT_FOUND"
-                ) from exc
+            if immediate_errors is not None and code in immediate_errors:
+                error_msg, error_code = immediate_errors[code]
+                raise GarminCliError(error=error_msg, error_code=error_code) from exc
 
             if code == 429:
                 if attempt < len(_RETRY_DELAYS):
@@ -74,6 +71,26 @@ def _make_write_request(
                 ) from exc
 
             raise
+
+
+def _make_write_request(
+    connectapi_fn: Callable[..., Any],
+    method: str,
+    url: str,
+    *,
+    json: dict[str, Any] | None = None,
+) -> Any:
+    """Execute a write operation (POST/PUT/DELETE) via connectapi_fn with retry on 429/5xx."""
+    return _retry_loop(
+        lambda: connectapi_fn(url, method=method, json=json),
+        immediate_errors={
+            400: ("Invalid input.", "INVALID_INPUT"),
+            401: ("Authentication failed.", "AUTH_FAILED"),
+            403: ("Authentication failed.", "AUTH_FAILED"),
+            404: ("Not found.", "NOT_FOUND"),
+            409: ("Invalid input.", "INVALID_INPUT"),
+        },
+    )
 
 
 def _make_request(
@@ -87,31 +104,9 @@ def _make_request(
     Passes connectapi_fn by reference so callers can patch their local
     ``garth`` module in tests without affecting this shared helper.
     """
-    for attempt in range(len(_RETRY_DELAYS) + 1):
-        try:
-            return connectapi_fn(url, params=params)
-        except Exception as exc:
-            code = _status_code(exc)
-
-            if code == 404:
-                raise GarminCliError(
-                    error=f"Not found: {url}", error_code="NOT_FOUND"
-                ) from exc
-
-            if code == 429:
-                if attempt < len(_RETRY_DELAYS):
-                    time.sleep(_RETRY_DELAYS[attempt])
-                    continue
-                raise GarminCliError(
-                    error="Rate limited by Garmin API.", error_code="RATE_LIMITED"
-                ) from exc
-
-            if code is not None and code >= 500:
-                if attempt < len(_RETRY_DELAYS):
-                    time.sleep(_RETRY_DELAYS[attempt])
-                    continue
-                raise GarminCliError(
-                    error="Garmin API server error.", error_code="SERVER_ERROR"
-                ) from exc
-
-            raise
+    return _retry_loop(
+        lambda: connectapi_fn(url, params=params),
+        immediate_errors={
+            404: (f"Not found: {url}", "NOT_FOUND"),
+        },
+    )

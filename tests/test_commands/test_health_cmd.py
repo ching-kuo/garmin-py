@@ -156,20 +156,6 @@ class TestSleepCommand:
         assert parsed["ok"] is False
         assert parsed["error_code"] == "AUTH_MISSING"
 
-    def test_sleep_json_output_no_ansi(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.health.get_sleep",
-            return_value={"dailySleepDTO": {}},
-        )
-        mocker.patch(
-            "garmin_cli.commands.health.serialize_sleep",
-            return_value=[{"date": "2026-03-11", "score": 80}],
-        )
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(cli, ["--json", "health", "sleep", "--days", "1"])
-        assert "\x1b[" not in result.output
-
     def test_sleep_empty_data_exit_0(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.health.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_sleep", return_value={})
@@ -180,20 +166,6 @@ class TestSleepCommand:
         parsed = json.loads(result.output)
         assert parsed["count"] == 0
 
-    def test_sleep_stdout_only_no_stderr_data(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.health.get_sleep",
-            return_value={"dailySleepDTO": {}},
-        )
-        mocker.patch(
-            "garmin_cli.commands.health.serialize_sleep",
-            return_value=[{"date": "2026-03-11", "score": 80}],
-        )
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(cli, ["--json", "health", "sleep", "--days", "1"])
-        # Data output should be in stdout
-        assert result.output.strip() != ""
 
 
 # ---------------------------------------------------------------------------

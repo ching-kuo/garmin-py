@@ -9,6 +9,7 @@ from typing import Any
 import garth
 
 from garmin_cli.config import CliConfig
+from garmin_cli.endpoints._base import extract_status_code
 from garmin_cli.exceptions import GarminCliError
 
 
@@ -38,12 +39,6 @@ def _secure_directory(path: str) -> None:
                     ),
                     error_code="AUTH_FAILED",
                 ) from exc
-
-
-def _status_code(exc: Exception) -> int | None:
-    if hasattr(exc, "response") and hasattr(exc.response, "status_code"):
-        return exc.response.status_code
-    return None
 
 
 def _probe_session(garth_client: Any | None = None) -> None:
@@ -80,7 +75,7 @@ def ensure_authenticated(config: CliConfig) -> None:
             _probe_session()
             return
         except Exception as exc:
-            if _status_code(exc) not in (401, 403):
+            if extract_status_code(exc) not in (401, 403):
                 raise GarminCliError(
                     error="Saved Garmin session could not be validated.",
                     error_code="AUTH_FAILED",

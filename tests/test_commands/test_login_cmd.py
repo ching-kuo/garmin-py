@@ -12,6 +12,7 @@ import pytest
 from click.testing import CliRunner
 
 from garmin_cli.cli import cli
+from tests.helpers import make_http_error as _http_error
 
 
 # ---------------------------------------------------------------------------
@@ -43,11 +44,6 @@ def _run_login(
     result = runner.invoke(cli, full_args, catch_exceptions=False, **extra)
     return result, mock_garth
 
-
-def _http_error(status_code: int) -> Exception:
-    err = Exception(f"HTTP {status_code}")
-    err.response = MagicMock(status_code=status_code)  # type: ignore[attr-defined]
-    return err
 
 
 # ---------------------------------------------------------------------------

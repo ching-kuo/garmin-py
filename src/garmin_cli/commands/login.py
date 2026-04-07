@@ -6,7 +6,8 @@ import os
 import click
 import garth
 
-from garmin_cli.auth import _probe_session, _secure_directory, _status_code
+from garmin_cli.auth import _probe_session, _secure_directory
+from garmin_cli.endpoints._base import extract_status_code
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.output import echo_json, make_envelope
 
@@ -77,7 +78,7 @@ def login_status(ctx: click.Context) -> None:
             _probe_session(garth)
             authenticated = True
         except Exception as exc:
-            if _status_code(exc) not in (401, 403):
+            if extract_status_code(exc) not in (401, 403):
                 raise GarminCliError(
                     error="Saved Garmin session could not be validated.",
                     error_code="AUTH_FAILED",

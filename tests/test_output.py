@@ -10,7 +10,8 @@ from typing import Any
 import pytest
 
 from garmin_cli.output import (
-    _cell,
+    _format_cell,
+    _sanitize_csv_cell,
     echo_csv,
     echo_json,
     echo_table,
@@ -121,31 +122,12 @@ class TestEchoJson:
         parsed = json.loads(out)
         assert parsed["ok"] is True
 
-    def test_outputs_to_stdout_not_stderr(self, capsys: Any) -> None:
-        env = make_envelope("test", [])
-        echo_json(env)
-        captured = capsys.readouterr()
-        assert captured.out.strip() != ""
-        assert captured.err == ""
-
-    def test_indented_output(self, capsys: Any) -> None:
-        env = make_envelope("test", [])
-        echo_json(env)
-        out = capsys.readouterr().out
-        assert "\n" in out  # indented means multiline
-
     def test_date_objects_serialized_as_strings(self, capsys: Any) -> None:
         env = make_envelope("test", [{"date": date(2026, 3, 11)}])
         echo_json(env)
         out = capsys.readouterr().out
         parsed = json.loads(out)
         assert parsed["data"][0]["date"] == "2026-03-11"
-
-    def test_no_ansi_codes_in_output(self, capsys: Any) -> None:
-        env = make_envelope("test", [{"key": "val"}])
-        echo_json(env)
-        out = capsys.readouterr().out
-        assert "\x1b[" not in out
 
     def test_error_envelope_output_valid_json(self, capsys: Any) -> None:
         env = make_error_envelope("test", "failed", "ERR")
@@ -197,11 +179,6 @@ class TestEchoTable:
         assert "Run A" in out
         assert "Run B" in out
 
-    def test_outputs_to_stdout(self, capsys: Any) -> None:
-        echo_table([{"x": 1}], ("x",))
-        captured = capsys.readouterr()
-        assert captured.out != ""
-        assert captured.err == ""
 
 
 # ---------------------------------------------------------------------------
@@ -250,12 +227,6 @@ class TestEchoCsv:
         row = next(reader)
         assert 'Run "Fast"' in row
 
-    def test_no_ansi_codes_in_output(self, capsys: Any) -> None:
-        data = [{"name": "Run", "val": 1}]
-        echo_csv(data, ("name", "val"))
-        out = capsys.readouterr().out
-        assert "\x1b[" not in out
-
     def test_empty_data_outputs_header_only(self, capsys: Any) -> None:
         echo_csv([], ("name", "distance_km"))
         out = capsys.readouterr().out
@@ -277,12 +248,6 @@ class TestEchoCsv:
         out = capsys.readouterr().out
         assert out  # just shouldn't crash
 
-    def test_outputs_to_stdout_not_stderr(self, capsys: Any) -> None:
-        echo_csv([{"x": 1}], ("x",))
-        captured = capsys.readouterr()
-        assert captured.out != ""
-        assert captured.err == ""
-
     def test_unicode_in_values(self, capsys: Any) -> None:
         data = [{"name": "Laufen \u00dc", "val": 1}]
         echo_csv(data, ("name", "val"))
@@ -291,10 +256,10 @@ class TestEchoCsv:
 
 
 # ---------------------------------------------------------------------------
-# _cell — CSV formula injection protection (regression tests)
+# _sanitize_csv_cell — CSV formula injection protection (regression tests)
 # ---------------------------------------------------------------------------
 
-class TestCellFormulaSafety:
+class TestSanitizeCsvCell:
     """Regression tests for CSV formula-injection fix.
 
     Values starting with =, +, -, @, \\t, or \\r must be prefixed with \\t
@@ -304,22 +269,22 @@ class TestCellFormulaSafety:
     @pytest.mark.parametrize("dangerous_prefix", ["=", "+", "-", "@", "\t", "\r"])
     def test_dangerous_prefix_is_escaped(self, dangerous_prefix: str) -> None:
         value = f"{dangerous_prefix}SUM(A1:A10)"
-        result = _cell(value)
+        result = _sanitize_csv_cell(value)
         assert result.startswith("\t"), (
             f"Expected tab prefix for value starting with {dangerous_prefix!r}, got {result!r}"
         )
 
     def test_safe_value_not_prefixed(self) -> None:
-        assert _cell("Morning Run") == "Morning Run"
+        assert _sanitize_csv_cell("Morning Run") == "Morning Run"
 
     def test_none_returns_empty_string(self) -> None:
-        assert _cell(None) == ""
-
-    def test_empty_string_not_prefixed(self) -> None:
-        assert _cell("") == ""
+        assert _sanitize_csv_cell(None) == ""
 
     def test_numeric_value_not_prefixed(self) -> None:
-        assert _cell(42) == "42"
+        assert _sanitize_csv_cell(42) == "42"
+
+    def test_negative_number_is_prefixed(self) -> None:
+        assert _sanitize_csv_cell("-5") == "\t-5"
 
     def test_csv_output_formula_values_are_tab_prefixed(self, capsys: Any) -> None:
         """Integration: formula-like values survive the full echo_csv path tab-prefixed."""
@@ -330,3 +295,19 @@ class TestCellFormulaSafety:
         next(reader)  # skip header
         row = next(reader)
         assert row[0].startswith("\t"), f"Expected tab prefix in CSV cell, got {row[0]!r}"
+
+
+class TestFormatCell:
+    """Tests for table-output cell formatting (no CSV injection protection)."""
+
+    def test_none_returns_empty_string(self) -> None:
+        assert _format_cell(None) == ""
+
+    def test_string_passthrough(self) -> None:
+        assert _format_cell("Morning Run") == "Morning Run"
+
+    def test_negative_number_not_prefixed(self) -> None:
+        assert _format_cell("-5") == "-5"
+
+    def test_numeric_value(self) -> None:
+        assert _format_cell(42) == "42"

@@ -11,6 +11,7 @@ import pytest
 from garmin_cli.auth import ensure_authenticated
 from garmin_cli.config import CliConfig
 from garmin_cli.exceptions import GarminCliError
+from tests.helpers import make_http_error as _http_error
 
 
 # ---------------------------------------------------------------------------
@@ -26,12 +27,6 @@ def _make_config(**kwargs: Any) -> CliConfig:
     }
     defaults.update(kwargs)
     return CliConfig(**defaults)
-
-
-def _http_error(status_code: int) -> Exception:
-    err = Exception(f"HTTP {status_code}")
-    err.response = MagicMock(status_code=status_code)  # type: ignore[attr-defined]
-    return err
 
 
 # ---------------------------------------------------------------------------

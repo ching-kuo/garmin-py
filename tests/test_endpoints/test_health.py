@@ -19,17 +19,7 @@ from garmin_cli.endpoints.health import (
     get_weight,
 )
 from garmin_cli.exceptions import GarminCliError
-
-
-# ---------------------------------------------------------------------------
-# Mock HTTP error helper
-# ---------------------------------------------------------------------------
-
-def _http_error(status_code: int) -> Exception:
-    """Create a mock HTTP error with a response.status_code attribute."""
-    err = Exception(f"HTTP {status_code}")
-    err.response = MagicMock(status_code=status_code)  # type: ignore[attr-defined]
-    return err
+from tests.helpers import make_http_error as _http_error
 
 
 # ---------------------------------------------------------------------------

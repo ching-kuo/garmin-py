@@ -1,4 +1,4 @@
-"""Tests for _status_code and _make_write_request from garmin_cli.endpoints._base."""
+"""Tests for extract_status_code and _make_write_request from garmin_cli.endpoints._base."""
 from __future__ import annotations
 
 from typing import Any
@@ -6,48 +6,40 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from garmin_cli.endpoints._base import _status_code, _make_write_request
+from garmin_cli.endpoints._base import extract_status_code, _make_write_request
 from garmin_cli.exceptions import GarminCliError
+from tests.helpers import make_http_error as _http_error
 
 
 # ---------------------------------------------------------------------------
-# _status_code
+# extract_status_code
 # ---------------------------------------------------------------------------
 
 class TestStatusCode:
 
     def test_returns_none_for_plain_exception(self) -> None:
         exc = Exception("plain error")
-        assert _status_code(exc) is None
+        assert extract_status_code(exc) is None
 
-    def test_returns_status_code_from_exc_response(self) -> None:
+    def test_returnsextract_status_code_from_exc_response(self) -> None:
         exc = Exception("HTTP 401")
         exc.response = MagicMock(status_code=401)  # type: ignore[attr-defined]
-        assert _status_code(exc) == 401
+        assert extract_status_code(exc) == 401
 
-    def test_returns_status_code_from_garth_http_error(self) -> None:
+    def test_returnsextract_status_code_from_garth_http_error(self) -> None:
         # GarthHTTPError structure: exc.error is HTTPError, exc.error.response.status_code
         garth_exc = MagicMock()
         garth_exc.error = MagicMock()
         garth_exc.error.response = MagicMock(status_code=403)
         # Remove the direct response attribute so it falls through to .error.response
         del garth_exc.response
-        assert _status_code(garth_exc) == 403
+        assert extract_status_code(garth_exc) == 403
 
-    def test_returns_none_when_response_has_no_status_code(self) -> None:
+    def test_returns_none_when_response_has_noextract_status_code(self) -> None:
         exc = Exception("no status")
         exc.response = MagicMock(spec=[])  # type: ignore[attr-defined]
-        assert _status_code(exc) is None
+        assert extract_status_code(exc) is None
 
-
-# ---------------------------------------------------------------------------
-# _make_write_request helpers
-# ---------------------------------------------------------------------------
-
-def _http_error(status_code: int) -> Exception:
-    err = Exception(f"HTTP {status_code}")
-    err.response = MagicMock(status_code=status_code)  # type: ignore[attr-defined]
-    return err
 
 
 # ---------------------------------------------------------------------------

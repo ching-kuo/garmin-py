@@ -172,10 +172,24 @@ def _build_sport_type(sport_key: str) -> dict:
     }
 
 
+def _build_segments(steps: list[dict], sport_type: dict) -> list[dict]:
+    """Build workoutSegments list from simplified steps and a sport_type dict."""
+    workout_steps = [
+        _build_step(step, i + 1) for i, step in enumerate(steps)
+    ]
+    return [
+        {
+            "segmentOrder": 1,
+            "sportType": dict(sport_type),
+            "workoutSteps": workout_steps,
+        }
+    ]
+
+
 def build_garmin_payload(input_data: dict) -> dict:
     """Transform simplified workout input to Garmin API payload.
 
-    Pure function — does not mutate input_data.
+    Does not mutate input_data.
 
     Args:
         input_data: Simplified workout dict with keys: name, sport, steps,
@@ -187,20 +201,10 @@ def build_garmin_payload(input_data: dict) -> dict:
     sport_key = input_data["sport"]
     sport_type = _build_sport_type(sport_key)
 
-    workout_steps = [
-        _build_step(step, i + 1) for i, step in enumerate(input_data["steps"])
-    ]
-
     payload: dict = {
         "workoutName": input_data["name"],
         "sportType": sport_type,
-        "workoutSegments": [
-            {
-                "segmentOrder": 1,
-                "sportType": sport_type,
-                "workoutSteps": workout_steps,
-            }
-        ],
+        "workoutSegments": _build_segments(input_data["steps"], sport_type),
     }
 
     if "description" in input_data:
@@ -214,7 +218,7 @@ def build_garmin_payload(input_data: dict) -> dict:
 def merge_workout_payload(existing: dict, user_input: dict) -> tuple[dict, list[str]]:
     """Merge user changes into an existing Garmin workout payload.
 
-    Pure function — does not mutate either input.
+    Does not mutate either input.
 
     Args:
         existing: Current Garmin API workout dict.
@@ -251,25 +255,13 @@ def merge_workout_payload(existing: dict, user_input: dict) -> tuple[dict, list[
         merged["description"] = user_input["description"]
 
     if "steps" in user_input:
-        # Rebuild segments entirely from user's steps, preserving name/sport from merged
-        sport_key = merged["sportType"]["sportTypeKey"]
-        workout_name = merged.get("workoutName", "")
-        temp_input = {
-            "name": workout_name,
-            "sport": sport_key,
-            "steps": user_input["steps"],
-        }
-        rebuilt = build_garmin_payload(temp_input)
-        merged["workoutSegments"] = rebuilt["workoutSegments"]
+        sport_type = _build_sport_type(merged["sportType"]["sportTypeKey"])
+        merged["workoutSegments"] = _build_segments(user_input["steps"], sport_type)
+        metrics = _compute_estimated_metrics(user_input["steps"])
         for key in ("estimatedDurationInSecs", "estimatedDistanceInMeters"):
-            if key in rebuilt:
-                merged[key] = rebuilt[key]
+            if key in metrics:
+                merged[key] = metrics[key]
             else:
                 merged.pop(key, None)
-
-    # Ensure read-only fields from existing are not overwritten
-    for field in _READ_ONLY_FIELDS:
-        if field in existing:
-            merged[field] = existing[field]
 
     return merged, warnings

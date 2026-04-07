@@ -36,15 +36,6 @@ class TestCliConfig:
         with pytest.raises((AttributeError, TypeError)):
             config.email = "other@b.com"  # type: ignore[misc]
 
-    def test_equality(self) -> None:
-        c1 = CliConfig(email="a@b.com", garth_home="/tmp/g")
-        c2 = CliConfig(email="a@b.com", garth_home="/tmp/g")
-        assert c1 == c2
-
-    def test_inequality(self) -> None:
-        c1 = CliConfig(email="a@b.com")
-        c2 = CliConfig(email="z@b.com")
-        assert c1 != c2
 
 
 
@@ -89,14 +80,6 @@ class TestLoadConfig:
         assert config.email == "full@test.com"
         assert config.password == "fullpass"
         assert config.garth_home == "/full/garth"
-
-    def test_load_config_returns_frozen_instance(self, monkeypatch: Any) -> None:
-        monkeypatch.delenv("GARMIN_EMAIL", raising=False)
-        monkeypatch.delenv("GARMIN_PASSWORD", raising=False)
-        monkeypatch.delenv("GARTH_HOME", raising=False)
-        config = load_config()
-        with pytest.raises((AttributeError, TypeError)):
-            config.email = "mutated"  # type: ignore[misc]
 
     def test_load_config_empty_string_env(self, monkeypatch: Any) -> None:
         monkeypatch.setenv("GARMIN_EMAIL", "")

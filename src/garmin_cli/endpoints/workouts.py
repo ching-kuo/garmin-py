@@ -43,14 +43,12 @@ def update_workout(workout_id: Any, merged_payload: dict) -> None:
     """PUT /workout-service/workout/{id} with pre-merged Garmin-format payload."""
     validated = _validate_numeric_id(workout_id, "workout_id")
     _write_request(f"/workout-service/workout/{validated}", method="PUT", json=merged_payload)
-    return None
 
 
 def delete_workout(workout_id: Any) -> None:
     """DELETE /workout-service/workout/{id}."""
     validated = _validate_numeric_id(workout_id, "workout_id")
     _write_request(f"/workout-service/workout/{validated}", method="DELETE")
-    return None
 
 
 def schedule_workout(workout_id: Any, schedule_date: date) -> dict:

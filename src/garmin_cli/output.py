@@ -72,7 +72,7 @@ def echo_table(data: list[dict[str, Any]], columns: tuple[str, ...]) -> None:
         return
 
     rows = [
-        [_cell(row.get(col)) for col in columns]
+        [_format_cell(row.get(col)) for col in columns]
         for row in data
     ]
     click.echo(tabulate(rows, headers=list(columns), tablefmt="simple"))
@@ -90,7 +90,7 @@ def echo_csv(data: list[dict[str, Any]], columns: tuple[str, ...]) -> None:
     )
     writer.writeheader()
     for row in data:
-        writer.writerow({col: _cell(row.get(col)) for col in columns})
+        writer.writerow({col: _sanitize_csv_cell(row.get(col)) for col in columns})
     sys.stdout.write(buf.getvalue())
 
 
@@ -111,11 +111,18 @@ def render_output(
     echo_table(data, columns)
 
 
+def _format_cell(value: Any) -> str:
+    """Convert a cell value to a display string (for table output)."""
+    if value is None:
+        return ""
+    return str(value)
+
+
 _CSV_INJECT_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 
-def _cell(value: Any) -> str:
-    """Convert a cell value to a display-safe string.
+def _sanitize_csv_cell(value: Any) -> str:
+    """Convert a cell value to a CSV-safe string.
 
     Prefixes values that start with CSV formula-injection characters with a
     tab so spreadsheet software does not interpret them as formulas.

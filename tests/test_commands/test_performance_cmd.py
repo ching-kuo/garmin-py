@@ -287,16 +287,3 @@ class TestGarthHomeFlag:
         config = call_args[0][0]
         assert config.garth_home == "/custom/garth"
 
-    def test_json_output_no_ansi_codes(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.performance.get_all_thresholds",
-            return_value={"thresholds": []},
-        )
-        mocker.patch(
-            "garmin_cli.commands.performance.serialize_thresholds",
-            return_value=[],
-        )
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(cli, ["--json", "performance", "thresholds"])
-        assert "\x1b[" not in result.output

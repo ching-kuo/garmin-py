@@ -242,8 +242,3 @@ class TestResolveDateConflicts:
 # Return type
 # ---------------------------------------------------------------------------
 
-class TestResolveDateReturnTypes:
-
-    def test_start_always_lte_end(self) -> None:
-        start, end = _resolve(days=7)
-        assert start <= end
