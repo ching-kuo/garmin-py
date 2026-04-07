@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "garmin-cli"
-version = "0.1.0"
+version = "1.2.0"
 description = "CLI tool for extracting health and activity data from Garmin Connect"
 requires-python = ">=3.10"
 dependencies = [
@@ -15,6 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mcp = ["mcp[cli]>=1.25,<2"]
 dev = [
     "pytest>=9.0",
     "pytest-mock>=3.15",

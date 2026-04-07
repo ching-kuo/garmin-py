@@ -398,3 +398,57 @@ garmin-cli --format csv health sleep --days 30 > sleep.csv
 | `--json` | JSON | Envelope with `ok`, `command`, `count`, `data`, `date_range` |
 | `--format csv` | CSV | Header row + data rows |
 | `--format json` | JSON | Same as `--json` |
+
+---
+
+## MCP Server (Alternative)
+
+For Claude Code/Desktop integration via MCP protocol instead of shell commands:
+
+### Install
+
+```bash
+pip install garmin-cli[mcp]
+```
+
+### Register with Claude Code
+
+```bash
+claude mcp add --transport stdio garmin -- garmin-cli mcp-server
+```
+
+Or with a custom garth home:
+
+```bash
+claude mcp add --transport stdio garmin -- garmin-cli --garth-home /path/to/.garth mcp-server
+```
+
+### Available tools
+
+Read-only CLI commands are exposed as MCP tools (write operations like workout create/update/delete are not included):
+
+| Tool | Parameters | Returns |
+|------|-----------|---------|
+| `health_sleep` | `start_date`, `end_date` | `{count, rows}` |
+| `health_hrv` | `start_date`, `end_date` | `{count, rows}` |
+| `health_weight` | `start_date`, `end_date` | `{count, rows}` |
+| `health_body_battery` | `start_date`, `end_date` | `{count, rows}` |
+| `health_stress` | `start_date`, `end_date` | `{count, rows}` |
+| `health_spo2` | `start_date`, `end_date` | `{count, rows}` |
+| `health_resting_hr` | `start_date`, `end_date` | `{count, rows}` |
+| `health_readiness` | `start_date`, `end_date` | `{count, rows}` |
+| `health_training_status` | `date` | `{count, rows}` |
+| `activity_list` | `limit?`, `start?`, `activity_type?`, `search?` | `{count, rows}` |
+| `activity_get` | `activity_id` | `{count, rows}` |
+| `activity_weather` | `activity_id` | `{count, rows}` |
+| `workout_list` | `limit?` | `{count, rows}` |
+| `workout_get` | `workout_id` | `{count, rows}` |
+| `workout_calendar` | `start_date`, `end_date` | `{count, rows}` |
+| `performance_thresholds` | *(none)* | `{count, rows}` |
+| `performance_vo2max` | `date?` | `{count, rows}` |
+| `performance_zones` | *(none)* | `{count, rows}` |
+| `login_status` | *(none)* | `{authenticated, garth_home}` |
+
+Dates use `YYYY-MM-DD` format. Max date range: 90 days. Errors surface as MCP ToolError with the original error message.
+
+SKILL.md remains the default and simpler integration method. Use MCP when you want native tool semantics without shell command parsing.

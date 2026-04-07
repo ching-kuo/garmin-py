@@ -220,12 +220,35 @@ garmin-cli --json activity list --limit 5
 | `INVALID_INPUT` | Bad arguments or conflicting options |
 | `INTERNAL_ERROR` | Unexpected error |
 
+## MCP Server (Optional)
+
+Expose garmin-cli as an MCP tool server for Claude Code/Desktop:
+
+```bash
+pip install garmin-cli[mcp]
+garmin-cli mcp-server              # starts stdio transport
+```
+
+Register with Claude Code:
+
+```bash
+claude mcp add --transport stdio garmin -- garmin-cli mcp-server
+```
+
+See [SKILL.md](SKILL.md#mcp-server-alternative) for the full tool list and parameter reference.
+
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/            # unit tests (640+ tests, 96% coverage)
+pytest tests/            # unit tests (589+ tests)
 pytest tests/ --e2e      # unit + e2e tests (requires garth session)
+```
+
+To run MCP server tests, also install the mcp extra:
+
+```bash
+pip install -e ".[dev,mcp]"
 ```
 
 E2E tests make real Garmin Connect API calls. They require a valid session in `~/.garth` (or `GARTH_HOME`). Set `E2E_RATE_LIMIT_SECONDS` (default: 5) to adjust the inter-request delay.

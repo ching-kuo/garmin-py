@@ -144,5 +144,25 @@ cli.add_command(workout)
 cli.add_command(login)
 
 
+@cli.command("mcp-server")
+@click.option("--transport", default="stdio", type=click.Choice(["stdio"]))
+@click.pass_context
+def mcp_server_cmd(ctx: click.Context, transport: str) -> None:
+    """Start the Garmin MCP server for Claude Code integration."""
+    try:
+        from garmin_cli.mcp_server import create_mcp_server
+    except ImportError as exc:
+        if "mcp" not in str(exc):
+            raise
+        click.echo(
+            "MCP support not installed. Run: pip install garmin-cli[mcp]",
+            err=True,
+        )
+        raise SystemExit(1)
+    config = ctx.obj["config"]
+    server = create_mcp_server(config)
+    server.run(transport=transport)
+
+
 def main() -> None:
     cli.main()
