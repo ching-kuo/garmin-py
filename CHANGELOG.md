@@ -7,6 +7,9 @@
 - Date filtering for `activity list`: `--date`, `--days`, `--from`/`--to` options and MCP `start_date`/`end_date` params
 - `get_activity_splits` endpoint for activity split data
 
+### Fixed
+- `activity get` now displays data for child activities fetched directly (previously showed empty fields because summaryDTO fallback was missing)
+
 ### Changed
 - Extracted shared `CLICK_DATE_TYPE` and `resolve_click_dates()` to `date_utils.py` (eliminates duplication between health and activity commands)
 

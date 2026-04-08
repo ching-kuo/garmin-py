@@ -270,6 +270,66 @@ class TestSerializeActivitySummary:
         for col in ("id", "date", "name", "type", "distance_km", "duration_min", "avg_hr"):
             assert col in COLUMNS_ACTIVITY_SUMMARY
 
+    def test_summary_dto_fallback(self) -> None:
+        """Child activities fetched directly should use summaryDTO fallback."""
+        raw = {
+            "activityId": 18878956185,
+            "activityName": "Running",
+            "activityType": {"typeKey": "running"},
+            "summaryDTO": {
+                "startTimeLocal": "2026-04-06T14:30:00",
+                "distance": 35049.1,
+                "duration": 11888.1,
+                "averageHR": 160,
+            },
+        }
+        result = serialize_activity_summary(raw)
+        assert result[0]["id"] == 18878956185
+        assert result[0]["date"] == "2026-04-06T14:30:00"
+        assert result[0]["distance_km"] == pytest.approx(35.0491, rel=0.01)
+        assert result[0]["duration_min"] == pytest.approx(198.135, rel=0.01)
+        assert result[0]["avg_hr"] == 160
+
+    def test_top_level_fields_preferred_over_summary_dto(self) -> None:
+        """Top-level fields take precedence over summaryDTO."""
+        raw = {
+            "activityId": 1,
+            "startTimeLocal": "2026-04-06T06:00:00",
+            "distance": 10000.0,
+            "duration": 3600.0,
+            "averageHR": 150,
+            "summaryDTO": {
+                "startTimeLocal": "2026-04-06T06:00:01",
+                "distance": 9999.0,
+                "duration": 3599.0,
+                "averageHR": 149,
+            },
+        }
+        result = serialize_activity_summary(raw)
+        assert result[0]["date"] == "2026-04-06T06:00:00"
+        assert result[0]["distance_km"] == pytest.approx(10.0, rel=0.01)
+        assert result[0]["duration_min"] == pytest.approx(60.0, rel=0.01)
+        assert result[0]["avg_hr"] == 150
+
+    def test_hybrid_top_level_and_summary_dto(self) -> None:
+        """Per-field coalescing uses top-level when present, summaryDTO otherwise."""
+        raw = {
+            "activityId": 2,
+            "startTimeLocal": "2026-04-06T14:00:00",
+            "averageHR": 162,
+            "activityType": {"typeKey": "running"},
+            "summaryDTO": {
+                "distance": 35049.1,
+                "duration": 11888.1,
+                "averageHR": 999,
+            },
+        }
+        result = serialize_activity_summary(raw)
+        assert result[0]["date"] == "2026-04-06T14:00:00"
+        assert result[0]["distance_km"] == pytest.approx(35.0491, rel=0.01)
+        assert result[0]["duration_min"] == pytest.approx(198.135, rel=0.01)
+        assert result[0]["avg_hr"] == 162
+
 
 # ---------------------------------------------------------------------------
 # serialize_multisport_children

@@ -467,15 +467,17 @@ def serialize_activity_summary(raw: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for item in items:
         activity = item if isinstance(item, dict) else {}
+        raw_summary = activity.get("summaryDTO")
+        summary = raw_summary if isinstance(raw_summary, dict) else {}
         rows.append(
             {
                 "id": activity.get("activityId"),
-                "date": activity.get("startTimeLocal"),
+                "date": _coalesce(activity.get("startTimeLocal"), summary.get("startTimeLocal")),
                 "name": activity.get("activityName"),
                 "type": _get_nested(activity, "activityType", "typeKey"),
-                "distance_km": _km(activity.get("distance")),
-                "duration_min": _minutes(activity.get("duration")),
-                "avg_hr": activity.get("averageHR"),
+                "distance_km": _km(_coalesce(activity.get("distance"), summary.get("distance"))),
+                "duration_min": _minutes(_coalesce(activity.get("duration"), summary.get("duration"))),
+                "avg_hr": _coalesce(activity.get("averageHR"), summary.get("averageHR")),
             }
         )
     return rows
