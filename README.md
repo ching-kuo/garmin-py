@@ -224,15 +224,31 @@ garmin-cli --json activity list --limit 5
 
 Expose garmin-cli as an MCP tool server (26 read-only tools) for local or remote MCP clients.
 
-This project currently tracks the MCP Python SDK v2 API from a pinned commit on the official `modelcontextprotocol/python-sdk` repository. MCP v2 is not yet published on PyPI as a stable `2.x` release, so the `mcp` extra installs from that pinned Git source.
+### Why garmin-cli is not on PyPI
 
-Temporary caveat: this MCP extra is best treated as a source-install workflow until upstream publishes a normal v2 release. Installing it requires `git` and live GitHub access.
+The `mcp` extra depends on a pinned pre-release commit of the MCP Python SDK v2, installed directly from GitHub. PyPI does not allow git-source dependencies in published packages. Until the MCP SDK publishes a stable v2 release on PyPI, garmin-cli must be installed from source.
+
+### Installation
+
+The recommended install method is `uv tool install`, which places the binary in `~/.local/bin` — a stable, venv-independent location that desktop applications can access without macOS sandbox issues:
 
 ```bash
-pip install "garmin-cli[mcp]"
-# or from a local checkout:
-pip install -e ".[mcp]"
+uv tool install --editable "/path/to/garmin-py[mcp]"
 ```
+
+To uninstall:
+
+```bash
+uv tool uninstall garmin-cli
+```
+
+**Avoid pointing MCP clients at a binary inside a project virtualenv** (e.g. `.venv/bin/garmin-cli`). On macOS, desktop applications run in a sandbox and cannot read `pyvenv.cfg` inside directories they have not been granted access to, which causes a fatal Python startup error:
+
+```
+PermissionError: [Errno 1] Operation not permitted: '/path/to/.venv/pyvenv.cfg'
+```
+
+The `uv tool install` approach avoids this entirely. Alternatively, grant Claude Desktop Full Disk Access in System Settings → Privacy & Security → Full Disk Access.
 
 ### Claude Desktop
 
@@ -245,7 +261,7 @@ Add to your Claude Desktop config file:
 {
   "mcpServers": {
     "garmin": {
-      "command": "garmin-cli",
+      "command": "/Users/YOU/.local/bin/garmin-cli",
       "args": ["mcp-server"]
     }
   }
@@ -258,21 +274,8 @@ With a custom session directory:
 {
   "mcpServers": {
     "garmin": {
-      "command": "garmin-cli",
+      "command": "/Users/YOU/.local/bin/garmin-cli",
       "args": ["--garth-home", "/path/to/.garth", "mcp-server"]
-    }
-  }
-}
-```
-
-If `garmin-cli` is installed in a virtualenv, use the full path to the binary:
-
-```json
-{
-  "mcpServers": {
-    "garmin": {
-      "command": "/path/to/venv/bin/garmin-cli",
-      "args": ["mcp-server"]
     }
   }
 }
