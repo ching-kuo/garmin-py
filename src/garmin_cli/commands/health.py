@@ -7,7 +7,7 @@ from typing import Any, Callable
 import click
 
 from garmin_cli.auth import ensure_authenticated
-from garmin_cli.date_utils import resolve_date_range
+from garmin_cli.date_utils import CLICK_DATE_TYPE, resolve_click_dates
 from garmin_cli.endpoints.health import (
     get_body_battery_range,
     get_hrv,
@@ -41,23 +41,7 @@ from garmin_cli.serializers import (
     serialize_weight,
 )
 
-_DATE_TYPE = click.DateTime(formats=["%Y-%m-%d"])
-
-
-def _resolve_range(
-    value_date: datetime | None,
-    days: int | None,
-    ahead: int | None,
-    date_from: datetime | None,
-    date_to: datetime | None,
-) -> tuple[Any, Any]:
-    return resolve_date_range(
-        date_=value_date.date() if value_date else None,
-        from_date=date_from.date() if date_from else None,
-        to_date=date_to.date() if date_to else None,
-        days=days,
-        ahead=ahead,
-    )
+_DATE_TYPE = CLICK_DATE_TYPE
 
 
 def _render_health_range(
@@ -73,7 +57,7 @@ def _render_health_range(
     *,
     ahead: int | None = None,
 ) -> None:
-    start, end = _resolve_range(value_date, days, ahead, date_from, date_to)
+    start, end = resolve_click_dates(value_date, days, ahead, date_from, date_to)
     ensure_authenticated(ctx.obj["config"])
     data = serializer(getter(start, end))
     render_output(
@@ -317,7 +301,7 @@ def status(
     value_date: datetime | None,
 ) -> None:
     """Get training status for a single day."""
-    start, end = _resolve_range(value_date, None, None, None, None)
+    start, end = resolve_click_dates(value_date, None, None, None, None)
     ensure_authenticated(ctx.obj["config"])
     data = serialize_training_status(get_training_status(start))
     render_output(

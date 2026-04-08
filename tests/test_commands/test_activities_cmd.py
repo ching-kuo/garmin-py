@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from typing import Any
 
 import pytest
@@ -159,6 +160,104 @@ class TestActivityListCommand:
         parsed = json.loads(result.output)
         assert parsed["ok"] is False
         assert parsed["error_code"] == "AUTH_MISSING"
+
+    def test_list_date_option(self, mocker: Any) -> None:
+        mock_list = mocker.patch(
+            "garmin_cli.commands.activities.list_activities",
+            return_value=[],
+        )
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.commands.activities.serialize_activity_summary",
+            return_value=[],
+        )
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["--json", "activity", "list", "--date", "2026-03-15"])
+        assert result.exit_code == 0
+        call_kwargs = mock_list.call_args
+        assert call_kwargs.kwargs.get("start_date") == date(2026, 3, 15)
+        assert call_kwargs.kwargs.get("end_date") == date(2026, 3, 15)
+
+    def test_list_days_option(self, mocker: Any) -> None:
+        mock_list = mocker.patch(
+            "garmin_cli.commands.activities.list_activities",
+            return_value=[],
+        )
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.commands.activities.serialize_activity_summary",
+            return_value=[],
+        )
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["--json", "activity", "list", "--days", "7"])
+        assert result.exit_code == 0
+        call_kwargs = mock_list.call_args
+        assert call_kwargs.kwargs.get("start_date") is not None
+        assert call_kwargs.kwargs.get("end_date") is not None
+
+    def test_list_from_to_option(self, mocker: Any) -> None:
+        mock_list = mocker.patch(
+            "garmin_cli.commands.activities.list_activities",
+            return_value=[],
+        )
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.commands.activities.serialize_activity_summary",
+            return_value=[],
+        )
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, [
+            "--json", "activity", "list",
+            "--from", "2026-03-01", "--to", "2026-03-10",
+        ])
+        assert result.exit_code == 0
+        call_kwargs = mock_list.call_args
+        assert call_kwargs.kwargs.get("start_date") == date(2026, 3, 1)
+        assert call_kwargs.kwargs.get("end_date") == date(2026, 3, 10)
+
+    def test_list_date_range_in_json_envelope(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.commands.activities.list_activities",
+            return_value=[],
+        )
+        mocker.patch(
+            "garmin_cli.commands.activities.serialize_activity_summary",
+            return_value=[],
+        )
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, [
+            "--json", "activity", "list", "--date", "2026-03-15",
+        ])
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert parsed["date_range"] is not None
+        assert parsed["date_range"]["from"] == "2026-03-15"
+        assert parsed["date_range"]["to"] == "2026-03-15"
+
+    def test_list_conflicting_date_options(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, [
+            "activity", "list", "--date", "2026-03-15", "--days", "7",
+        ])
+        assert result.exit_code != 0
+
+    def test_list_from_without_to_returns_error(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, [
+            "activity", "list", "--from", "2026-03-01",
+        ])
+        assert result.exit_code != 0
+
+    def test_list_to_without_from_returns_error(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, [
+            "activity", "list", "--to", "2026-03-31",
+        ])
+        assert result.exit_code != 0
 
 
 # ---------------------------------------------------------------------------

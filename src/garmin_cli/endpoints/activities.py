@@ -1,6 +1,7 @@
 """Activity endpoint helpers backed by Garmin Connect APIs."""
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 import garth
@@ -18,6 +19,8 @@ def list_activities(
     start: int,
     activity_type: str | None,
     search: str | None,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> list:
     if limit <= 0:
         raise GarminCliError(
@@ -29,6 +32,10 @@ def list_activities(
         params["activityType"] = activity_type
     if search is not None:
         params["search"] = search
+    if start_date is not None:
+        params["startDate"] = str(start_date)
+    if end_date is not None:
+        params["endDate"] = str(end_date)
     result = _request(
         "/activitylist-service/activities/search/activities",
         params=params,

@@ -4,7 +4,11 @@
 
 ### Added
 - Multisport activity support: `activity get` now detects triathlon/multisport parents and fetches per-sport child activities with distance, duration, HR, pace, and calories
+- Date filtering for `activity list`: `--date`, `--days`, `--from`/`--to` options and MCP `start_date`/`end_date` params
 - `get_activity_splits` endpoint for activity split data
+
+### Changed
+- Extracted shared `CLICK_DATE_TYPE` and `resolve_click_dates()` to `date_utils.py` (eliminates duplication between health and activity commands)
 
 ## [1.2.0] - 2026-04-07
 

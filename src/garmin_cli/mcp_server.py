@@ -290,13 +290,21 @@ def create_mcp_server(config: CliConfig) -> MCPServer:
         start: int = 0,
         activity_type: str | None = None,
         search: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
     ) -> dict[str, Any]:
-        """List recent activities. Returns id, date, name, type, distance_km, duration_min, avg_hr."""
+        """List recent activities, optionally filtered by date range (YYYY-MM-DD). Returns id, date, name, type, distance_km, duration_min, avg_hr."""
         _validate_limit(limit)
         _validate_start_offset(start)
+        parsed_start = None
+        parsed_end = None
+        if (start_date is None) != (end_date is None):
+            raise ToolError("start_date and end_date must be provided together")
+        if start_date is not None and end_date is not None:
+            parsed_start, parsed_end = _parse_date_range(start_date, end_date)
         try:
             ensure_authenticated(config)
-            raw = list_activities(limit, start, activity_type, search)
+            raw = list_activities(limit, start, activity_type, search, parsed_start, parsed_end)
         except GarminCliError as exc:
             raise _handle_error(exc) from exc
         return _envelope(serialize_activity_summary(raw))

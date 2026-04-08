@@ -1,12 +1,35 @@
 """Date range parsing and validation."""
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 import click
 
 _MAX_DAYS = 90
+
+CLICK_DATE_TYPE = click.DateTime(formats=["%Y-%m-%d"])
+
+
+def resolve_click_dates(
+    value_date: datetime | None,
+    days: int | None,
+    ahead: int | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
+) -> tuple[date, date]:
+    """Convert Click DateTime values to a (start, end) date range.
+
+    Thin wrapper around :func:`resolve_date_range` that handles the
+    ``datetime`` → ``date`` conversion Click forces on us.
+    """
+    return resolve_date_range(
+        date_=value_date.date() if value_date else None,
+        from_date=date_from.date() if date_from else None,
+        to_date=date_to.date() if date_to else None,
+        days=days,
+        ahead=ahead,
+    )
 
 
 def resolve_date_range(

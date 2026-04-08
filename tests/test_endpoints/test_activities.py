@@ -1,6 +1,7 @@
 """Tests for garmin_cli.endpoints.activities — list_activities, get_activity, get_activity_weather, multisport."""
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -62,6 +63,45 @@ class TestListActivities:
         with pytest.raises(GarminCliError) as exc_info:
             list_activities(limit=10, start=0, activity_type=None, search=None)
         assert exc_info.value.error_code == "NOT_FOUND"
+
+    def test_passes_start_date_param(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.connectapi.return_value = []
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        list_activities(
+            limit=10, start=0, activity_type=None, search=None,
+            start_date=date(2026, 3, 1), end_date=None,
+        )
+        call_kwargs = mock_garth.connectapi.call_args
+        params = call_kwargs[1]["params"] if "params" in call_kwargs[1] else call_kwargs[0][1]
+        assert params["startDate"] == "2026-03-01"
+        assert "endDate" not in params
+
+    def test_passes_both_date_params(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.connectapi.return_value = []
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        list_activities(
+            limit=10, start=0, activity_type=None, search=None,
+            start_date=date(2026, 3, 1), end_date=date(2026, 3, 10),
+        )
+        call_kwargs = mock_garth.connectapi.call_args
+        params = call_kwargs[1]["params"] if "params" in call_kwargs[1] else call_kwargs[0][1]
+        assert params["startDate"] == "2026-03-01"
+        assert params["endDate"] == "2026-03-10"
+
+    def test_no_date_params_by_default(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.connectapi.return_value = []
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        list_activities(limit=10, start=0, activity_type=None, search=None)
+        call_kwargs = mock_garth.connectapi.call_args
+        params = call_kwargs[1]["params"] if "params" in call_kwargs[1] else call_kwargs[0][1]
+        assert "startDate" not in params
+        assert "endDate" not in params
 
 
 # ---------------------------------------------------------------------------

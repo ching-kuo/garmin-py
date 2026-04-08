@@ -709,7 +709,28 @@ class TestActivityTools:
         mock_list = mocker.patch("garmin_cli.mcp_server.list_activities", return_value=[])
         server = create_mcp_server(_config())
         _call(server, "activity_list", {"limit": 5, "start": 10, "activity_type": "running", "search": "morning"})
-        mock_list.assert_called_once_with(5, 10, "running", "morning")
+        mock_list.assert_called_once_with(5, 10, "running", "morning", None, None)
+
+    def test_activity_list_with_date_range(self, mocker: Any) -> None:
+        from datetime import date
+
+        mocker.patch("garmin_cli.mcp_server.ensure_authenticated")
+        mock_list = mocker.patch("garmin_cli.mcp_server.list_activities", return_value=[])
+        server = create_mcp_server(_config())
+        _call(server, "activity_list", {"start_date": "2026-03-01", "end_date": "2026-03-10"})
+        mock_list.assert_called_once_with(20, 0, None, None, date(2026, 3, 1), date(2026, 3, 10))
+
+    def test_activity_list_start_date_only_raises(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_server.ensure_authenticated")
+        server = create_mcp_server(_config())
+        with pytest.raises(Exception, match="start_date and end_date must be provided together"):
+            _call(server, "activity_list", {"start_date": "2026-03-15"})
+
+    def test_activity_list_end_date_only_raises(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_server.ensure_authenticated")
+        server = create_mcp_server(_config())
+        with pytest.raises(Exception, match="start_date and end_date must be provided together"):
+            _call(server, "activity_list", {"end_date": "2026-03-10"})
 
     def test_activity_get(self, mocker: Any) -> None:
 

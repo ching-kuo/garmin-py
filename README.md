@@ -118,7 +118,7 @@ garmin-cli health status      [--date DATE]
 ### Activities
 
 ```bash
-garmin-cli activity list    [--limit N] [--type TYPE] [--search TEXT]
+garmin-cli activity list    [--limit N] [--type TYPE] [--search TEXT] [--date DATE | --from DATE --to DATE | --days N]
 garmin-cli activity get     ACTIVITY_ID    # multisport shows child activities
 garmin-cli activity weather ACTIVITY_ID
 ```
@@ -185,6 +185,12 @@ garmin-cli health hrv --from 2026-03-01 --to 2026-03-10
 
 # List recent running activities as CSV
 garmin-cli --format csv activity list --limit 10 --type running
+
+# Activities from a specific date range
+garmin-cli activity list --from 2026-03-01 --to 2026-03-31
+
+# Activities from the past 7 days
+garmin-cli activity list --days 7
 
 # Upcoming planned workouts
 garmin-cli workout calendar --ahead 7

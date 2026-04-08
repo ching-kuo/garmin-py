@@ -450,7 +450,7 @@ Read-only CLI commands are exposed as MCP tools (write operations like workout c
 | `health_resting_hr` | `start_date`, `end_date` | `{count, rows}` |
 | `health_readiness` | `start_date`, `end_date` | `{count, rows}` |
 | `health_training_status` | `date` | `{count, rows}` |
-| `activity_list` | `limit?`, `start?`, `activity_type?`, `search?` | `{count, rows}` |
+| `activity_list` | `limit?`, `start?`, `activity_type?`, `search?`, `start_date?`, `end_date?` | `{count, rows}` — `start_date`/`end_date` (YYYY-MM-DD) must be provided together |
 | `activity_get` | `activity_id` | `{count, rows, children?}` — multisport activities include per-sport child details |
 | `activity_weather` | `activity_id` | `{count, rows}` |
 | `workout_list` | `limit?` | `{count, rows}` |

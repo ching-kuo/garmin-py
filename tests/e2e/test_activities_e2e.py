@@ -86,6 +86,33 @@ def test_get_multisport_activity(run_cli, rate_limiter, cli_runner, garth_sessio
 
 
 @pytest.mark.e2e
+def test_list_activities_with_date_range(run_cli):
+    """List activities filtered by a date range."""
+    result, parsed = run_cli([
+        "activity", "list", "--limit", "5",
+        "--from", "2026-03-01", "--to", "2026-03-31",
+    ])
+    assert_exit_ok(result)
+    assert_envelope_ok(parsed)
+    assert parsed["date_range"] is not None
+    assert parsed["date_range"]["from"] == "2026-03-01"
+    assert parsed["date_range"]["to"] == "2026-03-31"
+    for row in parsed["data"]:
+        assert_row_has_keys(row, ["id", "date", "name", "type"])
+        if row["date"]:
+            assert "2026-03" in row["date"]
+
+
+@pytest.mark.e2e
+def test_list_activities_with_days(run_cli):
+    """List activities filtered by --days."""
+    result, parsed = run_cli(["activity", "list", "--limit", "5", "--days", "30"])
+    assert_exit_ok(result)
+    assert_envelope_ok(parsed)
+    assert parsed["date_range"] is not None
+
+
+@pytest.mark.e2e
 def test_get_activity_weather(run_cli, activity_id):
     if activity_id is None:
         pytest.skip("No activities found")
