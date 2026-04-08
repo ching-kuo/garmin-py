@@ -403,15 +403,15 @@ garmin-cli --format csv health sleep --days 30 > sleep.csv
 
 ## MCP Server (Alternative)
 
-For Claude Code/Desktop integration via MCP protocol instead of shell commands:
+For Claude Code/Desktop integration via MCP protocol instead of shell commands. Uses MCP Python SDK v2 (MCPServer).
 
 ### Install
 
 ```bash
-pip install garmin-cli[mcp]
+pip install "garmin-cli[mcp]"
 ```
 
-### Register with Claude Code
+### Register with Claude Code (stdio)
 
 ```bash
 claude mcp add --transport stdio garmin -- garmin-cli mcp-server
@@ -423,6 +423,15 @@ Or with a custom garth home:
 claude mcp add --transport stdio garmin -- garmin-cli --garth-home /path/to/.garth mcp-server
 ```
 
+### HTTP transports (SSE / streamable-http)
+
+```bash
+garmin-cli mcp-server --transport streamable-http --host 127.0.0.1 --port 8000
+garmin-cli mcp-server --transport sse --host 127.0.0.1 --port 8000
+```
+
+See README.md for full HTTP transport options and authentication notes.
+
 ### Available tools
 
 Read-only CLI commands are exposed as MCP tools (write operations like workout create/update/delete are not included):
@@ -432,6 +441,9 @@ Read-only CLI commands are exposed as MCP tools (write operations like workout c
 | `health_sleep` | `start_date`, `end_date` | `{count, rows}` |
 | `health_hrv` | `start_date`, `end_date` | `{count, rows}` |
 | `health_weight` | `start_date`, `end_date` | `{count, rows}` |
+| `health_daily_summary` | `start_date`, `end_date` | `{count, rows}` — steps, floors, intensity minutes, calories, resting HR (one API call per day) |
+| `health_steps` | `start_date`, `end_date` | `{count, rows}` — steps, distance, step goal (native range API) |
+| `health_intensity_minutes` | `start_date`, `end_date` | `{count, rows}` — moderate/vigorous minutes, weekly goal (native range API) |
 | `health_body_battery` | `start_date`, `end_date` | `{count, rows}` |
 | `health_stress` | `start_date`, `end_date` | `{count, rows}` |
 | `health_spo2` | `start_date`, `end_date` | `{count, rows}` |
@@ -444,9 +456,13 @@ Read-only CLI commands are exposed as MCP tools (write operations like workout c
 | `workout_list` | `limit?` | `{count, rows}` |
 | `workout_get` | `workout_id` | `{count, rows}` |
 | `workout_calendar` | `start_date`, `end_date` | `{count, rows}` |
+| `performance_race_predictions` | *(none)* | `{count, rows}` — predicted times for 5K, 10K, half marathon, marathon |
+| `performance_endurance_score` | `start_date`, `end_date` | `{count, rows}` — endurance score and classification (one API call per day) |
+| `performance_hill_score` | `start_date`, `end_date` | `{count, rows}` — hill score, endurance score, strength score (one API call per day) |
 | `performance_thresholds` | *(none)* | `{count, rows}` |
 | `performance_vo2max` | `date?` | `{count, rows}` |
 | `performance_zones` | *(none)* | `{count, rows}` |
+| `device_list` | *(none)* | `{count, rows}` — registered devices with type and last sync |
 | `login_status` | *(none)* | `{authenticated, garth_home}` |
 
 Dates use `YYYY-MM-DD` format. Max date range: 90 days. Errors surface as MCP ToolError with the original error message.

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from datetime import date, timedelta
 from typing import Any, Callable
 
 from garmin_cli.exceptions import GarminCliError
@@ -110,3 +111,18 @@ def _make_request(
             404: (f"Not found: {url}", "NOT_FOUND"),
         },
     )
+
+
+def _collect_daily_range(
+    getter: Callable[[date], Any],
+    start: date,
+    end: date,
+) -> list[Any]:
+    items: list[Any] = []
+    current = start
+    while current <= end:
+        items.append(getter(current))
+        current += timedelta(days=1)
+        if current <= end:
+            time.sleep(0.5)
+    return items

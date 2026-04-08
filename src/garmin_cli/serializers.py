@@ -21,6 +21,23 @@ COLUMNS_SPO2 = ("date", "avg_spo2", "lowest_spo2")
 COLUMNS_RESTING_HR = ("date", "resting_hr")
 COLUMNS_READINESS = ("date", "score", "level")
 COLUMNS_STATUS = ("date", "training_status", "load_type")
+COLUMNS_DAILY_SUMMARY = (
+    "date",
+    "total_steps",
+    "distance_km",
+    "active_kilocalories",
+    "floors_ascended",
+    "floors_descended",
+    "moderate_intensity_minutes",
+    "vigorous_intensity_minutes",
+    "resting_heart_rate",
+)
+COLUMNS_STEPS = ("date", "total_steps", "total_distance", "step_goal")
+COLUMNS_INTENSITY_MINUTES = ("date", "moderate_value", "vigorous_value", "weekly_goal")
+COLUMNS_RACE_PREDICTIONS = ("race_type", "predicted_time_seconds", "distance_meters")
+COLUMNS_ENDURANCE_SCORE = ("date", "overall_score", "endurance_classification")
+COLUMNS_HILL_SCORE = ("date", "overall_score", "endurance_score", "strength_score")
+COLUMNS_DEVICE = ("device_id", "display_name", "device_type", "last_sync_time")
 COLUMNS_ACTIVITY_SUMMARY = (
     "id",
     "date",
@@ -323,6 +340,113 @@ def serialize_training_status(raw: Any) -> list[dict[str, Any]]:
             "date": item.get("calendarDate"),
             "training_status": item.get("trainingStatusType"),
             "load_type": item.get("trainingLoadType"),
+        }
+        for item in _listify(raw)
+    ]
+
+
+def serialize_daily_summary(raw: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "date": item.get("calendarDate"),
+            "total_steps": item.get("totalSteps"),
+            "distance_km": _km(item.get("totalDistanceMeters")),
+            "active_kilocalories": item.get("activeKilocalories"),
+            "floors_ascended": item.get("floorsAscended"),
+            "floors_descended": item.get("floorsDescended"),
+            "moderate_intensity_minutes": item.get("moderateIntensityMinutes"),
+            "vigorous_intensity_minutes": item.get("vigorousIntensityMinutes"),
+            "resting_heart_rate": item.get("restingHeartRate"),
+        }
+        for item in _listify(raw)
+    ]
+
+
+def serialize_steps(raw: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "date": item.get("calendarDate"),
+            "total_steps": item.get("totalSteps"),
+            "total_distance": item.get("totalDistance"),
+            "step_goal": item.get("stepGoal"),
+        }
+        for item in _listify(raw)
+    ]
+
+
+def serialize_intensity_minutes(raw: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "date": item.get("calendarDate"),
+            "moderate_value": item.get("moderateValue"),
+            "vigorous_value": item.get("vigorousValue"),
+            "weekly_goal": item.get("weeklyGoal"),
+        }
+        for item in _listify(raw)
+    ]
+
+
+def serialize_race_predictions(raw: Any) -> list[dict[str, Any]]:
+    if isinstance(raw, dict):
+        items = _listify(
+            raw.get("racePredictions") or raw.get("predictions") or raw
+        )
+    else:
+        items = _listify(raw)
+    return [
+        {
+            "race_type": _coalesce(
+                item.get("raceType"),
+                item.get("predictionType"),
+                item.get("eventType"),
+                item.get("displayName"),
+            ),
+            "predicted_time_seconds": _coalesce(
+                item.get("predictedTimeInSeconds"),
+                item.get("predictedTime"),
+                item.get("timeInSeconds"),
+                item.get("time"),
+            ),
+            "distance_meters": _coalesce(
+                item.get("distanceMeters"),
+                item.get("raceDistance"),
+                item.get("distance"),
+            ),
+        }
+        for item in items
+    ]
+
+
+def serialize_endurance_score(raw: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "date": item.get("calendarDate"),
+            "overall_score": item.get("overallScore"),
+            "endurance_classification": item.get("enduranceClassification"),
+        }
+        for item in _listify(raw)
+    ]
+
+
+def serialize_hill_score(raw: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "date": item.get("calendarDate"),
+            "overall_score": item.get("overallScore"),
+            "endurance_score": item.get("enduranceScore"),
+            "strength_score": item.get("strengthScore"),
+        }
+        for item in _listify(raw)
+    ]
+
+
+def serialize_device(raw: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "device_id": item.get("deviceId"),
+            "display_name": item.get("displayName"),
+            "device_type": item.get("deviceTypeName"),
+            "last_sync_time": item.get("lastSyncTime"),
         }
         for item in _listify(raw)
     ]

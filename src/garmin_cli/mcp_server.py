@@ -1,4 +1,4 @@
-"""MCP server exposing Garmin Connect endpoints as tools via FastMCP."""
+"""MCP server exposing Garmin Connect endpoints as tools via MCPServer."""
 from __future__ import annotations
 
 import os
@@ -6,8 +6,8 @@ from datetime import date
 from typing import Any
 
 import garth
-from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from garmin_cli.auth import _probe_session, _secure_directory, ensure_authenticated
 from garmin_cli.config import CliConfig
@@ -17,16 +17,25 @@ from garmin_cli.endpoints.activities import (
     get_activity_weather,
     list_activities,
 )
+from garmin_cli.endpoints.devices import get_devices
 from garmin_cli.endpoints.health import (
     get_body_battery_range,
+    get_daily_summary_range,
     get_hrv,
+    get_intensity_minutes_range,
     get_resting_hr_range,
     get_sleep,
     get_spo2_range,
+    get_steps_range,
     get_stress_range,
     get_training_readiness_range,
     get_training_status,
     get_weight,
+)
+from garmin_cli.endpoints.metrics import (
+    get_endurance_score_range,
+    get_hill_score_range,
+    get_race_predictions,
 )
 from garmin_cli.endpoints.performance import (
     get_all_thresholds,
@@ -44,10 +53,17 @@ from garmin_cli.serializers import (
     serialize_activity_summary,
     serialize_body_battery,
     serialize_calendar_workout,
+    serialize_daily_summary,
+    serialize_device,
+    serialize_endurance_score,
     serialize_hrv,
+    serialize_hill_score,
+    serialize_intensity_minutes,
+    serialize_race_predictions,
     serialize_resting_hr,
     serialize_sleep,
     serialize_spo2,
+    serialize_steps,
     serialize_stress,
     serialize_thresholds,
     serialize_training_readiness,
@@ -120,14 +136,14 @@ def _latest_vo2max_rows(rows: list[dict[str, object]]) -> list[dict[str, object]
     return [row for row in rows if row.get("date") == latest_date]
 
 
-def create_mcp_server(config: CliConfig) -> FastMCP:
-    """Create a FastMCP server with Garmin Connect tools.
+def create_mcp_server(config: CliConfig) -> MCPServer:
+    """Create an MCPServer with Garmin Connect tools.
 
     Args:
         config: CLI configuration (garth_home, credentials, etc.)
             captured by closure so every tool call has access.
     """
-    mcp = FastMCP("garmin")
+    mcp = MCPServer("garmin")
 
     # -- Health tools -------------------------------------------------------
 
@@ -163,6 +179,39 @@ def create_mcp_server(config: CliConfig) -> FastMCP:
         except GarminCliError as exc:
             raise _handle_error(exc) from exc
         return _envelope(serialize_weight(raw))
+
+    @mcp.tool()
+    def health_daily_summary(start_date: str, end_date: str) -> dict[str, Any]:
+        """Get daily summary data for a date range (YYYY-MM-DD). Returns date, total_steps, distance_km, calories, floors, intensity minutes, and resting heart rate. Note: large ranges may be slow (one API call per day)."""
+        start, end = _parse_date_range(start_date, end_date)
+        try:
+            ensure_authenticated(config)
+            raw = get_daily_summary_range(start, end)
+        except GarminCliError as exc:
+            raise _handle_error(exc) from exc
+        return _envelope(serialize_daily_summary(raw))
+
+    @mcp.tool()
+    def health_steps(start_date: str, end_date: str) -> dict[str, Any]:
+        """Get steps data for a date range (YYYY-MM-DD). Returns date, total_steps, total_distance, step_goal."""
+        start, end = _parse_date_range(start_date, end_date)
+        try:
+            ensure_authenticated(config)
+            raw = get_steps_range(start, end)
+        except GarminCliError as exc:
+            raise _handle_error(exc) from exc
+        return _envelope(serialize_steps(raw))
+
+    @mcp.tool()
+    def health_intensity_minutes(start_date: str, end_date: str) -> dict[str, Any]:
+        """Get intensity minutes for a date range (YYYY-MM-DD). Returns date, moderate_value, vigorous_value, weekly_goal."""
+        start, end = _parse_date_range(start_date, end_date)
+        try:
+            ensure_authenticated(config)
+            raw = get_intensity_minutes_range(start, end)
+        except GarminCliError as exc:
+            raise _handle_error(exc) from exc
+        return _envelope(serialize_intensity_minutes(raw))
 
     @mcp.tool()
     def health_body_battery(start_date: str, end_date: str) -> dict[str, Any]:
@@ -314,6 +363,38 @@ def create_mcp_server(config: CliConfig) -> FastMCP:
     # -- Performance tools --------------------------------------------------
 
     @mcp.tool()
+    def performance_race_predictions() -> dict[str, Any]:
+        """Get latest race predictions. Returns race_type, predicted_time_seconds, distance_meters."""
+        try:
+            ensure_authenticated(config)
+            raw = get_race_predictions()
+        except GarminCliError as exc:
+            raise _handle_error(exc) from exc
+        return _envelope(serialize_race_predictions(raw))
+
+    @mcp.tool()
+    def performance_endurance_score(start_date: str, end_date: str) -> dict[str, Any]:
+        """Get endurance score for a date range (YYYY-MM-DD). Returns date, overall_score, endurance_classification."""
+        start, end = _parse_date_range(start_date, end_date)
+        try:
+            ensure_authenticated(config)
+            raw = get_endurance_score_range(start, end)
+        except GarminCliError as exc:
+            raise _handle_error(exc) from exc
+        return _envelope(serialize_endurance_score(raw))
+
+    @mcp.tool()
+    def performance_hill_score(start_date: str, end_date: str) -> dict[str, Any]:
+        """Get hill score for a date range (YYYY-MM-DD). Returns date, overall_score, endurance_score, strength_score."""
+        start, end = _parse_date_range(start_date, end_date)
+        try:
+            ensure_authenticated(config)
+            raw = get_hill_score_range(start, end)
+        except GarminCliError as exc:
+            raise _handle_error(exc) from exc
+        return _envelope(serialize_hill_score(raw))
+
+    @mcp.tool()
     def performance_thresholds() -> dict[str, Any]:
         """Get all available threshold metrics. Returns sport, lt_hr_bpm, lt_pace, ftp_watts, weight_kg."""
         try:
@@ -349,6 +430,18 @@ def create_mcp_server(config: CliConfig) -> FastMCP:
         except GarminCliError as exc:
             raise _handle_error(exc) from exc
         return _envelope(serialize_zones(raw))
+
+    # -- Device tools -------------------------------------------------------
+
+    @mcp.tool()
+    def device_list() -> dict[str, Any]:
+        """List registered Garmin devices. Returns device_id, display_name, device_type, last_sync_time."""
+        try:
+            ensure_authenticated(config)
+            raw = get_devices()
+        except GarminCliError as exc:
+            raise _handle_error(exc) from exc
+        return _envelope(serialize_device(raw))
 
     # -- Login status -------------------------------------------------------
 

@@ -222,18 +222,98 @@ garmin-cli --json activity list --limit 5
 
 ## MCP Server (Optional)
 
-Expose garmin-cli as an MCP tool server for Claude Code/Desktop:
+Expose garmin-cli as an MCP tool server (26 read-only tools) for local or remote MCP clients.
+
+This project currently tracks the MCP Python SDK v2 API from a pinned commit on the official `modelcontextprotocol/python-sdk` repository. MCP v2 is not yet published on PyPI as a stable `2.x` release, so the `mcp` extra installs from that pinned Git source.
+
+Temporary caveat: this MCP extra is best treated as a source-install workflow until upstream publishes a normal v2 release. Installing it requires `git` and live GitHub access.
 
 ```bash
-pip install garmin-cli[mcp]
-garmin-cli mcp-server              # starts stdio transport
+pip install "garmin-cli[mcp]"
+# or from a local checkout:
+pip install -e ".[mcp]"
 ```
 
-Register with Claude Code:
+### Claude Desktop
+
+Add to your Claude Desktop config file:
+
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "garmin": {
+      "command": "garmin-cli",
+      "args": ["mcp-server"]
+    }
+  }
+}
+```
+
+With a custom session directory:
+
+```json
+{
+  "mcpServers": {
+    "garmin": {
+      "command": "garmin-cli",
+      "args": ["--garth-home", "/path/to/.garth", "mcp-server"]
+    }
+  }
+}
+```
+
+If `garmin-cli` is installed in a virtualenv, use the full path to the binary:
+
+```json
+{
+  "mcpServers": {
+    "garmin": {
+      "command": "/path/to/venv/bin/garmin-cli",
+      "args": ["mcp-server"]
+    }
+  }
+}
+```
+
+### Claude Code
 
 ```bash
 claude mcp add --transport stdio garmin -- garmin-cli mcp-server
 ```
+
+### ChatGPT (via MCP bridge)
+
+ChatGPT does not natively support MCP. To connect, run the server with an HTTP transport and use an MCP-to-OpenAI bridge such as [mcp-openai-bridge](https://github.com/nicobailey/mcp-openai-bridge) or a similar proxy:
+
+```bash
+# Start the MCP server with streamable HTTP
+garmin-cli mcp-server --transport streamable-http --host 127.0.0.1 --port 8000
+```
+
+Then point the bridge at `http://127.0.0.1:8000/mcp` and configure it as a ChatGPT plugin or custom GPT action. Refer to the bridge project's documentation for setup details.
+
+### HTTP Transports
+
+SSE and streamable HTTP use the MCP SDK's built-in HTTP server. By default it binds to `127.0.0.1:8000`.
+
+Streamable HTTP (recommended for remote clients):
+
+```bash
+garmin-cli mcp-server --transport streamable-http --host 127.0.0.1 --port 8000
+```
+
+SSE (for clients that require it):
+
+```bash
+garmin-cli mcp-server --transport sse --host 127.0.0.1 --port 8000
+```
+
+Optional HTTP flags: `--sse-path`, `--message-path` (SSE only), `--streamable-http-path`, `--stateless-http`, `--json-response` (streamable-http only). Use `--host 0.0.0.0` only when intentionally exposing beyond localhost.
+
+For remote clients, prefer a dedicated session directory with `--garth-home` rather than exporting credentials into another process.
 
 See [SKILL.md](SKILL.md#mcp-server-alternative) for the full tool list and parameter reference.
 

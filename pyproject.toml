@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mcp = ["mcp[cli]>=1.25,<2"]
+mcp = ["mcp[cli] @ git+https://github.com/modelcontextprotocol/python-sdk.git@d5b9155f14ab3b4b203a47c55b53955b2d0bca09"]
 dev = [
     "pytest>=9.0",
     "pytest-mock>=3.15",

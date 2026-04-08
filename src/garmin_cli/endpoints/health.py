@@ -1,32 +1,16 @@
 """Health endpoint helpers backed by Garmin Connect APIs."""
 from __future__ import annotations
 
-from datetime import date, timedelta
-import time
-from typing import Any, Callable
+from datetime import date
+from typing import Any
 
 import garth
 
-from garmin_cli.endpoints._base import _make_request
+from garmin_cli.endpoints._base import _collect_daily_range, _make_request
 
 
 def _request(url: str, *, params: dict[str, Any] | None = None) -> Any:
     return _make_request(garth.connectapi, url, params=params)
-
-
-def _collect_daily_range(
-    getter: Callable[[date], Any],
-    start: date,
-    end: date,
-) -> list[Any]:
-    items: list[Any] = []
-    current = start
-    while current <= end:
-        items.append(getter(current))
-        current += timedelta(days=1)
-        if current <= end:
-            time.sleep(0.5)
-    return items
 
 
 def get_sleep(start: date, end: date) -> Any:
@@ -49,6 +33,35 @@ def get_weight(start: date, end: date) -> Any:
         "/weight-service/weight/dateRange",
         params={"startDate": start.isoformat(), "endDate": end.isoformat()},
     )
+
+
+def get_daily_summary(day: date) -> Any:
+    result = _request(
+        "/usersummary-service/usersummary/daily/",
+        params={"calendarDate": day.isoformat()},
+    )
+    return result if result is not None else {}
+
+
+def get_daily_summary_range(start: date, end: date) -> list[Any]:
+    return _collect_daily_range(get_daily_summary, start, end)
+
+
+def _get_stats_range(stat: str, start: date, end: date) -> list[Any]:
+    result = _request(
+        f"/usersummary-service/stats/{stat}/daily/{start.isoformat()}/{end.isoformat()}"
+    )
+    if isinstance(result, dict):
+        return [result]
+    return result if result is not None else []
+
+
+def get_steps_range(start: date, end: date) -> list[Any]:
+    return _get_stats_range("steps", start, end)
+
+
+def get_intensity_minutes_range(start: date, end: date) -> list[Any]:
+    return _get_stats_range("im", start, end)
 
 
 def get_body_battery(day: date) -> Any:

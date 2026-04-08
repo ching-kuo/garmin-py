@@ -3,15 +3,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import date
 from typing import Any
 
 import pytest
 
 pytest.importorskip("mcp", reason="mcp extra not installed")
 
-from mcp.server.fastmcp.exceptions import ToolError  # noqa: E402
+from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402
 
+from garmin_cli import serializers as garmin_serializers  # noqa: E402
 from garmin_cli.config import CliConfig  # noqa: E402
+from garmin_cli.endpoints import devices as devices_endpoints  # noqa: E402
+from garmin_cli.endpoints import health as health_endpoints  # noqa: E402
+from garmin_cli.endpoints import metrics as metrics_endpoints  # noqa: E402
 from garmin_cli.exceptions import GarminCliError  # noqa: E402
 from garmin_cli.mcp_server import create_mcp_server  # noqa: E402
 
@@ -25,7 +30,7 @@ def _config(**overrides: Any) -> CliConfig:
 def _call(mcp_server: Any, tool_name: str, args: dict[str, Any] | None = None) -> Any:
     """Call an MCP tool and parse the JSON text result."""
     result = asyncio.run(mcp_server.call_tool(tool_name, args or {}))
-    # FastMCP may return (list[Content], dict) tuple or list[Content]
+    # MCPServer may return (list[Content], dict) tuple or list[Content]
     if isinstance(result, tuple):
         content_list = result[0]
     else:
@@ -44,6 +49,9 @@ class TestToolRegistration:
         "health_sleep",
         "health_hrv",
         "health_weight",
+        "health_daily_summary",
+        "health_steps",
+        "health_intensity_minutes",
         "health_body_battery",
         "health_stress",
         "health_spo2",
@@ -57,8 +65,12 @@ class TestToolRegistration:
         "workout_get",
         "workout_calendar",
         "performance_thresholds",
+        "performance_race_predictions",
+        "performance_endurance_score",
+        "performance_hill_score",
         "performance_vo2max",
         "performance_zones",
+        "device_list",
         "login_status",
     })
 
@@ -129,11 +141,471 @@ class TestInputValidation:
 
 
 # ---------------------------------------------------------------------------
+# Endpoint layer -- health additions
+# ---------------------------------------------------------------------------
+
+class TestHealthEndpoints:
+    """Verify new health endpoint helpers call Garmin APIs correctly."""
+
+    def test_get_daily_summary(self, mocker: Any) -> None:
+        mock_request = mocker.patch(
+            "garmin_cli.endpoints.health._request",
+            return_value={"calendarDate": "2026-01-01", "totalSteps": 12345},
+        )
+        result = health_endpoints.get_daily_summary(date(2026, 1, 1))
+        assert result["totalSteps"] == 12345
+        mock_request.assert_called_once_with(
+            "/usersummary-service/usersummary/daily/",
+            params={"calendarDate": "2026-01-01"},
+        )
+
+    def test_get_daily_summary_coalesces_none(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.endpoints.health._request", return_value=None)
+        result = health_endpoints.get_daily_summary(date(2026, 1, 1))
+        assert result == {}
+
+    def test_get_daily_summary_range(self, mocker: Any) -> None:
+        mock_collect = mocker.patch(
+            "garmin_cli.endpoints.health._collect_daily_range",
+            return_value=[{"calendarDate": "2026-01-01"}],
+        )
+        result = health_endpoints.get_daily_summary_range(
+            date(2026, 1, 1),
+            date(2026, 1, 3),
+        )
+        assert result == [{"calendarDate": "2026-01-01"}]
+        mock_collect.assert_called_once_with(
+            health_endpoints.get_daily_summary,
+            date(2026, 1, 1),
+            date(2026, 1, 3),
+        )
+
+    def test_get_steps_range(self, mocker: Any) -> None:
+        mock_request = mocker.patch(
+            "garmin_cli.endpoints.health._request",
+            return_value=[{"calendarDate": "2026-01-01", "totalSteps": 12345}],
+        )
+        result = health_endpoints.get_steps_range(date(2026, 1, 1), date(2026, 1, 7))
+        assert result[0]["totalSteps"] == 12345
+
+    def test_get_steps_range_wraps_dict_as_list(self, mocker: Any) -> None:
+        mocker.patch(
+            "garmin_cli.endpoints.health._request",
+            return_value={"calendarDate": "2026-01-01", "totalSteps": 99},
+        )
+        result = health_endpoints.get_steps_range(date(2026, 1, 1), date(2026, 1, 1))
+        assert result == [{"calendarDate": "2026-01-01", "totalSteps": 99}]
+
+    def test_get_steps_range_coalesces_none(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.endpoints.health._request", return_value=None)
+        result = health_endpoints.get_steps_range(date(2026, 1, 1), date(2026, 1, 7))
+        assert result == []
+
+    def test_get_intensity_minutes_range(self, mocker: Any) -> None:
+        mock_request = mocker.patch(
+            "garmin_cli.endpoints.health._request",
+            return_value=[{"calendarDate": "2026-01-01", "moderateValue": 30}],
+        )
+        result = health_endpoints.get_intensity_minutes_range(
+            date(2026, 1, 1),
+            date(2026, 1, 7),
+        )
+        assert result[0]["moderateValue"] == 30
+        mock_request.assert_called_once_with(
+            "/usersummary-service/stats/im/daily/2026-01-01/2026-01-07"
+        )
+
+    def test_get_intensity_minutes_range_coalesces_none(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.endpoints.health._request", return_value=None)
+        result = health_endpoints.get_intensity_minutes_range(
+            date(2026, 1, 1),
+            date(2026, 1, 7),
+        )
+        assert result == []
+
+    def test_get_steps_range_not_found(self, mocker: Any) -> None:
+        mocker.patch(
+            "garmin_cli.endpoints.health._request",
+            side_effect=GarminCliError(error="Not found", error_code="NOT_FOUND"),
+        )
+        with pytest.raises(GarminCliError, match="Not found"):
+            health_endpoints.get_steps_range(date(2026, 1, 1), date(2026, 1, 7))
+
+
+# ---------------------------------------------------------------------------
+# Endpoint layer -- metrics
+# ---------------------------------------------------------------------------
+
+class TestMetricsEndpoints:
+    """Verify metrics endpoint helpers call Garmin APIs correctly."""
+
+
+    def test_get_race_predictions(self, mocker: Any) -> None:
+        mock_request = mocker.patch(
+            "garmin_cli.endpoints.metrics._request",
+            return_value=[{"raceType": "5K", "predictedTimeInSeconds": 1500}],
+        )
+        result = metrics_endpoints.get_race_predictions()
+        assert result[0]["raceType"] == "5K"
+        mock_request.assert_called_once_with("/metrics-service/metrics/racepredictions")
+
+    def test_get_race_predictions_coalesces_none(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.endpoints.metrics._request", return_value=None)
+        result = metrics_endpoints.get_race_predictions()
+        assert result == []
+
+    def test_get_endurance_score(self, mocker: Any) -> None:
+        mock_request = mocker.patch(
+            "garmin_cli.endpoints.metrics._request",
+            return_value={"calendarDate": "2026-01-01", "overallScore": 5100},
+        )
+        result = metrics_endpoints.get_endurance_score(date(2026, 1, 1))
+        assert result["overallScore"] == 5100
+        mock_request.assert_called_once_with(
+            "/metrics-service/metrics/endurancescore",
+            params={"calendarDate": "2026-01-01"},
+        )
+
+    def test_get_endurance_score_coalesces_none(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.endpoints.metrics._request", return_value=None)
+        result = metrics_endpoints.get_endurance_score(date(2026, 1, 1))
+        assert result == {}
+
+    def test_get_endurance_score_range(self, mocker: Any) -> None:
+        mock_collect = mocker.patch(
+            "garmin_cli.endpoints.metrics._collect_daily_range",
+            return_value=[{"calendarDate": "2026-01-01", "overallScore": 5100}],
+        )
+        result = metrics_endpoints.get_endurance_score_range(
+            date(2026, 1, 1),
+            date(2026, 1, 3),
+        )
+        assert result[0]["overallScore"] == 5100
+        mock_collect.assert_called_once_with(
+            metrics_endpoints.get_endurance_score,
+            date(2026, 1, 1),
+            date(2026, 1, 3),
+        )
+
+    def test_get_hill_score(self, mocker: Any) -> None:
+        mock_request = mocker.patch(
+            "garmin_cli.endpoints.metrics._request",
+            return_value={"calendarDate": "2026-01-01", "overallScore": 42},
+        )
+        result = metrics_endpoints.get_hill_score(date(2026, 1, 1))
+        assert result["overallScore"] == 42
+        mock_request.assert_called_once_with(
+            "/metrics-service/metrics/hillscore",
+            params={"calendarDate": "2026-01-01"},
+        )
+
+    def test_get_hill_score_coalesces_none(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.endpoints.metrics._request", return_value=None)
+        result = metrics_endpoints.get_hill_score(date(2026, 1, 1))
+        assert result == {}
+
+    def test_get_hill_score_range(self, mocker: Any) -> None:
+        mock_collect = mocker.patch(
+            "garmin_cli.endpoints.metrics._collect_daily_range",
+            return_value=[{"calendarDate": "2026-01-01", "overallScore": 42}],
+        )
+        result = metrics_endpoints.get_hill_score_range(
+            date(2026, 1, 1),
+            date(2026, 1, 3),
+        )
+        assert result[0]["overallScore"] == 42
+        mock_collect.assert_called_once_with(
+            metrics_endpoints.get_hill_score,
+            date(2026, 1, 1),
+            date(2026, 1, 3),
+        )
+
+    def test_get_race_predictions_not_found(self, mocker: Any) -> None:
+        mocker.patch(
+            "garmin_cli.endpoints.metrics._request",
+            side_effect=GarminCliError(error="Not found", error_code="NOT_FOUND"),
+        )
+        with pytest.raises(GarminCliError, match="Not found"):
+            metrics_endpoints.get_race_predictions()
+
+
+# ---------------------------------------------------------------------------
+# Endpoint layer -- devices
+# ---------------------------------------------------------------------------
+
+class TestDeviceEndpoints:
+    """Verify device endpoint helpers call Garmin APIs correctly."""
+
+
+    def test_get_devices(self, mocker: Any) -> None:
+        mock_request = mocker.patch(
+            "garmin_cli.endpoints.devices._request",
+            return_value=[{"deviceId": 1, "displayName": "Forerunner"}],
+        )
+        result = devices_endpoints.get_devices()
+        assert result[0]["displayName"] == "Forerunner"
+        mock_request.assert_called_once_with("/device-service/deviceregistration/devices")
+
+    def test_get_devices_coalesces_none(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.endpoints.devices._request", return_value=None)
+        result = devices_endpoints.get_devices()
+        assert result == []
+
+    def test_get_devices_not_found(self, mocker: Any) -> None:
+        mocker.patch(
+            "garmin_cli.endpoints.devices._request",
+            side_effect=GarminCliError(error="Not found", error_code="NOT_FOUND"),
+        )
+        with pytest.raises(GarminCliError, match="Not found"):
+            devices_endpoints.get_devices()
+
+
+# ---------------------------------------------------------------------------
+# Serializers -- new tool payloads
+# ---------------------------------------------------------------------------
+
+class TestNewSerializers:
+    """Verify serializers for new MCP tool payloads."""
+
+    def test_serialize_daily_summary(self) -> None:
+        result = garmin_serializers.serialize_daily_summary(
+            {
+                "calendarDate": "2026-01-01",
+                "totalSteps": 12345,
+                "totalDistanceMeters": 7500,
+                "activeKilocalories": 500,
+                "floorsAscended": 10,
+                "floorsDescended": 8,
+                "moderateIntensityMinutes": 30,
+                "vigorousIntensityMinutes": 12,
+                "restingHeartRate": 48,
+            }
+        )
+        assert result == [
+            {
+                "date": "2026-01-01",
+                "total_steps": 12345,
+                "distance_km": 7.5,
+                "active_kilocalories": 500,
+                "floors_ascended": 10,
+                "floors_descended": 8,
+                "moderate_intensity_minutes": 30,
+                "vigorous_intensity_minutes": 12,
+                "resting_heart_rate": 48,
+            }
+        ]
+
+    def test_serialize_daily_summary_missing_fields(self) -> None:
+        result = garmin_serializers.serialize_daily_summary({"calendarDate": "2026-01-01"})
+        assert result == [
+            {
+                "date": "2026-01-01",
+                "total_steps": None,
+                "distance_km": None,
+                "active_kilocalories": None,
+                "floors_ascended": None,
+                "floors_descended": None,
+                "moderate_intensity_minutes": None,
+                "vigorous_intensity_minutes": None,
+                "resting_heart_rate": None,
+            }
+        ]
+
+    def test_serialize_steps(self) -> None:
+        result = garmin_serializers.serialize_steps(
+            [{"calendarDate": "2026-01-01", "totalSteps": 12345, "totalDistance": 8100, "stepGoal": 10000}]
+        )
+        assert result == [
+            {
+                "date": "2026-01-01",
+                "total_steps": 12345,
+                "total_distance": 8100,
+                "step_goal": 10000,
+            }
+        ]
+
+    def test_serialize_intensity_minutes(self) -> None:
+        result = garmin_serializers.serialize_intensity_minutes(
+            [{"calendarDate": "2026-01-01", "moderateValue": 45, "vigorousValue": 15, "weeklyGoal": 150}]
+        )
+        assert result == [
+            {
+                "date": "2026-01-01",
+                "moderate_value": 45,
+                "vigorous_value": 15,
+                "weekly_goal": 150,
+            }
+        ]
+
+    def test_serialize_race_predictions(self) -> None:
+        result = garmin_serializers.serialize_race_predictions(
+            [{"raceType": "MARATHON", "predictedTimeInSeconds": 12600, "distanceMeters": 42195}]
+        )
+        assert result == [
+            {
+                "race_type": "MARATHON",
+                "predicted_time_seconds": 12600,
+                "distance_meters": 42195,
+            }
+        ]
+
+    def test_serialize_endurance_score(self) -> None:
+        result = garmin_serializers.serialize_endurance_score(
+            {
+                "calendarDate": "2026-01-01",
+                "overallScore": 5100,
+                "enduranceClassification": "EXCELLENT",
+            }
+        )
+        assert result == [
+            {
+                "date": "2026-01-01",
+                "overall_score": 5100,
+                "endurance_classification": "EXCELLENT",
+            }
+        ]
+
+    def test_serialize_hill_score(self) -> None:
+        result = garmin_serializers.serialize_hill_score(
+            {
+                "calendarDate": "2026-01-01",
+                "overallScore": 42,
+                "enduranceScore": 40,
+                "strengthScore": 44,
+            }
+        )
+        assert result == [
+            {
+                "date": "2026-01-01",
+                "overall_score": 42,
+                "endurance_score": 40,
+                "strength_score": 44,
+            }
+        ]
+
+    def test_serialize_device(self) -> None:
+        result = garmin_serializers.serialize_device(
+            {
+                "deviceId": 1,
+                "displayName": "Forerunner",
+                "deviceTypeName": "WATCH",
+                "lastSyncTime": "2026-01-01T10:00:00",
+            }
+        )
+        assert result == [
+            {
+                "device_id": 1,
+                "display_name": "Forerunner",
+                "device_type": "WATCH",
+                "last_sync_time": "2026-01-01T10:00:00",
+            }
+        ]
+
+    def test_new_serializers_return_empty_list_for_none(self) -> None:
+        assert garmin_serializers.serialize_daily_summary(None) == []
+        assert garmin_serializers.serialize_steps(None) == []
+        assert garmin_serializers.serialize_intensity_minutes(None) == []
+        assert garmin_serializers.serialize_race_predictions(None) == []
+        assert garmin_serializers.serialize_endurance_score(None) == []
+        assert garmin_serializers.serialize_hill_score(None) == []
+        assert garmin_serializers.serialize_device(None) == []
+
+    def test_new_columns_contain_expected_fields(self) -> None:
+        assert garmin_serializers.COLUMNS_DAILY_SUMMARY == (
+            "date",
+            "total_steps",
+            "distance_km",
+            "active_kilocalories",
+            "floors_ascended",
+            "floors_descended",
+            "moderate_intensity_minutes",
+            "vigorous_intensity_minutes",
+            "resting_heart_rate",
+        )
+        assert garmin_serializers.COLUMNS_STEPS == (
+            "date",
+            "total_steps",
+            "total_distance",
+            "step_goal",
+        )
+        assert garmin_serializers.COLUMNS_INTENSITY_MINUTES == (
+            "date",
+            "moderate_value",
+            "vigorous_value",
+            "weekly_goal",
+        )
+        assert garmin_serializers.COLUMNS_RACE_PREDICTIONS == (
+            "race_type",
+            "predicted_time_seconds",
+            "distance_meters",
+        )
+        assert garmin_serializers.COLUMNS_ENDURANCE_SCORE == (
+            "date",
+            "overall_score",
+            "endurance_classification",
+        )
+        assert garmin_serializers.COLUMNS_HILL_SCORE == (
+            "date",
+            "overall_score",
+            "endurance_score",
+            "strength_score",
+        )
+        assert garmin_serializers.COLUMNS_DEVICE == (
+            "device_id",
+            "display_name",
+            "device_type",
+            "last_sync_time",
+        )
+
+
+# ---------------------------------------------------------------------------
 # Happy path -- health tools
 # ---------------------------------------------------------------------------
 
 class TestHealthTools:
     """Verify health tools call endpoints and return envelope."""
+
+    def test_health_daily_summary(self, mocker: Any) -> None:
+
+        mocker.patch("garmin_cli.mcp_server.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.mcp_server.get_daily_summary_range",
+            return_value=[
+                {
+                    "calendarDate": "2026-01-01",
+                    "totalSteps": 12345,
+                    "totalDistanceMeters": 7500,
+                }
+            ],
+        )
+        server = create_mcp_server(_config())
+        result = _call(server, "health_daily_summary", {"start_date": "2026-01-01", "end_date": "2026-01-01"})
+        assert result["count"] == 1
+        assert result["rows"][0]["total_steps"] == 12345
+
+    def test_health_steps(self, mocker: Any) -> None:
+
+        mocker.patch("garmin_cli.mcp_server.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.mcp_server.get_steps_range",
+            return_value=[{"calendarDate": "2026-01-01", "totalSteps": 12345, "stepGoal": 10000}],
+        )
+        server = create_mcp_server(_config())
+        result = _call(server, "health_steps", {"start_date": "2026-01-01", "end_date": "2026-01-07"})
+        assert result["count"] == 1
+        assert result["rows"][0]["step_goal"] == 10000
+
+    def test_health_intensity_minutes(self, mocker: Any) -> None:
+
+        mocker.patch("garmin_cli.mcp_server.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.mcp_server.get_intensity_minutes_range",
+            return_value=[{"calendarDate": "2026-01-01", "moderateValue": 45, "vigorousValue": 15}],
+        )
+        server = create_mcp_server(_config())
+        result = _call(server, "health_intensity_minutes", {"start_date": "2026-01-01", "end_date": "2026-01-07"})
+        assert result["count"] == 1
+        assert result["rows"][0]["moderate_value"] == 45
 
     def test_health_sleep(self, mocker: Any) -> None:
 
@@ -296,6 +768,42 @@ class TestWorkoutTools:
 
 class TestPerformanceTools:
 
+    def test_performance_race_predictions(self, mocker: Any) -> None:
+
+        mocker.patch("garmin_cli.mcp_server.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.mcp_server.get_race_predictions",
+            return_value=[{"raceType": "MARATHON", "predictedTimeInSeconds": 12600}],
+        )
+        server = create_mcp_server(_config())
+        result = _call(server, "performance_race_predictions", {})
+        assert result["count"] == 1
+        assert result["rows"][0]["race_type"] == "MARATHON"
+
+    def test_performance_endurance_score(self, mocker: Any) -> None:
+
+        mocker.patch("garmin_cli.mcp_server.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.mcp_server.get_endurance_score_range",
+            return_value=[{"calendarDate": "2026-01-01", "overallScore": 5100}],
+        )
+        server = create_mcp_server(_config())
+        result = _call(server, "performance_endurance_score", {"start_date": "2026-01-01", "end_date": "2026-01-07"})
+        assert result["count"] == 1
+        assert result["rows"][0]["overall_score"] == 5100
+
+    def test_performance_hill_score(self, mocker: Any) -> None:
+
+        mocker.patch("garmin_cli.mcp_server.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.mcp_server.get_hill_score_range",
+            return_value=[{"calendarDate": "2026-01-01", "overallScore": 42}],
+        )
+        server = create_mcp_server(_config())
+        result = _call(server, "performance_hill_score", {"start_date": "2026-01-01", "end_date": "2026-01-07"})
+        assert result["count"] == 1
+        assert result["rows"][0]["overall_score"] == 42
+
     def test_performance_thresholds(self, mocker: Any) -> None:
 
         mocker.patch("garmin_cli.mcp_server.ensure_authenticated")
@@ -331,6 +839,25 @@ class TestPerformanceTools:
         server = create_mcp_server(_config())
         result = _call(server, "performance_zones", {})
         assert result["count"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# Happy path -- device tools
+# ---------------------------------------------------------------------------
+
+class TestDeviceTools:
+
+    def test_device_list(self, mocker: Any) -> None:
+
+        mocker.patch("garmin_cli.mcp_server.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.mcp_server.get_devices",
+            return_value=[{"deviceId": 1, "displayName": "Forerunner", "deviceTypeName": "WATCH"}],
+        )
+        server = create_mcp_server(_config())
+        result = _call(server, "device_list", {})
+        assert result["count"] == 1
+        assert result["rows"][0]["display_name"] == "Forerunner"
 
 
 # ---------------------------------------------------------------------------
@@ -454,4 +981,4 @@ class TestImportGuard:
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["mcp-server"])
         assert result.exit_code == 1
-        assert "pip install" in (result.output + (result.stderr or "")).lower()
+        assert 'pip install "garmin-cli[mcp]"' in (result.output + (result.stderr or ""))

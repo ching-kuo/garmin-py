@@ -24,7 +24,7 @@ class TestDailyHealthRangeHelpers:
                 {"bodyBatteryValuesArray": [["2026-03-12T08:00:00", 75, "CHARGED"]]},
             ],
         )
-        mock_sleep = mocker.patch("garmin_cli.endpoints.health.time.sleep")
+        mock_sleep = mocker.patch("garmin_cli.endpoints._base.time.sleep")
 
         result = get_body_battery_range(date(2026, 3, 11), date(2026, 3, 12))
 
@@ -52,7 +52,7 @@ class TestDailyHealthRangeHelpers:
             "garmin_cli.endpoints.health.get_training_readiness",
             side_effect=[{"score": 68}, {"score": 70}],
         )
-        mocker.patch("garmin_cli.endpoints.health.time.sleep")
+        mocker.patch("garmin_cli.endpoints._base.time.sleep")
 
         assert len(get_stress_range(date(2026, 3, 11), date(2026, 3, 12))) == 2
         assert len(get_spo2_range(date(2026, 3, 11), date(2026, 3, 12))) == 2
