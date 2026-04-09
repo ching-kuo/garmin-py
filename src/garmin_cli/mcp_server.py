@@ -52,6 +52,7 @@ from garmin_cli.endpoints.workouts import (
 )
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.serializers import (
+    serialize_activity_detail,
     serialize_activity_summary,
     serialize_multisport_children,
     serialize_body_battery,
@@ -310,15 +311,16 @@ def create_mcp_server(config: CliConfig) -> MCPServer:
         return _envelope(serialize_activity_summary(raw))
 
     @mcp.tool()
-    def activity_get(activity_id: int) -> dict[str, Any]:
-        """Get a single activity by ID. For multisport activities (triathlon etc.), includes child activities with per-sport details. Returns id, date, name, type, distance_km, duration_min, avg_hr, and children[] for multisport."""
+    def activity_get(activity_id: int, detail: bool = False) -> dict[str, Any]:
+        """Get a single activity by ID. For multisport activities (triathlon etc.), includes child activities with per-sport details. Returns compact activity fields by default, or extended metrics such as max_hr, calories, elevation, speed, cadence, power, tss, and intensity_factor when detail=True."""
         _validate_positive_id(activity_id, "activity_id")
         try:
             ensure_authenticated(config)
             raw = get_activity(activity_id)
         except GarminCliError as exc:
             raise _handle_error(exc) from exc
-        result = _envelope(serialize_activity_summary(raw))
+        rows = serialize_activity_detail(raw) if detail else serialize_activity_summary(raw)
+        result = _envelope(rows)
         if is_multisport_parent(raw):
             try:
                 children = get_multisport_children(raw)

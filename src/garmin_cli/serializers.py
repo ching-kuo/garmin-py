@@ -47,6 +47,21 @@ COLUMNS_ACTIVITY_SUMMARY = (
     "duration_min",
     "avg_hr",
 )
+COLUMNS_ACTIVITY_DETAIL = COLUMNS_ACTIVITY_SUMMARY + (
+    "max_hr",
+    "calories",
+    "elevation_gain_m",
+    "elevation_loss_m",
+    "avg_speed_kmh",
+    "max_speed_kmh",
+    "avg_cadence_spm",
+    "avg_cadence_rpm",
+    "avg_power_w",
+    "max_power_w",
+    "norm_power_w",
+    "tss",
+    "intensity_factor",
+)
 COLUMNS_CALENDAR_WORKOUT = ("date", "id", "name", "type", "duration_min", "description")
 COLUMNS_WORKOUT = ("id", "name", "sport", "duration_min", "description")
 COLUMNS_WORKOUT_DETAIL = (
@@ -91,6 +106,10 @@ def _hours(value: Any) -> float | None:
 
 def _km(value: Any) -> float | None:
     return None if value is None else value / 1000
+
+
+def _kmh(value: Any) -> float | None:
+    return None if value is None else value * 3.6
 
 
 def _get_nested(value: dict[str, Any], *keys: str) -> Any:
@@ -462,31 +481,68 @@ def serialize_device(raw: Any) -> list[dict[str, Any]]:
     ]
 
 
-def serialize_activity_summary(raw: Any) -> list[dict[str, Any]]:
+def _iter_activity_pairs(raw: Any) -> list[tuple[dict[str, Any], dict[str, Any]]]:
     items = raw if isinstance(raw, list) else [raw]
-    rows: list[dict[str, Any]] = []
+    pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for item in items:
         activity = item if isinstance(item, dict) else {}
         raw_summary = activity.get("summaryDTO")
         summary = raw_summary if isinstance(raw_summary, dict) else {}
-        rows.append(
-            {
-                "id": activity.get("activityId"),
-                "date": _coalesce(activity.get("startTimeLocal"), summary.get("startTimeLocal")),
-                "name": activity.get("activityName"),
-                "type": _get_nested(activity, "activityType", "typeKey"),
-                "distance_km": _km(_coalesce(activity.get("distance"), summary.get("distance"))),
-                "duration_min": _minutes(_coalesce(activity.get("duration"), summary.get("duration"))),
-                "avg_hr": _coalesce(activity.get("averageHR"), summary.get("averageHR")),
-            }
-        )
-    return rows
+        pairs.append((activity, summary))
+    return pairs
+
+
+def _normalize_activity_base(activity: dict[str, Any], summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": activity.get("activityId"),
+        "date": _coalesce(activity.get("startTimeLocal"), summary.get("startTimeLocal")),
+        "name": activity.get("activityName"),
+        "type": _get_nested(activity, "activityType", "typeKey"),
+        "distance_km": _km(_coalesce(activity.get("distance"), summary.get("distance"))),
+        "duration_min": _minutes(_coalesce(activity.get("duration"), summary.get("duration"))),
+        "avg_hr": _coalesce(activity.get("averageHR"), summary.get("averageHR")),
+    }
+
+
+def serialize_activity_summary(raw: Any) -> list[dict[str, Any]]:
+    return [_normalize_activity_base(a, s) for a, s in _iter_activity_pairs(raw)]
 
 
 _PACE_SPORTS: frozenset[str] = frozenset({
     "running", "trail_running", "treadmill_running",
     "open_water_swimming", "lap_swimming", "swimming",
 })
+
+
+def _activity_detail_fields(activity: dict[str, Any], summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "max_hr": _coalesce(activity.get("maxHR"), summary.get("maxHR")),
+        "calories": _coalesce(activity.get("calories"), summary.get("calories")),
+        "elevation_gain_m": _coalesce(activity.get("elevationGain"), summary.get("elevationGain")),
+        "elevation_loss_m": _coalesce(activity.get("elevationLoss"), summary.get("elevationLoss")),
+        "avg_speed_kmh": _kmh(_coalesce(activity.get("averageSpeed"), summary.get("averageSpeed"))),
+        "max_speed_kmh": _kmh(_coalesce(activity.get("maxSpeed"), summary.get("maxSpeed"))),
+        "avg_cadence_spm": _coalesce(
+            activity.get("averageRunningCadenceInStepsPerMinute"),
+            summary.get("averageRunningCadenceInStepsPerMinute"),
+        ),
+        "avg_cadence_rpm": _coalesce(
+            activity.get("averageBikingCadenceInRevPerMinute"),
+            summary.get("averageBikingCadenceInRevPerMinute"),
+        ),
+        "avg_power_w": _coalesce(activity.get("averagePower"), summary.get("averagePower")),
+        "max_power_w": _coalesce(activity.get("maxPower"), summary.get("maxPower")),
+        "norm_power_w": _coalesce(activity.get("normPower"), summary.get("normPower")),
+        "tss": _coalesce(activity.get("trainingStressScore"), summary.get("trainingStressScore")),
+        "intensity_factor": _coalesce(activity.get("intensityFactor"), summary.get("intensityFactor")),
+    }
+
+
+def serialize_activity_detail(raw: Any) -> list[dict[str, Any]]:
+    return [
+        {**_normalize_activity_base(a, s), **_activity_detail_fields(a, s)}
+        for a, s in _iter_activity_pairs(raw)
+    ]
 
 
 def serialize_multisport_children(children: list[dict[str, Any]]) -> list[dict[str, Any]]:

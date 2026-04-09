@@ -16,9 +16,11 @@ from garmin_cli.endpoints.activities import (
 )
 from garmin_cli.output import echo_csv, echo_json, echo_table, make_envelope, render_output
 from garmin_cli.serializers import (
+    COLUMNS_ACTIVITY_DETAIL,
     COLUMNS_ACTIVITY_SUMMARY,
     COLUMNS_ACTIVITY_WEATHER,
     COLUMNS_MULTISPORT_CHILDREN,
+    serialize_activity_detail,
     serialize_activity_summary,
     serialize_multisport_children,
 )
@@ -71,13 +73,15 @@ def list_cmd(
 
 @activity.command("get")
 @click.argument("activity_id")
+@click.option("--detail", "-d", is_flag=True, default=False)
 @click.pass_context
-def get_cmd(ctx: click.Context, activity_id: str) -> None:
+def get_cmd(ctx: click.Context, activity_id: str, detail: bool) -> None:
     """Get a single activity by ID. For multisport activities, shows each child sport."""
     ensure_authenticated(ctx.obj["config"])
     raw = get_activity(activity_id)
     fmt = ctx.obj["config"].output_format
-    data = serialize_activity_summary(raw)
+    data = serialize_activity_detail(raw) if detail else serialize_activity_summary(raw)
+    columns = COLUMNS_ACTIVITY_DETAIL if detail else COLUMNS_ACTIVITY_SUMMARY
 
     child_data: list[dict] = []
     if is_multisport_parent(raw):
@@ -91,16 +95,19 @@ def get_cmd(ctx: click.Context, activity_id: str) -> None:
             envelope["children"] = child_data
         echo_json(envelope)
     elif fmt == "table":
-        echo_table(data, COLUMNS_ACTIVITY_SUMMARY)
+        echo_table(data, columns)
         if child_data:
             click.echo("")
             click.echo("Child activities:")
             echo_table(child_data, COLUMNS_MULTISPORT_CHILDREN)
     else:
         if child_data:
+            if detail:
+                echo_csv(data, columns)
+                click.echo("")
             echo_csv(child_data, COLUMNS_MULTISPORT_CHILDREN)
         else:
-            echo_csv(data, COLUMNS_ACTIVITY_SUMMARY)
+            echo_csv(data, columns)
 
 
 @activity.command("weather")

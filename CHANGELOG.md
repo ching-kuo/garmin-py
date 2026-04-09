@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Detail view for activities: `activity get --detail` shows extended metrics (max HR, calories, elevation, speed, cadence, power, normalized power, TSS, intensity factor). MCP `activity_get` gains `detail: bool` parameter
 - Multisport activity support: `activity get` now detects triathlon/multisport parents and fetches per-sport child activities with distance, duration, HR, pace, and calories
 - Date filtering for `activity list`: `--date`, `--days`, `--from`/`--to` options and MCP `start_date`/`end_date` params
 - `get_activity_splits` endpoint for activity split data

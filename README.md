@@ -119,7 +119,7 @@ garmin-cli health status      [--date DATE]
 
 ```bash
 garmin-cli activity list    [--limit N] [--type TYPE] [--search TEXT] [--date DATE | --from DATE --to DATE | --days N]
-garmin-cli activity get     ACTIVITY_ID    # multisport shows child activities
+garmin-cli activity get     ACTIVITY_ID [--detail]  # --detail/-d shows power, cadence, elevation, etc.
 garmin-cli activity weather ACTIVITY_ID
 ```
 

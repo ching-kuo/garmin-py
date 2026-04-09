@@ -741,6 +741,79 @@ class TestActivityTools:
         assert result["count"] == 1
         assert result["rows"][0]["id"] == 123
 
+    def test_activity_get_detail_true(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_server.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.mcp_server.get_activity",
+            return_value={
+                "activityId": 123,
+                "startTimeLocal": "2026-01-01",
+                "activityName": "Run",
+                "activityType": {"typeKey": "running"},
+                "distance": 10000,
+                "duration": 3600,
+                "averageHR": 155,
+                "maxHR": 178,
+                "calories": 650,
+                "elevationGain": 120.0,
+                "elevationLoss": 100.0,
+                "averageSpeed": 2.778,
+                "maxSpeed": 4.0,
+                "averageRunningCadenceInStepsPerMinute": 180.0,
+            },
+        )
+        server = create_mcp_server(_config())
+        result = _call(server, "activity_get", {"activity_id": 123, "detail": True})
+        assert result["count"] == 1
+        row = result["rows"][0]
+        assert "max_hr" in row
+        assert "calories" in row
+        assert "elevation_gain_m" in row
+        assert "avg_speed_kmh" in row
+        assert "avg_cadence_spm" in row
+
+    def test_activity_get_default_compact(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_server.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.mcp_server.get_activity",
+            return_value={
+                "activityId": 123,
+                "startTimeLocal": "2026-01-01",
+                "activityName": "Run",
+                "activityType": {"typeKey": "running"},
+                "distance": 10000,
+                "duration": 3600,
+                "averageHR": 155,
+            },
+        )
+        server = create_mcp_server(_config())
+        result = _call(server, "activity_get", {"activity_id": 123})
+        assert result["count"] == 1
+        row = result["rows"][0]
+        assert "id" in row
+        assert "max_hr" not in row
+
+    def test_activity_get_detail_false_compact(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_server.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.mcp_server.get_activity",
+            return_value={
+                "activityId": 123,
+                "startTimeLocal": "2026-01-01",
+                "activityName": "Run",
+                "activityType": {"typeKey": "running"},
+                "distance": 10000,
+                "duration": 3600,
+                "averageHR": 155,
+            },
+        )
+        server = create_mcp_server(_config())
+        result = _call(server, "activity_get", {"activity_id": 123, "detail": False})
+        assert result["count"] == 1
+        row = result["rows"][0]
+        assert "id" in row
+        assert "max_hr" not in row
+
     def test_activity_weather(self, mocker: Any) -> None:
 
         mocker.patch("garmin_cli.mcp_server.ensure_authenticated")
