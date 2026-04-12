@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.0.0] - 2026-04-12
 
 ### Added
 - MFA prompt support during interactive `garmin-cli login`
@@ -13,13 +13,13 @@
 - Redundant `_secure_directory` calls removed from login and auth paths (already handled by `backend.save`)
 
 ### Changed
+- **Breaking:** Replaced the unmaintained `garth` runtime dependency with [`python-garminconnect==0.3.2`](https://github.com/cyberjunky/python-garminconnect) behind a repo-owned compatibility boundary (`src/garmin_cli/backend.py`). `garth` is no longer maintained and had accumulated security debt; `python-garminconnect` provides a native OAuth implementation with active maintenance.
+- **Breaking:** Renamed the primary session-home surface to `GARMIN_HOME` / `--garmin-home`; `GARTH_HOME` / `--garth-home` kept as deprecated aliases
+- **Breaking:** Switched the default session home from `~/.garth` to `~/.garminconnect`; existing sessions are migrated automatically on first use
 - Deduplicated VO2max latest-day filter into shared `select_latest_dated_rows` in serializers
 - Moved test-only `CliRunner` compat shim from production `cli.py` to `tests/conftest.py`
 - Replaced duplicate `_WEATHER_FIELDS` in MCP server with shared `COLUMNS_ACTIVITY_WEATHER`
 - Consolidated `*_fixes*` test files into canonical test suites
-- Replaced the deprecated `garth` runtime dependency with `python-garminconnect==0.3.2` behind a repo-owned compatibility boundary (`src/garmin_cli/backend.py`)
-- Renamed the primary session-home surface to `GARMIN_HOME` / `--garmin-home` with `GARTH_HOME` / `--garth-home` kept as deprecated aliases
-- Switched the default session home to `~/.garminconnect`
 - Added a governed raw-fallback registry for workout update paths and migrated workout read/create/delete/schedule helpers onto typed upstream methods where available
 
 ## [1.3.0] - 2026-04-09
