@@ -124,17 +124,19 @@ def garth_session():
     mp.delenv("GARMIN_EMAIL", raising=False)
     mp.delenv("GARMIN_PASSWORD", raising=False)
 
-    garth_home = os.path.expanduser(os.environ.get("GARTH_HOME", "~/.garth"))
+    garth_home = os.path.expanduser(
+        os.environ.get("GARMIN_HOME", os.environ.get("GARTH_HOME", "~/.garminconnect"))
+    )
     if not os.path.isdir(garth_home):
-        pytest.skip("GARTH_HOME directory not found (set GARTH_HOME env var to override)")
+        pytest.skip(
+            "Garmin home directory not found (set GARMIN_HOME or GARTH_HOME to override)"
+        )
 
-    session_files = [
-        name
-        for name in os.listdir(garth_home)
-        if name.endswith(".json") or name.endswith(".token")
-    ]
-    if not session_files:
-        pytest.skip("No garth session files found in GARTH_HOME (run garth login first)")
+    token_file = os.path.join(garth_home, "garmin_tokens.json")
+    if not os.path.isfile(token_file):
+        pytest.skip(
+            "No garmin_tokens.json found in the Garmin home directory (run garmin-cli login first)"
+        )
 
     yield garth_home
     mp.undo()

@@ -1,8 +1,6 @@
 """Tests for garmin_cli.workout_schema.validate_workout_input."""
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 
 from garmin_cli.workout_schema import END_CONDITIONS, validate_workout_input

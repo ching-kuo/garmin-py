@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import pytest
 from click.testing import CliRunner
 
 from garmin_cli.cli import cli
@@ -293,12 +292,12 @@ class TestPerformanceZonesCommand:
 
 
 # ---------------------------------------------------------------------------
-# --garth-home global flag
+# --garmin-home global flag
 # ---------------------------------------------------------------------------
 
-class TestGarthHomeFlag:
+class TestGarminHomeFlag:
 
-    def test_garth_home_flag_passed_to_config(self, mocker: Any) -> None:
+    def test_garmin_home_flag_passed_to_config(self, mocker: Any) -> None:
         mock_auth = mocker.patch(
             "garmin_cli.commands.performance.ensure_authenticated"
         )
@@ -313,10 +312,31 @@ class TestGarthHomeFlag:
         runner = CliRunner(mix_stderr=False)
         runner.invoke(
             cli,
-            ["--garth-home", "/custom/garth", "performance", "thresholds"],
+            ["--garmin-home", "/custom/garmin", "performance", "thresholds"],
         )
-        # Auth should be called; config with custom garth_home should be passed
+        # Auth should be called; config with custom session home should be passed
         assert mock_auth.called
         call_args = mock_auth.call_args
         config = call_args[0][0]
-        assert config.garth_home == "/custom/garth"
+        assert config.garth_home == "/custom/garmin"
+
+    def test_garth_home_alias_still_passed_to_config(self, mocker: Any) -> None:
+        mock_auth = mocker.patch(
+            "garmin_cli.commands.performance.ensure_authenticated"
+        )
+        mocker.patch(
+            "garmin_cli.commands.performance.get_all_thresholds",
+            return_value={"thresholds": []},
+        )
+        mocker.patch(
+            "garmin_cli.commands.performance.serialize_thresholds",
+            return_value=[],
+        )
+        runner = CliRunner(mix_stderr=False)
+        runner.invoke(
+            cli,
+            ["--garth-home", "/compat/garth", "performance", "thresholds"],
+        )
+        assert mock_auth.called
+        config = mock_auth.call_args[0][0]
+        assert config.garth_home == "/compat/garth"

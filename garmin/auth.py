@@ -1,4 +1,4 @@
-"""Garmin Connect authentication via garth."""
+"""Garmin Connect authentication via the maintained backend."""
 
 from __future__ import annotations
 
@@ -6,8 +6,7 @@ import logging
 import sys
 from typing import Protocol
 
-import garth
-
+from garmin_cli import backend as garth
 logger = logging.getLogger(__name__)
 
 
@@ -42,7 +41,7 @@ def login(config: GarminConfig) -> None:
         sys.exit(1)
 
     try:
-        garth.login(config.email, config.password)
+        garth.login(config.email, config.password, garth_home=garth_home)
         garth.save(garth_home)
         logger.info("Logged in and saved session to %s", garth_home)
     except Exception as exc:

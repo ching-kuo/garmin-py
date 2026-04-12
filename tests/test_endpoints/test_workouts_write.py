@@ -45,7 +45,7 @@ class TestCreateWorkout:
     def test_returns_created_workout_dict(self, mocker: Any) -> None:
         expected = {**_SAMPLE_PAYLOAD, "workoutId": 42}
         mock_garth = MagicMock()
-        mock_garth.connectapi.return_value = expected
+        mock_garth.create_workout.return_value = expected
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
 
         result = create_workout(_SAMPLE_PAYLOAD)
@@ -54,7 +54,7 @@ class TestCreateWorkout:
 
     def test_400_raises_invalid_input(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.connectapi.side_effect = _http_error(400)
+        mock_garth.create_workout.side_effect = _http_error(400)
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
 
         with pytest.raises(GarminCliError) as exc_info:
@@ -63,7 +63,7 @@ class TestCreateWorkout:
 
     def test_401_raises_auth_failed(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.connectapi.side_effect = _http_error(401)
+        mock_garth.create_workout.side_effect = _http_error(401)
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
 
         with pytest.raises(GarminCliError) as exc_info:
@@ -72,7 +72,7 @@ class TestCreateWorkout:
 
     def test_500_retries_and_raises(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.connectapi.side_effect = [_http_error(500)] * 4
+        mock_garth.create_workout.side_effect = [_http_error(500)] * 4
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
         mocker.patch("time.sleep")
 
@@ -128,18 +128,17 @@ class TestUpdateWorkout:
 
 class TestDeleteWorkout:
 
-    def test_url_contains_workout_id(self, mocker: Any) -> None:
+    def test_calls_typed_delete_with_workout_id(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.connectapi.return_value = None
+        mock_garth.delete_workout.return_value = None
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
 
         delete_workout(12345)
-        call_str = str(mock_garth.connectapi.call_args)
-        assert "12345" in call_str
+        mock_garth.delete_workout.assert_called_once_with(12345)
 
     def test_returns_none_on_success(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.connectapi.return_value = None
+        mock_garth.delete_workout.return_value = None
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
 
         result = delete_workout(12345)
@@ -155,7 +154,7 @@ class TestDeleteWorkout:
 
     def test_404_raises_not_found(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.connectapi.side_effect = _http_error(404)
+        mock_garth.delete_workout.side_effect = _http_error(404)
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
 
         with pytest.raises(GarminCliError) as exc_info:
@@ -171,20 +170,19 @@ class TestScheduleWorkout:
 
     def test_passes_date_as_iso_string(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.connectapi.return_value = {
+        mock_garth.schedule_workout.return_value = {
             "workoutScheduleId": 555,
             "calendarDate": "2026-04-01",
         }
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
 
         schedule_workout(12345, date(2026, 4, 1))
-        call_str = str(mock_garth.connectapi.call_args)
-        assert "2026-04-01" in call_str
+        mock_garth.schedule_workout.assert_called_once_with(12345, date(2026, 4, 1))
 
     def test_returns_schedule_dict(self, mocker: Any) -> None:
         expected = {"workoutScheduleId": 555, "calendarDate": "2026-04-01"}
         mock_garth = MagicMock()
-        mock_garth.connectapi.return_value = expected
+        mock_garth.schedule_workout.return_value = expected
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
 
         result = schedule_workout(12345, date(2026, 4, 1))
@@ -201,7 +199,7 @@ class TestScheduleWorkout:
 
     def test_404_raises_not_found(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.connectapi.side_effect = _http_error(404)
+        mock_garth.schedule_workout.side_effect = _http_error(404)
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
 
         with pytest.raises(GarminCliError) as exc_info:
@@ -211,7 +209,7 @@ class TestScheduleWorkout:
     def test_invalid_date_does_not_crash(self, mocker: Any) -> None:
         """Passing a date object (not a string) should work without crashing."""
         mock_garth = MagicMock()
-        mock_garth.connectapi.return_value = {
+        mock_garth.schedule_workout.return_value = {
             "workoutScheduleId": 777,
             "calendarDate": "2026-04-01",
         }

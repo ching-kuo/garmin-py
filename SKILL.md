@@ -13,7 +13,7 @@ Extract health, activity, workout, and performance data from Garmin Connect.
 
 - Python 3.10+
 - Install: `pip install .` (from repo root)
-- Authentication: run `garmin-cli login`, or use a saved garth session at `~/.garth`, or set env vars `GARMIN_EMAIL` / `GARMIN_PASSWORD`
+- Authentication: run `garmin-cli login`, or use a saved session at `~/.garminconnect`, or set env vars `GARMIN_EMAIL` / `GARMIN_PASSWORD`
 
 ## Agent Usage
 
@@ -112,9 +112,14 @@ garmin-cli --json health status --date 2026-03-11
 garmin-cli --json activity list --limit 10
 garmin-cli --json activity list --limit 10 --type running
 garmin-cli --json activity list --limit 10 --search "morning run"
+garmin-cli --json activity list --from 2026-03-01 --to 2026-03-31
+garmin-cli --json activity list --days 7
 
 # Get a single activity by ID -- same fields as list
 garmin-cli --json activity get 12345678901
+
+# Get with extended metrics (max_hr, calories, elevation, speed, cadence, power, NP, TSS, IF)
+garmin-cli --json activity get 12345678901 --detail
 
 # Weather for an activity -- fields: temperature, weatherIconCode, windSpeed, windDirectionDegrees, humidity, precipProbability
 garmin-cli --json activity weather 12345678901
@@ -340,7 +345,7 @@ garmin-cli --json performance zones
 ### Login and check authentication
 
 ```bash
-# Interactive login (saves session to ~/.garth)
+# Interactive login (saves session to ~/.garminconnect)
 garmin-cli login
 
 # Non-interactive login (for scripting)
@@ -350,7 +355,7 @@ garmin-cli login --email user@example.com --password secret
 garmin-cli --json login status
 ```
 
-`login status` returns `{"ok": true, ..., "data": [{"authenticated": true, "garth_home": "..."}]}` when a session is present and `"authenticated": false` when not. Exit code is always `0` (it is an informational command).
+`login status` returns `{"ok": true, ..., "data": [{"authenticated": true, "garmin_home": "..."}]}` when a session is present and `"authenticated": false` when not. Exit code is always `0` (it is an informational command).
 
 After login, verify the session is usable:
 
@@ -417,10 +422,10 @@ pip install "garmin-cli[mcp]"
 claude mcp add --transport stdio garmin -- garmin-cli mcp-server
 ```
 
-Or with a custom garth home:
+Or with a custom session directory:
 
 ```bash
-claude mcp add --transport stdio garmin -- garmin-cli --garth-home /path/to/.garth mcp-server
+claude mcp add --transport stdio garmin -- garmin-cli --garmin-home /path/to/.garminconnect mcp-server
 ```
 
 ### HTTP transports (SSE / streamable-http)
@@ -463,7 +468,7 @@ Read-only CLI commands are exposed as MCP tools (write operations like workout c
 | `performance_vo2max` | `date?` | `{count, rows}` |
 | `performance_zones` | *(none)* | `{count, rows}` |
 | `device_list` | *(none)* | `{count, rows}` — registered devices with type and last sync |
-| `login_status` | *(none)* | `{authenticated, garth_home}` |
+| `login_status` | *(none)* | `{authenticated, garmin_home}` |
 
 Dates use `YYYY-MM-DD` format. Max date range: 90 days. Errors surface as MCP ToolError with the original error message.
 

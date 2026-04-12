@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import json
-import os
 import stat
 from pathlib import Path
 from typing import Any
+from unittest.mock import ANY
 from unittest.mock import MagicMock
 
-import pytest
 from click.testing import CliRunner
 
 from garmin_cli.cli import cli
@@ -38,7 +37,7 @@ def _run_login(
         extra["input"] = input
     if tmp_path is not None:
         garth_dir = str(tmp_path / "garth")
-        full_args = ["--garth-home", garth_dir] + args
+        full_args = ["--garmin-home", garth_dir] + args
     else:
         full_args = args
     result = runner.invoke(cli, full_args, catch_exceptions=False, **extra)
@@ -70,7 +69,12 @@ class TestLoginCommand:
             input="user@example.com\nsecretpassword\n",
             tmp_path=tmp_path,
         )
-        mock_garth.login.assert_called_once_with("user@example.com", "secretpassword")
+        mock_garth.login.assert_called_once_with(
+            "user@example.com",
+            "secretpassword",
+            garth_home=str(tmp_path / "garth"),
+            prompt_mfa=ANY,
+        )
 
     def test_login_calls_garth_save_after_login(
         self, mocker: Any, tmp_path: Path
@@ -93,7 +97,7 @@ class TestLoginCommand:
         runner = CliRunner(mix_stderr=False)
         runner.invoke(
             cli,
-            ["--garth-home", str(garth_dir), "login"],
+            ["--garmin-home", str(garth_dir), "login"],
             input="user@example.com\nsecretpassword\n",
             catch_exceptions=False,
         )
@@ -140,7 +144,7 @@ class TestLoginCommand:
         result = runner.invoke(
             cli,
             [
-                "--garth-home", garth_dir,
+                "--garmin-home", garth_dir,
                 "login",
                 "--email", "cli@example.com",
                 "--password", "clipass",
@@ -148,7 +152,12 @@ class TestLoginCommand:
             catch_exceptions=False,
         )
         assert result.exit_code == 0
-        mock_garth.login.assert_called_once_with("cli@example.com", "clipass")
+        mock_garth.login.assert_called_once_with(
+            "cli@example.com",
+            "clipass",
+            garth_home=garth_dir,
+            prompt_mfa=ANY,
+        )
 
     def test_login_json_mode_without_credentials_returns_json_error(
         self, mocker: Any, tmp_path: Path
@@ -199,7 +208,7 @@ class TestLoginCommand:
             cli,
             [
                 "--json",
-                "--garth-home", str(symlink_dir),
+                "--garmin-home", str(symlink_dir),
                 "login",
                 "--email", "cli@example.com",
                 "--password", "clipass",
@@ -241,7 +250,7 @@ class TestLoginCommandFailure:
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
             cli,
-            ["--garth-home", garth_dir, "login"],
+            ["--garmin-home", garth_dir, "login"],
             input="user@example.com\nwrongpassword\n",
             catch_exceptions=False,
         )
@@ -260,7 +269,7 @@ class TestLoginCommandFailure:
         result = runner.invoke(
             cli,
             [
-                "--json", "--garth-home", garth_dir, "login",
+                "--json", "--garmin-home", garth_dir, "login",
                 "--email", "user@example.com", "--password", "wrongpassword",
             ],
             catch_exceptions=False,
@@ -280,7 +289,7 @@ class TestLoginCommandFailure:
         result = runner.invoke(
             cli,
             [
-                "--json", "--garth-home", garth_dir, "login",
+                "--json", "--garmin-home", garth_dir, "login",
                 "--email", "user@example.com", "--password", "wrongpassword",
             ],
             catch_exceptions=False,
@@ -305,7 +314,7 @@ class TestLoginStatusLoggedIn:
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
             cli,
-            ["--garth-home", str(garth_dir), "login", "status"],
+            ["--garmin-home", str(garth_dir), "login", "status"],
             catch_exceptions=False,
         )
         assert result.exit_code == 0
@@ -318,7 +327,7 @@ class TestLoginStatusLoggedIn:
         runner = CliRunner(mix_stderr=False)
         runner.invoke(
             cli,
-            ["--garth-home", str(garth_dir), "login", "status"],
+            ["--garmin-home", str(garth_dir), "login", "status"],
             catch_exceptions=False,
         )
         mock_garth.resume.assert_called_once()
@@ -333,7 +342,7 @@ class TestLoginStatusLoggedIn:
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
             cli,
-            ["--garth-home", str(garth_dir), "login", "status"],
+            ["--garmin-home", str(garth_dir), "login", "status"],
             catch_exceptions=False,
         )
         output = result.output.lower()
@@ -349,7 +358,7 @@ class TestLoginStatusLoggedIn:
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
             cli,
-            ["--json", "--garth-home", str(garth_dir), "login", "status"],
+            ["--json", "--garmin-home", str(garth_dir), "login", "status"],
             catch_exceptions=False,
         )
         assert result.exit_code == 0
@@ -366,7 +375,7 @@ class TestLoginStatusLoggedIn:
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
             cli,
-            ["--json", "--garth-home", str(garth_dir), "login", "status"],
+            ["--json", "--garmin-home", str(garth_dir), "login", "status"],
             catch_exceptions=False,
         )
         parsed = json.loads(result.output)
@@ -387,7 +396,7 @@ class TestLoginStatusLoggedIn:
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
             cli,
-            ["--json", "--garth-home", str(garth_dir), "login", "status"],
+            ["--json", "--garmin-home", str(garth_dir), "login", "status"],
             catch_exceptions=False,
         )
 
@@ -413,7 +422,7 @@ class TestLoginStatusNotLoggedIn:
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
             cli,
-            ["--garth-home", str(garth_dir), "login", "status"],
+            ["--garmin-home", str(garth_dir), "login", "status"],
             catch_exceptions=False,
         )
         assert result.exit_code == 0
@@ -428,7 +437,7 @@ class TestLoginStatusNotLoggedIn:
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
             cli,
-            ["--garth-home", str(garth_dir), "login", "status"],
+            ["--garmin-home", str(garth_dir), "login", "status"],
             catch_exceptions=False,
         )
         output = result.output.lower()
@@ -448,7 +457,7 @@ class TestLoginStatusNotLoggedIn:
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
             cli,
-            ["--json", "--garth-home", str(garth_dir), "login", "status"],
+            ["--json", "--garmin-home", str(garth_dir), "login", "status"],
             catch_exceptions=False,
         )
         assert result.exit_code == 0
@@ -458,7 +467,7 @@ class TestLoginStatusNotLoggedIn:
         assert len(data) > 0
         assert data[0]["authenticated"] is False
 
-    def test_status_json_mode_shows_garth_home(
+    def test_status_json_mode_shows_garmin_home(
         self, mocker: Any, tmp_path: Path
     ) -> None:
         mock_garth = MagicMock()
@@ -468,10 +477,10 @@ class TestLoginStatusNotLoggedIn:
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
             cli,
-            ["--json", "--garth-home", str(garth_dir), "login", "status"],
+            ["--json", "--garmin-home", str(garth_dir), "login", "status"],
             catch_exceptions=False,
         )
         parsed = json.loads(result.output)
         data = parsed.get("data", [])
         assert len(data) > 0
-        assert "garth_home" in data[0]
+        assert "garmin_home" in data[0]

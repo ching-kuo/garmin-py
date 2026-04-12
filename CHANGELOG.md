@@ -2,11 +2,25 @@
 
 ## [Unreleased]
 
+### Added
+- MFA prompt support during interactive `garmin-cli login`
+- Token store migration: existing `~/.garth/garmin_tokens.json` is copied into `~/.garminconnect` on first use
+- Token file symlink rejection to prevent token material redirection
+
+### Fixed
+- `ensure_authenticated` now correctly surfaces non-401/403 probe failures as `AUTH_FAILED` instead of silently falling through to a fresh login attempt
+- Symlink check in `ensure_secure_directory` now runs before legacy token migration to prevent writing into symlink targets
+- Redundant `_secure_directory` calls removed from login and auth paths (already handled by `backend.save`)
+
 ### Changed
 - Deduplicated VO2max latest-day filter into shared `select_latest_dated_rows` in serializers
 - Moved test-only `CliRunner` compat shim from production `cli.py` to `tests/conftest.py`
 - Replaced duplicate `_WEATHER_FIELDS` in MCP server with shared `COLUMNS_ACTIVITY_WEATHER`
 - Consolidated `*_fixes*` test files into canonical test suites
+- Replaced the deprecated `garth` runtime dependency with `python-garminconnect==0.3.2` behind a repo-owned compatibility boundary (`src/garmin_cli/backend.py`)
+- Renamed the primary session-home surface to `GARMIN_HOME` / `--garmin-home` with `GARTH_HOME` / `--garth-home` kept as deprecated aliases
+- Switched the default session home to `~/.garminconnect`
+- Added a governed raw-fallback registry for workout update paths and migrated workout read/create/delete/schedule helpers onto typed upstream methods where available
 
 ## [1.3.0] - 2026-04-09
 

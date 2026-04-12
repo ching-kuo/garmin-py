@@ -2,27 +2,12 @@
 from __future__ import annotations
 
 import json
-from datetime import date
 from typing import Any
 
 import pytest
 from click.testing import CliRunner
 
 from garmin_cli.cli import cli
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _run(args: list[str], mocker: Any, *, auth_ok: bool = True) -> Any:
-    """Invoke the CLI with mocked auth and return the result."""
-    mock_auth = mocker.patch("garmin_cli.commands.health.ensure_authenticated")
-    if not auth_ok:
-        from garmin_cli.exceptions import GarminCliError
-        mock_auth.side_effect = GarminCliError(error="No creds", error_code="AUTH_MISSING")
-    runner = CliRunner(mix_stderr=False)
-    return runner.invoke(cli, args, catch_exceptions=False), mock_auth
 
 
 # ---------------------------------------------------------------------------

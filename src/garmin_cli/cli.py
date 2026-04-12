@@ -16,7 +16,7 @@ from garmin_cli.config import CliConfig, load_config
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.output import echo_json, make_error_envelope
 
-_GLOBAL_OPTIONS_WITH_VALUES = ("--format", "--garth-home")
+_GLOBAL_OPTIONS_WITH_VALUES = ("--format", "--garmin-home", "--garth-home")
 _MCP_SERVER_TRANSPORTS = ("stdio", "sse", "streamable-http")
 
 
@@ -204,9 +204,16 @@ class SafeGroup(click.Group):
     show_default=True,
     help="Output format.",
 )
-@click.option("--garth-home", type=str, default=None, help="Override garth home directory.")
+@click.option(
+    "--garmin-home",
+    "--garth-home",
+    "garmin_home",
+    type=str,
+    default=None,
+    help="Override Garmin session directory. --garth-home is deprecated.",
+)
 @click.pass_context
-def cli(ctx: click.Context, json_output: bool, output_format: str, garth_home: str | None) -> None:
+def cli(ctx: click.Context, json_output: bool, output_format: str, garmin_home: str | None) -> None:
     """garmin-cli."""
     config = load_config()
     resolved_format = "json" if json_output else output_format
@@ -214,7 +221,7 @@ def cli(ctx: click.Context, json_output: bool, output_format: str, garth_home: s
     ctx.obj["config"] = CliConfig(
         email=config.email,
         password=config.password,
-        garth_home=garth_home or config.garth_home,
+        garth_home=garmin_home or config.garth_home,
         output_format=resolved_format,
     )
 

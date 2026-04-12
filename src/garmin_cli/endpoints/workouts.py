@@ -4,24 +4,70 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
-import garth
-
-from garmin_cli.endpoints._base import _make_request, _make_write_request, _validate_numeric_id
-from garmin_cli.exceptions import GarminCliError
+from garmin_cli import backend as garth
+from garmin_cli.endpoints._base import (
+    _make_request,
+    _make_write_request,
+    _retry_loop,
+    _validate_numeric_id,
+)
 
 
 def _request(url: str, *, params: dict[str, Any] | None = None) -> Any:
     return _make_request(garth.connectapi, url, params=params)
 
 
-def _write_request(url: str, *, method: str, json: dict[str, Any] | None = None) -> Any:
-    return _make_write_request(garth.connectapi, method, url, json=json)
+def _write_request(
+    url: str,
+    *,
+    method: str,
+    json: dict[str, Any] | None = None,
+    capability: str | None = None,
+) -> Any:
+    if capability is None:
+        return _make_write_request(garth.connectapi, method, url, json=json)
+    return _make_write_request(
+        lambda request_url, **request_kwargs: garth.connectapi(
+            request_url,
+            capability=capability,
+            **request_kwargs,
+        ),
+        method,
+        url,
+        json=json,
+    )
+
+
+def _typed_read(
+    call: Any,
+    *,
+    not_found_message: str,
+) -> Any:
+    return _retry_loop(
+        call,
+        immediate_errors={
+            404: (not_found_message, "NOT_FOUND"),
+        },
+    )
+
+
+def _typed_write(call: Any) -> Any:
+    return _retry_loop(
+        call,
+        immediate_errors={
+            400: ("Invalid input.", "INVALID_INPUT"),
+            401: ("Authentication failed.", "AUTH_FAILED"),
+            403: ("Authentication failed.", "AUTH_FAILED"),
+            404: ("Not found.", "NOT_FOUND"),
+            409: ("Invalid input.", "INVALID_INPUT"),
+        },
+    )
 
 
 def list_workouts(limit: int) -> list:
-    result = _request(
-        "/workout-service/workouts",
-        params={"start": 0, "limit": limit},
+    result = _typed_read(
+        lambda: garth.list_workouts(limit),
+        not_found_message="Not found: /workout-service/workouts",
     )
     if isinstance(result, dict):
         return [result]
@@ -30,35 +76,39 @@ def list_workouts(limit: int) -> list:
 
 def get_workout(workout_id: Any) -> dict:
     validated = _validate_numeric_id(workout_id, "workout_id")
-    result = _request(f"/workout-service/workout/{validated}")
+    result = _typed_read(
+        lambda: garth.get_workout(validated),
+        not_found_message=f"Not found: /workout-service/workout/{validated}",
+    )
     return result if result is not None else {}
 
 
 def create_workout(payload: dict) -> dict:
     """POST /workout-service/workout with Garmin-format payload."""
-    return _write_request("/workout-service/workout", method="POST", json=payload)
+    return _typed_write(lambda: garth.create_workout(payload))
 
 
 def update_workout(workout_id: Any, merged_payload: dict) -> None:
     """PUT /workout-service/workout/{id} with pre-merged Garmin-format payload."""
     validated = _validate_numeric_id(workout_id, "workout_id")
-    _write_request(f"/workout-service/workout/{validated}", method="PUT", json=merged_payload)
+    _write_request(
+        f"/workout-service/workout/{validated}",
+        method="PUT",
+        json=merged_payload,
+        capability="workout_update",
+    )
 
 
 def delete_workout(workout_id: Any) -> None:
     """DELETE /workout-service/workout/{id}."""
     validated = _validate_numeric_id(workout_id, "workout_id")
-    _write_request(f"/workout-service/workout/{validated}", method="DELETE")
+    _typed_write(lambda: garth.delete_workout(validated))
 
 
 def schedule_workout(workout_id: Any, schedule_date: date) -> dict:
     """POST /workout-service/schedule/{id} with date."""
     validated = _validate_numeric_id(workout_id, "workout_id")
-    return _write_request(
-        f"/workout-service/schedule/{validated}",
-        method="POST",
-        json={"date": schedule_date.isoformat()},
-    )
+    return _typed_write(lambda: garth.schedule_workout(validated, schedule_date))
 
 
 def get_calendar_range(start: date, end: date) -> list:

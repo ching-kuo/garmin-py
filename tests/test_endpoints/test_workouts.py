@@ -24,7 +24,7 @@ class TestListWorkouts:
 
     def test_returns_list(self, mocker: Any, sample_workouts_list_raw: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.connectapi.return_value = sample_workouts_list_raw
+        mock_garth.list_workouts.return_value = sample_workouts_list_raw
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
 
         result = list_workouts(limit=20)
@@ -32,7 +32,7 @@ class TestListWorkouts:
 
     def test_empty_result(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.connectapi.return_value = []
+        mock_garth.list_workouts.return_value = []
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
 
         result = list_workouts(limit=20)
@@ -40,7 +40,7 @@ class TestListWorkouts:
 
     def test_http_500_raises_server_error_code(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.connectapi.side_effect = [_http_error(500)] * 4
+        mock_garth.list_workouts.side_effect = [_http_error(500)] * 4
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
         mocker.patch("time.sleep")
 
@@ -57,7 +57,7 @@ class TestGetWorkout:
 
     def test_returns_workout_data(self, mocker: Any, sample_workout_raw: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.connectapi.return_value = sample_workout_raw
+        mock_garth.get_workout.return_value = sample_workout_raw
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
 
         result = get_workout(987654)
@@ -65,7 +65,7 @@ class TestGetWorkout:
 
     def test_http_404_raises_not_found_error_code(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.connectapi.side_effect = _http_error(404)
+        mock_garth.get_workout.side_effect = _http_error(404)
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
 
         with pytest.raises(GarminCliError) as exc_info:
@@ -74,14 +74,11 @@ class TestGetWorkout:
 
     def test_string_workout_id(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.connectapi.return_value = {}
+        mock_garth.get_workout.return_value = {}
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
 
         get_workout("987654")
-        mock_garth.connectapi.assert_called_once_with(
-            "/workout-service/workout/987654",
-            params=None,
-        )
+        mock_garth.get_workout.assert_called_once_with(987654)
 
 
 # ---------------------------------------------------------------------------

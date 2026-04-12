@@ -439,15 +439,6 @@ def sample_lactate_threshold_live_raw() -> list[dict]:
 
 
 @pytest.fixture()
-def sample_ftp_raw() -> dict:
-    return {
-        "functionalThresholdPower": 280,
-        "ftpAutoDetected": True,
-        "sport": "cycling",
-    }
-
-
-@pytest.fixture()
 def sample_vo2max_raw() -> dict:
     return {
         "calendarDate": "2026-03-11",
@@ -512,17 +503,3 @@ def sample_all_thresholds_raw() -> dict:
         ]
     }
 
-
-# ---------------------------------------------------------------------------
-# Config fixture
-# ---------------------------------------------------------------------------
-
-@pytest.fixture()
-def base_config() -> dict:
-    """A dict representing a minimal valid CliConfig (used before production code exists)."""
-    return {
-        "email": "test@example.com",
-        "password": "secret",
-        "garth_home": "/tmp/test_garth",
-        "output_format": "table",
-    }

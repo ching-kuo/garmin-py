@@ -10,10 +10,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-import garth
-
-from .api import _GET_WORKOUT
-
+from garmin_cli import backend as garth
 logger = logging.getLogger(__name__)
 
 # ── Endpoint templates ────────────────────────────────────────────────────
@@ -21,8 +18,6 @@ _LIST_WORKOUTS = "/workout-service/workouts"
 _GET_ACTIVITY = "/activity-service/activity/{activity_id}"
 _GET_ACTIVITY_WEATHER = "/activity-service/activity/{activity_id}/weather"
 _LIST_ACTIVITIES = "/activitylist-service/activities/search/activities"
-_CREATE_WORKOUT = "/workout-service/workout"
-_SCHEDULE_WORKOUT = "/workout-service/schedule/{workout_id}"
 
 
 def list_workouts() -> dict:
@@ -60,8 +55,7 @@ def list_activities(
 def schedule_workout(workout_id: str, date: str) -> dict:
     """Schedule a workout on a given date (YYYY-MM-DD)."""
     datetime.strptime(date, "%Y-%m-%d")  # validate
-    endpoint = _SCHEDULE_WORKOUT.format(workout_id=workout_id)
-    result = garth.connectapi(endpoint, method="POST", json={"date": date})
+    result = garth.schedule_workout(workout_id, date)
     sid = result.get("workoutScheduleId")
     if sid is None:
         raise RuntimeError(f"Scheduling failed: {result}")
@@ -70,9 +64,8 @@ def schedule_workout(workout_id: str, date: str) -> dict:
 
 def delete_workout(workout_id: str) -> bool:
     """Delete a workout from Garmin Connect."""
-    endpoint = _GET_WORKOUT.format(workout_id=workout_id)
     try:
-        garth.connectapi(endpoint, method="DELETE")
+        garth.delete_workout(workout_id)
         logger.info("Deleted workout %s.", workout_id)
         return True
     except Exception as exc:
@@ -82,7 +75,7 @@ def delete_workout(workout_id: str) -> bool:
 
 def upload_workout(workout_data: dict) -> dict:
     """Upload a structured workout to Garmin Connect."""
-    result = garth.connectapi(_CREATE_WORKOUT, method="POST", json=workout_data)
+    result = garth.create_workout(workout_data)
     workout_id = result.get("workoutId")
     if workout_id is None:
         raise RuntimeError("No workout ID returned from Garmin.")

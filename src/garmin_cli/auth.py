@@ -1,16 +1,18 @@
-"""Authentication via garth."""
+"""Authentication via the maintained Garmin backend."""
 from __future__ import annotations
 
+import logging
 import os
-import stat
 from datetime import date
 from typing import Any
 
-import garth
-
+from garmin_cli import backend as garth
 from garmin_cli.config import CliConfig
 from garmin_cli.endpoints._base import extract_status_code
 from garmin_cli.exceptions import GarminCliError
+from garmin_cli.token_store import ensure_secure_directory
+
+logger = logging.getLogger(__name__)
 
 
 def _secure_directory(path: str) -> None:
@@ -19,26 +21,21 @@ def _secure_directory(path: str) -> None:
     Raises GarminCliError if the path is a symlink or if permission
     repair fails.
     """
-    if os.path.islink(path):
+    try:
+        ensure_secure_directory(path)
+    except OSError as exc:
+        if os.path.islink(path):
+            raise GarminCliError(
+                error=f"garmin_home path '{path}' is a symlink — refusing for security",
+                error_code="AUTH_FAILED",
+            ) from exc
         raise GarminCliError(
-            error=f"garth_home path '{path}' is a symlink — refusing for security",
+            error=(
+                f"garmin_home directory has insecure permissions "
+                f"and cannot be repaired: {exc}"
+            ),
             error_code="AUTH_FAILED",
-        )
-
-    if os.path.exists(path):
-        st = os.stat(path)
-        current_mode = stat.S_IMODE(st.st_mode)
-        if current_mode != 0o700:
-            try:
-                os.chmod(path, 0o700)
-            except OSError as exc:
-                raise GarminCliError(
-                    error=(
-                        f"garth_home directory has insecure permissions "
-                        f"and cannot be repaired: {exc}"
-                    ),
-                    error_code="AUTH_FAILED",
-                ) from exc
+        ) from exc
 
 
 def _probe_session(garth_client: Any | None = None) -> None:
@@ -87,6 +84,8 @@ def ensure_authenticated(config: CliConfig) -> None:
             error=f"Cannot access session directory: {exc}",
             error_code="AUTH_FAILED",
         ) from exc
+    except GarminCliError:
+        raise
     except Exception:
         pass  # session expired or missing — fall through to login
 
@@ -100,10 +99,16 @@ def ensure_authenticated(config: CliConfig) -> None:
         )
 
     try:
-        garth.login(config.email, config.password)
+        garth.login(config.email, config.password, garth_home=garth_home)
         os.makedirs(garth_home, mode=0o700, exist_ok=True)
         garth.save(garth_home)
     except Exception as exc:
+        if extract_status_code(exc) == 429:
+            logger.debug("Garmin login hit rate limiting for %s", garth_home)
+            raise GarminCliError(
+                error="Garmin login is temporarily rate limited. Try again shortly.",
+                error_code="RATE_LIMITED",
+            ) from exc
         raise GarminCliError(
             error="Authentication failed. Check your credentials.",
             error_code="AUTH_FAILED",

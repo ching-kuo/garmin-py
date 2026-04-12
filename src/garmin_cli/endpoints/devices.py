@@ -3,8 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import garth
-
+from garmin_cli import backend as garth
 from garmin_cli.endpoints._base import _make_request
 
 
@@ -17,5 +16,4 @@ def get_devices() -> list[Any]:
     if isinstance(result, dict):
         return [result]
     return result if result is not None else []
-
 

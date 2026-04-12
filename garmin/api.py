@@ -5,8 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-import garth
-
+from garmin_cli import backend as garth
 from .zones import ms_to_pace
 
 logger = logging.getLogger(__name__)
@@ -23,8 +22,7 @@ _POWER_TO_WEIGHT = "/biometric-service/biometric/powerToWeight/latest/{date}/"
 
 def get_workout(workout_id: str) -> dict:
     """Fetch a single workout by ID."""
-    endpoint = _GET_WORKOUT.format(workout_id=workout_id)
-    return {"workout": garth.connectapi(endpoint)}
+    return {"workout": garth.get_workout(workout_id)}
 
 
 def get_calendar(
@@ -179,5 +177,10 @@ def update_workout_description(
     updated = {**workout_data, "description": combined}
 
     endpoint = _GET_WORKOUT.format(workout_id=workout_id)
-    garth.connectapi(endpoint, method="PUT", json=updated)
+    garth.connectapi(
+        endpoint,
+        method="PUT",
+        json=updated,
+        capability="workout_description_update",
+    )
     logger.info("Updated workout %s description on Garmin.", workout_id)

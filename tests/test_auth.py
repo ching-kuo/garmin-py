@@ -124,7 +124,11 @@ class TestEnsureAuthenticatedLoginSuccess:
             garth_home=str(garth_dir), email="user@test.com", password="secret"
         )
         ensure_authenticated(config)
-        mock_garth.login.assert_called_once_with("user@test.com", "secret")
+        mock_garth.login.assert_called_once_with(
+            "user@test.com",
+            "secret",
+            garth_home=str(garth_dir),
+        )
 
     def test_calls_save_after_login(self, mocker: Any, tmp_path: Path) -> None:
         garth_dir = tmp_path / "garth"
@@ -153,7 +157,11 @@ class TestEnsureAuthenticatedLoginSuccess:
             garth_home=str(garth_dir), email="user@test.com", password="pass"
         )
         ensure_authenticated(config)
-        mock_garth.login.assert_called_once_with("user@test.com", "pass")
+        mock_garth.login.assert_called_once_with(
+            "user@test.com",
+            "pass",
+            garth_home=str(garth_dir),
+        )
 
     def test_stale_resumed_session_falls_back_to_login(
         self, mocker: Any, tmp_path: Path
@@ -169,7 +177,30 @@ class TestEnsureAuthenticatedLoginSuccess:
             garth_home=str(garth_dir), email="user@test.com", password="pass"
         )
         ensure_authenticated(config)
-        mock_garth.login.assert_called_once_with("user@test.com", "pass")
+        mock_garth.login.assert_called_once_with(
+            "user@test.com",
+            "pass",
+            garth_home=str(garth_dir),
+        )
+
+    def test_probe_server_error_raises_auth_failed(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        """Non-401/403 probe failure (e.g. 500) must surface as AUTH_FAILED, not fall through."""
+        garth_dir = tmp_path / "garth"
+        garth_dir.mkdir(mode=0o700)
+
+        mock_garth = MagicMock()
+        mock_garth.connectapi.side_effect = _http_error(500)
+        mocker.patch("garmin_cli.auth.garth", mock_garth)
+
+        config = _make_config(
+            garth_home=str(garth_dir), email="user@test.com", password="pass"
+        )
+        with pytest.raises(GarminCliError) as exc_info:
+            ensure_authenticated(config)
+        assert exc_info.value.error_code == "AUTH_FAILED"
+        mock_garth.login.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -263,5 +294,4 @@ class TestEnsureAuthenticatedSecurity:
 
         actual_mode = stat.S_IMODE(garth_dir.stat().st_mode)
         assert actual_mode == 0o700
-
 

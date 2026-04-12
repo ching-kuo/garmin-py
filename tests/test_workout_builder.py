@@ -2,9 +2,6 @@
 from __future__ import annotations
 
 import copy
-from typing import Any
-
-import pytest
 
 from garmin_cli.workout_builder import build_garmin_payload, merge_workout_payload
 
@@ -25,20 +22,6 @@ def _running_workout(steps: list | None = None) -> dict:
             }
         ],
     }
-
-
-def _interval_step(
-    duration_type: str = "time",
-    duration_value: int = 600,
-    target: dict | None = None,
-) -> dict:
-    step: dict = {
-        "type": "interval",
-        "duration": {"type": duration_type, "value": duration_value},
-    }
-    if target is not None:
-        step["target"] = target
-    return step
 
 
 def _existing_workout(workout_id: int = 12345, owner_id: int = 9999) -> dict:

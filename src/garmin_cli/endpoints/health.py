@@ -4,8 +4,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-import garth
-
+from garmin_cli import backend as garth
 from garmin_cli.endpoints._base import _collect_daily_range, _make_request
 
 

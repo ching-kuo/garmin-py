@@ -18,7 +18,7 @@ garmin-cli --version
 
 ## Authentication
 
-`garmin-cli` authenticates via the [`garth`](https://github.com/matin/garth) library.
+`garmin-cli` authenticates via the maintained [`python-garminconnect`](https://github.com/cyberjunky/python-garminconnect) backend. The primary session-home surface is now `GARMIN_HOME` / `--garmin-home`; `GARTH_HOME` / `--garth-home` remains as a deprecated compatibility alias.
 
 ### Interactive login (recommended)
 
@@ -26,7 +26,7 @@ garmin-cli --version
 garmin-cli login
 # Email: your@email.com
 # Password: (hidden)
-# Login successful. Session saved at: ~/.garth
+# Login successful. Token store saved at: ~/.garminconnect/garmin_tokens.json
 ```
 
 Use `--email` / `--password` to skip the prompts (useful for scripting):
@@ -39,10 +39,10 @@ Check login status at any time:
 
 ```bash
 garmin-cli login status
-# Logged in. Session saved at: ~/.garth
+# Logged in. Token store at: ~/.garminconnect/garmin_tokens.json
 
 garmin-cli --json login status
-# {"ok": true, "command": "login status", "count": 1, "data": [{"authenticated": true, "garth_home": "..."}]}
+# {"ok": true, "command": "login status", "count": 1, "data": [{"authenticated": true, "garmin_home": "..."}]}
 ```
 
 ### Environment variables (alternative)
@@ -56,11 +56,13 @@ garmin-cli health sleep --days 1
 ### Custom session directory
 
 ```bash
-garmin-cli --garth-home /path/to/session login
-garmin-cli --garth-home /path/to/session health sleep --days 1
+garmin-cli --garmin-home /path/to/session login
+garmin-cli --garmin-home /path/to/session health sleep --days 1
 ```
 
-The session directory (`~/.garth`) contains OAuth tokens. It is created with `0o700` permissions. Symlinks are rejected. Do not share this directory.
+The default session directory is `~/.garminconnect`. It is created with `0o700` permissions. Symlinks are rejected. Do not share this directory.
+
+New sessions are stored as `garmin_tokens.json` inside `GARMIN_HOME`. If you still have an existing `~/.garth/garmin_tokens.json`, the CLI will copy it into the new default home on first use. `GARTH_HOME` / `--garth-home` still work as deprecated aliases when you need to keep an older path explicitly.
 
 ## Output Formats
 
@@ -281,7 +283,7 @@ With a custom session directory:
   "mcpServers": {
     "garmin": {
       "command": "/Users/YOU/.local/bin/garmin-cli",
-      "args": ["--garth-home", "/path/to/.garth", "mcp-server"]
+      "args": ["--garmin-home", "/path/to/.garminconnect", "mcp-server"]
     }
   }
 }
@@ -322,7 +324,7 @@ garmin-cli mcp-server --transport sse --host 127.0.0.1 --port 8000
 
 Optional HTTP flags: `--sse-path`, `--message-path` (SSE only), `--streamable-http-path`, `--stateless-http`, `--json-response` (streamable-http only). Use `--host 0.0.0.0` only when intentionally exposing beyond localhost.
 
-For remote clients, prefer a dedicated session directory with `--garth-home` rather than exporting credentials into another process.
+For remote clients, prefer a dedicated session directory with `--garmin-home` rather than exporting credentials into another process.
 
 See [SKILL.md](SKILL.md#mcp-server-alternative) for the full tool list and parameter reference.
 
@@ -330,8 +332,8 @@ See [SKILL.md](SKILL.md#mcp-server-alternative) for the full tool list and param
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/            # unit tests (699+ tests)
-pytest tests/ --e2e      # unit + e2e tests (requires garth session)
+pytest tests/            # unit tests (730+ tests)
+pytest tests/ --e2e      # unit + e2e tests (requires GARMIN_HOME/garmin_tokens.json)
 ```
 
 To run MCP server tests, also install the mcp extra:
@@ -340,4 +342,4 @@ To run MCP server tests, also install the mcp extra:
 pip install -e ".[dev,mcp]"
 ```
 
-E2E tests make real Garmin Connect API calls. They require a valid session in `~/.garth` (or `GARTH_HOME`). Set `E2E_RATE_LIMIT_SECONDS` (default: 5) to adjust the inter-request delay.
+E2E tests make real Garmin Connect API calls. They require a valid `garmin_tokens.json` session in `~/.garminconnect` (or `GARMIN_HOME`; `GARTH_HOME` still works as an alias). Set `E2E_RATE_LIMIT_SECONDS` (default: 5) to adjust the inter-request delay.

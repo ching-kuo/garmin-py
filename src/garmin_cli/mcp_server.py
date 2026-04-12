@@ -5,10 +5,10 @@ import os
 from datetime import date
 from typing import Any
 
-import garth
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
+from garmin_cli import backend as garth
 from garmin_cli.auth import _probe_session, _secure_directory, ensure_authenticated
 from garmin_cli.config import CliConfig
 from garmin_cli.endpoints._base import extract_status_code
@@ -135,7 +135,7 @@ def create_mcp_server(config: CliConfig) -> MCPServer:
     """Create an MCPServer with Garmin Connect tools.
 
     Args:
-        config: CLI configuration (garth_home, credentials, etc.)
+        config: CLI configuration (session home, credentials, etc.)
             captured by closure so every tool call has access.
     """
     mcp = MCPServer("garmin")
@@ -459,12 +459,12 @@ def create_mcp_server(config: CliConfig) -> MCPServer:
 
     @mcp.tool()
     def login_status() -> dict[str, Any]:
-        """Check authentication status. Returns authenticated (bool) and garth_home path. Never raises for missing sessions."""
-        garth_home = os.path.expanduser(config.garth_home)
+        """Check authentication status. Returns authenticated (bool) and garmin_home path. Never raises for missing sessions."""
+        garmin_home = os.path.expanduser(config.garth_home)
         authenticated = False
         try:
-            _secure_directory(garth_home)
-            garth.resume(garth_home)
+            _secure_directory(garmin_home)
+            garth.resume(garmin_home)
             try:
                 _probe_session(garth)
                 authenticated = True
@@ -482,6 +482,6 @@ def create_mcp_server(config: CliConfig) -> MCPServer:
             raise _handle_error(exc) from exc
         except Exception:
             pass  # garth session expired/corrupt -- report as not authenticated
-        return {"authenticated": authenticated, "garth_home": garth_home}
+        return {"authenticated": authenticated, "garmin_home": garmin_home}
 
     return mcp

@@ -181,7 +181,7 @@ class TestHealthEndpoints:
         )
 
     def test_get_steps_range(self, mocker: Any) -> None:
-        mock_request = mocker.patch(
+        mocker.patch(
             "garmin_cli.endpoints.health._request",
             return_value=[{"calendarDate": "2026-01-01", "totalSteps": 12345}],
         )
@@ -968,7 +968,7 @@ class TestLoginStatus:
         server = create_mcp_server(_config())
         result = _call(server, "login_status", {})
         assert result["authenticated"] is True
-        assert "garth_home" in result
+        assert "garmin_home" in result
 
     def test_login_status_not_authenticated(self, mocker: Any) -> None:
 

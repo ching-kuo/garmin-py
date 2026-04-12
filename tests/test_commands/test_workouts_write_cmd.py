@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import pytest
 from click.testing import CliRunner
 
 from garmin_cli.cli import cli
@@ -633,8 +632,6 @@ class TestWorkoutScheduleCommand:
         mock_schedule.assert_called_once()
 
     def test_schedule_passes_correct_date(self, mocker: Any) -> None:
-        from datetime import date
-
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
         mock_schedule = mocker.patch(
             "garmin_cli.commands.workouts.schedule_workout",

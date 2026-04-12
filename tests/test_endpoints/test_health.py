@@ -8,20 +8,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from garmin_cli.endpoints.health import (
-    get_body_battery,
     get_body_battery_range,
     get_hrv,
     get_resting_hr_range,
-    get_resting_hr,
     get_sleep,
     get_spo2_range,
-    get_spo2,
     get_stress_range,
-    get_stress,
     get_training_readiness_range,
-    get_training_readiness,
-    get_training_status,
-    get_weight,
 )
 from garmin_cli.exceptions import GarminCliError
 from tests.helpers import make_http_error as _http_error

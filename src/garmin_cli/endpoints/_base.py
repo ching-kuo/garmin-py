@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import re
 from datetime import date, timedelta
 from typing import Any, Callable
 
@@ -26,6 +27,9 @@ def extract_status_code(exc: Exception) -> int | None:
     # GarthHTTPError stores the HTTPError at exc.error.response.status_code
     if hasattr(exc, "error") and hasattr(exc.error, "response") and hasattr(exc.error.response, "status_code"):
         return exc.error.response.status_code
+    match = re.search(r"\b([1-5]\d{2})\b", str(exc))
+    if match is not None:
+        return int(match.group(1))
     return None
 
 

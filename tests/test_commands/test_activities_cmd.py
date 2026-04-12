@@ -5,7 +5,6 @@ import json
 from datetime import date
 from typing import Any
 
-import pytest
 from click.testing import CliRunner
 
 from garmin_cli.cli import cli

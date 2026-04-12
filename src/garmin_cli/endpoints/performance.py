@@ -4,8 +4,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
-import garth
-
+from garmin_cli import backend as garth
 from garmin_cli.endpoints._base import _make_request
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.serializers import (
