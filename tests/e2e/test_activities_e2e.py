@@ -119,3 +119,113 @@ def test_get_activity_weather(run_cli, activity_id):
     result, parsed = run_cli(["activity", "weather", str(activity_id)])
     assert_exit_ok(result)
     assert_envelope_ok(parsed)
+
+
+@pytest.mark.e2e
+def test_get_activity_detail_union_schema_and_manifest(run_cli, activity_id):
+    """activity get --detail returns the full union schema with sport-applicable
+    keys populated and inapplicable keys present as null. When unavailable is
+    present, every entry must declare a recognised reason."""
+    if activity_id is None:
+        pytest.skip("No activities found")
+    result, parsed = run_cli(["activity", "get", "--detail", str(activity_id)])
+    assert_exit_ok(result)
+    assert_envelope_ok(parsed)
+    if not parsed["data"]:
+        pytest.skip("No detail row returned")
+
+    row = parsed["data"][0]
+    # Union schema covers cycling, running, and swim metric families. Whether or
+    # not the watch recorded these, the keys must be present so consumers see a
+    # stable shape.
+    union_keys = [
+        "norm_power_w", "intensity_factor", "training_stress_score",
+        "avg_ground_contact_time", "avg_vertical_oscillation",
+        "avg_vertical_ratio", "avg_stride_length",
+        "swolf", "total_strokes", "avg_stroke_rate", "avg_distance_per_stroke",
+        "aerobic_training_effect", "anaerobic_training_effect",
+        "vo2_max_value", "recovery_time_hours",
+    ]
+    assert_row_has_keys(row, union_keys)
+
+    if "unavailable" in parsed:
+        manifest = parsed["unavailable"]
+        assert isinstance(manifest, list)
+        for entry in manifest:
+            assert_row_has_keys(entry, ["key", "reason"])
+            assert entry["reason"] in {
+                "not_applicable_to_sport", "absent_in_response",
+            }
+
+
+@pytest.mark.e2e
+def test_get_activity_with_laps_flag(run_cli, activity_id):
+    """activity get --laps adds a laps[] envelope alongside detail data."""
+    if activity_id is None:
+        pytest.skip("No activities found")
+    result, parsed = run_cli(["activity", "get", "--detail", "--laps", str(activity_id)])
+    assert_exit_ok(result)
+    assert_envelope_ok(parsed)
+    assert "laps" in parsed, "Missing 'laps' key when --laps is set"
+    assert isinstance(parsed["laps"], list)
+    if parsed["laps"]:
+        lap = parsed["laps"][0]
+        assert_row_has_keys(lap, ["lap_index", "duration_min", "distance_km"])
+
+
+@pytest.mark.e2e
+def test_activity_laps_subcommand(run_cli, activity_id):
+    """activity laps returns lap rows; multisport activities stamp leg_index."""
+    if activity_id is None:
+        pytest.skip("No activities found")
+    result, parsed = run_cli(["activity", "laps", str(activity_id)])
+    assert_exit_ok(result)
+    assert_envelope_ok(parsed)
+    if parsed["data"]:
+        row = parsed["data"][0]
+        assert_row_has_keys(row, ["lap_index", "duration_min", "distance_km"])
+
+
+@pytest.mark.e2e
+def test_activity_zones_subcommand(run_cli, activity_id):
+    """activity zones returns time-in-zone breakdown rows."""
+    if activity_id is None:
+        pytest.skip("No activities found")
+    result, parsed = run_cli(["activity", "zones", str(activity_id)])
+    assert_exit_ok(result)
+    assert_envelope_ok(parsed)
+    if parsed["data"]:
+        row = parsed["data"][0]
+        assert_row_has_keys(
+            row,
+            ["zone", "zone_low_bpm", "zone_high_bpm", "minutes_in_zone"],
+        )
+
+
+@pytest.mark.e2e
+def test_multisport_laps_fan_out(run_cli, rate_limiter, cli_runner, garth_session):
+    """For multisport parents, activity laps fans out to each child leg and
+    stamps a 0-based leg_index on every row."""
+    from tests.e2e.conftest import _invoke_cli_json
+
+    result, parsed = _invoke_cli_json(
+        cli_runner, rate_limiter,
+        ["activity", "list", "--limit", "50", "--type", "multi_sport"],
+    )
+    assert_exit_ok(result)
+    assert_envelope_ok(parsed)
+    if not parsed["data"]:
+        pytest.skip("No multisport activities found in account")
+
+    ms_id = parsed["data"][0]["id"]
+    result, parsed = run_cli(["activity", "laps", str(ms_id)])
+    assert_exit_ok(result)
+    assert_envelope_ok(parsed)
+    if not parsed["data"]:
+        pytest.skip("Multisport parent has no lap rows from any leg")
+
+    leg_indices = {row.get("leg_index") for row in parsed["data"]}
+    assert all(isinstance(i, int) for i in leg_indices), (
+        "Multisport laps must stamp integer leg_index on every row"
+    )
+    assert min(leg_indices) == 0, "leg_index is 0-based"

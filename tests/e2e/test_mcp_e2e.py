@@ -134,3 +134,125 @@ def test_device_list_mcp(mcp_server_live, rate_limiter):
     assert_mcp_envelope_ok(parsed)
     if parsed["rows"]:
         assert_row_has_keys(parsed["rows"][0], ["device_id", "display_name", "device_type", "last_sync_time"])
+
+
+@pytest.fixture(scope="module")
+def first_activity_id(mcp_server_live, rate_limiter):
+    parsed = _call_tool_json(
+        mcp_server_live, rate_limiter, "activity_list", {"limit": 1},
+    )
+    rows = parsed.get("rows") or []
+    if not rows:
+        return None
+    return rows[0].get("id")
+
+
+@pytest.mark.e2e
+def test_activity_get_detail_mcp_manifest(mcp_server_live, rate_limiter, first_activity_id):
+    """activity_get(detail=True) returns union schema and (when present)
+    a well-formed unavailable[] manifest."""
+    if first_activity_id is None:
+        pytest.skip("No activities found")
+    parsed = _call_tool_json(
+        mcp_server_live, rate_limiter,
+        "activity_get",
+        {"activity_id": int(first_activity_id), "detail": True},
+    )
+    assert_mcp_envelope_ok(parsed)
+    if not parsed["rows"]:
+        pytest.skip("No detail row returned")
+
+    row = parsed["rows"][0]
+    assert_row_has_keys(
+        row,
+        [
+            "norm_power_w", "intensity_factor", "training_stress_score",
+            "avg_ground_contact_time", "avg_vertical_oscillation",
+            "swolf", "total_strokes",
+            "aerobic_training_effect", "anaerobic_training_effect",
+        ],
+    )
+
+    if "unavailable" in parsed:
+        manifest = parsed["unavailable"]
+        assert isinstance(manifest, list)
+        for entry in manifest:
+            assert_row_has_keys(entry, ["key", "reason"])
+            assert entry["reason"] in {
+                "not_applicable_to_sport", "absent_in_response",
+            }
+
+
+@pytest.mark.e2e
+def test_activity_laps_mcp(mcp_server_live, rate_limiter, first_activity_id):
+    if first_activity_id is None:
+        pytest.skip("No activities found")
+    parsed = _call_tool_json(
+        mcp_server_live, rate_limiter,
+        "activity_laps",
+        {"activity_id": int(first_activity_id)},
+    )
+    assert_mcp_envelope_ok(parsed)
+    if parsed["rows"]:
+        assert_row_has_keys(
+            parsed["rows"][0],
+            ["lap_index", "duration_min", "distance_km"],
+        )
+
+
+@pytest.mark.e2e
+def test_activity_hr_zones_mcp(mcp_server_live, rate_limiter, first_activity_id):
+    if first_activity_id is None:
+        pytest.skip("No activities found")
+    parsed = _call_tool_json(
+        mcp_server_live, rate_limiter,
+        "activity_hr_zones",
+        {"activity_id": int(first_activity_id)},
+    )
+    assert_mcp_envelope_ok(parsed)
+    if parsed["rows"]:
+        assert_row_has_keys(
+            parsed["rows"][0],
+            ["zone", "zone_low_bpm", "zone_high_bpm", "minutes_in_zone"],
+        )
+
+
+@pytest.mark.e2e
+def test_activity_metrics_describe_mcp(mcp_server_live, rate_limiter, first_activity_id):
+    if first_activity_id is None:
+        pytest.skip("No activities found")
+    parsed = _call_tool_json(
+        mcp_server_live, rate_limiter,
+        "activity_metrics_describe",
+        {"activity_id": int(first_activity_id)},
+    )
+    assert_mcp_envelope_ok(parsed)
+    if parsed["rows"]:
+        assert_row_has_keys(parsed["rows"][0], ["key", "unit", "metricsIndex"])
+
+
+@pytest.mark.e2e
+def test_activity_laps_mcp_multisport_fan_out(mcp_server_live, rate_limiter):
+    """activity_laps fans out across multisport child legs and stamps leg_index."""
+    parsed = _call_tool_json(
+        mcp_server_live, rate_limiter,
+        "activity_list",
+        {"limit": 50, "activity_type": "multi_sport"},
+    )
+    rows = parsed.get("rows") or []
+    if not rows:
+        pytest.skip("No multisport activities found in account")
+
+    ms_id = int(rows[0]["id"])
+    parsed = _call_tool_json(
+        mcp_server_live, rate_limiter, "activity_laps", {"activity_id": ms_id},
+    )
+    assert_mcp_envelope_ok(parsed)
+    if not parsed["rows"]:
+        pytest.skip("Multisport parent has no lap rows from any leg")
+
+    leg_indices = {row.get("leg_index") for row in parsed["rows"]}
+    assert all(isinstance(i, int) for i in leg_indices), (
+        "Multisport laps must stamp integer leg_index on every row"
+    )
+    assert min(leg_indices) == 0, "leg_index is 0-based"
