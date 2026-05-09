@@ -148,6 +148,13 @@ def test_get_activity_detail_union_schema_and_manifest(run_cli, activity_id):
     ]
     assert_row_has_keys(row, union_keys)
 
+    type_key = (row.get("type") or "").lower()
+    is_multisport = "multi" in type_key
+    if not is_multisport:
+        # UNION_COLUMNS unions cycling-only, running-only, and swim-only keys,
+        # so any single-sport activity must surface at least one
+        # not_applicable_to_sport entry. A missing unavailable[] = regression.
+        assert "unavailable" in parsed, "Detail envelope is missing the unavailable[] manifest"
     if "unavailable" in parsed:
         manifest = parsed["unavailable"]
         assert isinstance(manifest, list)
@@ -156,6 +163,10 @@ def test_get_activity_detail_union_schema_and_manifest(run_cli, activity_id):
             assert entry["reason"] in {
                 "not_applicable_to_sport", "absent_in_response",
             }
+        if not is_multisport:
+            assert any(
+                e["reason"] == "not_applicable_to_sport" for e in manifest
+            ), "Expected at least one not_applicable_to_sport entry for a sport-specific activity"
 
 
 @pytest.mark.e2e
@@ -224,8 +235,13 @@ def test_multisport_laps_fan_out(run_cli, rate_limiter, cli_runner, garth_sessio
     if not parsed["data"]:
         pytest.skip("Multisport parent has no lap rows from any leg")
 
-    leg_indices = {row.get("leg_index") for row in parsed["data"]}
-    assert all(isinstance(i, int) for i in leg_indices), (
-        "Multisport laps must stamp integer leg_index on every row"
-    )
+    assert all(
+        isinstance(row.get("leg_index"), int) for row in parsed["data"]
+    ), "Multisport laps must stamp integer leg_index on every row"
+    leg_indices = {row["leg_index"] for row in parsed["data"]}
     assert min(leg_indices) == 0, "leg_index is 0-based"
+    # Without ≥2 distinct leg_indices, a regression that silently drops
+    # children and reports only the first leg's laps would still pass.
+    assert len(leg_indices) >= 2, (
+        "Expected fan-out across >=2 multisport child legs"
+    )

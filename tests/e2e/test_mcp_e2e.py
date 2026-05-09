@@ -173,6 +173,10 @@ def test_activity_get_detail_mcp_manifest(mcp_server_live, rate_limiter, first_a
         ],
     )
 
+    type_key = (row.get("type") or "").lower()
+    is_multisport = "multi" in type_key
+    if not is_multisport:
+        assert "unavailable" in parsed, "Detail envelope is missing the unavailable[] manifest"
     if "unavailable" in parsed:
         manifest = parsed["unavailable"]
         assert isinstance(manifest, list)
@@ -181,6 +185,10 @@ def test_activity_get_detail_mcp_manifest(mcp_server_live, rate_limiter, first_a
             assert entry["reason"] in {
                 "not_applicable_to_sport", "absent_in_response",
             }
+        if not is_multisport:
+            assert any(
+                e["reason"] == "not_applicable_to_sport" for e in manifest
+            ), "Expected at least one not_applicable_to_sport entry for a sport-specific activity"
 
 
 @pytest.mark.e2e
@@ -228,7 +236,13 @@ def test_activity_metrics_describe_mcp(mcp_server_live, rate_limiter, first_acti
     )
     assert_mcp_envelope_ok(parsed)
     if parsed["rows"]:
-        assert_row_has_keys(parsed["rows"][0], ["key", "unit", "metricsIndex"])
+        first = parsed["rows"][0]
+        assert_row_has_keys(first, ["key", "unit", "metricsIndex"])
+        # A descriptor row with key=None means the wire field name drifted
+        # (e.g. metricDescriptorKey vs key) and rows are silently empty.
+        assert first["key"] is not None, (
+            "metric descriptor key is None; serializer may be reading the wrong wire field"
+        )
 
 
 @pytest.mark.e2e
@@ -251,8 +265,11 @@ def test_activity_laps_mcp_multisport_fan_out(mcp_server_live, rate_limiter):
     if not parsed["rows"]:
         pytest.skip("Multisport parent has no lap rows from any leg")
 
-    leg_indices = {row.get("leg_index") for row in parsed["rows"]}
-    assert all(isinstance(i, int) for i in leg_indices), (
-        "Multisport laps must stamp integer leg_index on every row"
-    )
+    assert all(
+        isinstance(row.get("leg_index"), int) for row in parsed["rows"]
+    ), "Multisport laps must stamp integer leg_index on every row"
+    leg_indices = {row["leg_index"] for row in parsed["rows"]}
     assert min(leg_indices) == 0, "leg_index is 0-based"
+    assert len(leg_indices) >= 2, (
+        "Expected fan-out across >=2 multisport child legs"
+    )
