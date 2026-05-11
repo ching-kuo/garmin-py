@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-05-11
+
 ### Added
 - Sport-aware activity detail: `activity get --detail` and MCP `activity_get(detail=True)` now project metrics scoped by the activity's `activityType.typeKey`. Cycling activities surface the full power suite (avg/max/normalized power, TSS, intensity factor); running activities surface running dynamics (ground contact time, vertical oscillation, vertical ratio, stride length); pool-swim activities surface SWOLF, total strokes, average stroke rate, and distance per stroke. Run/bike training response (aerobic/anaerobic training effect, vO2max, recovery time) surfaces for both.
 - `activity laps <id>` CLI subcommand and MCP `activity_laps` tool: return lap-by-lap rows for run/bike activities, per-pool-length rows for pool-swim activities. Pool swim auto-routes to the typed `get_activity_typed_splits` backend method; everything else uses the existing splits endpoint. Multisport parents (triathlon etc.) fan out across child legs and stamp a 0-based `leg_index` on every returned row.
