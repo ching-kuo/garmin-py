@@ -5,6 +5,8 @@ import os
 from datetime import date
 from typing import Any
 
+from mcp.server.auth.provider import TokenVerifier
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
@@ -169,14 +171,30 @@ def _fetch_laps_rows_for_activity(activity: dict[str, Any], activity_id: Any) ->
     return _fetch_one_activity_laps(activity, activity_id)
 
 
-def create_mcp_server(config: CliConfig) -> MCPServer:
+def create_mcp_server(
+    config: CliConfig,
+    *,
+    token_verifier: TokenVerifier | None = None,
+    auth: AuthSettings | None = None,
+) -> MCPServer:
     """Create an MCPServer with Garmin Connect tools.
 
     Args:
         config: CLI configuration (session home, credentials, etc.)
             captured by closure so every tool call has access.
+        token_verifier: Optional bearer-token verifier; when supplied along
+            with ``auth`` the MCP SDK gates all tools on non-loopback
+            transports. Loopback / stdio callers should leave both as
+            ``None``.
+        auth: Optional auth settings; required by the SDK when
+            ``token_verifier`` is set.
     """
-    mcp = MCPServer("garmin")
+    mcp_kwargs: dict[str, Any] = {}
+    if token_verifier is not None:
+        mcp_kwargs["token_verifier"] = token_verifier
+    if auth is not None:
+        mcp_kwargs["auth"] = auth
+    mcp = MCPServer("garmin", **mcp_kwargs)
 
     # -- Health tools -------------------------------------------------------
 

@@ -1,6 +1,7 @@
 """CLI entrypoint for garmin-cli."""
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from typing import Any
 
@@ -18,6 +19,9 @@ from garmin_cli.output import echo_json, make_error_envelope
 
 _GLOBAL_OPTIONS_WITH_VALUES = ("--format", "--garmin-home", "--garth-home")
 _MCP_SERVER_TRANSPORTS = ("stdio", "sse", "streamable-http")
+_MCP_DEFAULT_LOOPBACK_HOST = "127.0.0.1"
+_MCP_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+_MCP_BEARER_ENV = "GARMIN_MCP_BEARER_TOKEN"
 
 
 def _command_name_from_args(args: Sequence[str] | None) -> str:
@@ -233,6 +237,45 @@ cli.add_command(workout)
 cli.add_command(login)
 
 
+def _is_loopback_host(host: str | None) -> bool:
+    if host is None:
+        return True  # default applied later is loopback
+    return host in _MCP_LOOPBACK_HOSTS
+
+
+def _resolve_mcp_auth(transport: str, host: str | None) -> tuple[Any, Any]:
+    """Resolve the (token_verifier, auth_settings) pair for the mcp-server bind.
+
+    Loopback / stdio binds return (None, None). Non-loopback HTTP binds require
+    ``GARMIN_MCP_BEARER_TOKEN`` to be set non-empty; absence / emptiness raises
+    a ``click.ClickException`` to refuse start-up.
+    """
+    if transport == "stdio" or _is_loopback_host(host):
+        return None, None
+
+    raw_token = os.environ.get(_MCP_BEARER_ENV, "")
+    try:
+        from garmin_cli.mcp_auth import StaticBearerTokenVerifier
+    except ImportError as exc:
+        raise click.ClickException(
+            f'MCP auth support unavailable: {exc}. Install with: pip install "garmin-cli[mcp]"'
+        ) from exc
+
+    try:
+        verifier = StaticBearerTokenVerifier(raw_token)
+    except ValueError as exc:
+        raise click.ClickException(
+            f"Refusing to bind {host!r} without a bearer token: {exc}. "
+            f"Set {_MCP_BEARER_ENV} or bind to a loopback host (127.0.0.1)."
+        ) from exc
+
+    from mcp.server.auth.settings import AuthSettings
+
+    base_url = f"http://{host}:8000"
+    auth = AuthSettings(issuer_url=base_url, resource_server_url=base_url)
+    return verifier, auth
+
+
 @cli.command("mcp-server")
 @click.option(
     "--transport",
@@ -241,7 +284,15 @@ cli.add_command(login)
     show_default=True,
     help="MCP transport to serve.",
 )
-@click.option("--host", type=str, default=None, help="Bind host for HTTP transports.")
+@click.option(
+    "--host",
+    type=str,
+    default=None,
+    help=(
+        "Bind host for HTTP transports. Defaults to 127.0.0.1 (loopback). "
+        f"Non-loopback binds require {_MCP_BEARER_ENV} to be set."
+    ),
+)
 @click.option(
     "--port",
     type=click.IntRange(1, 65535),
@@ -306,6 +357,9 @@ def mcp_server_cmd(
             err=True,
         )
         raise SystemExit(1)
+    if transport != "stdio" and host is None:
+        host = _MCP_DEFAULT_LOOPBACK_HOST
+    token_verifier, auth_settings = _resolve_mcp_auth(transport, host)
     run_kwargs = _build_mcp_run_kwargs(
         transport=transport,
         host=host,
@@ -318,7 +372,11 @@ def mcp_server_cmd(
         json_response=json_response,
     )
     config = ctx.obj["config"]
-    server = create_mcp_server(config)
+    server = create_mcp_server(
+        config,
+        token_verifier=token_verifier,
+        auth=auth_settings,
+    )
     server.run(**run_kwargs)
 
 
