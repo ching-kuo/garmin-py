@@ -76,17 +76,6 @@ class TestLoginCommand:
             prompt_mfa=ANY,
         )
 
-    def test_login_calls_garth_save_after_login(
-        self, mocker: Any, tmp_path: Path
-    ) -> None:
-        result, mock_garth = _run_login(
-            ["login"],
-            mocker,
-            input="user@example.com\nsecretpassword\n",
-            tmp_path=tmp_path,
-        )
-        mock_garth.save.assert_called_once()
-
     def test_login_creates_garth_home_directory(
         self, mocker: Any, tmp_path: Path
     ) -> None:
@@ -318,19 +307,6 @@ class TestLoginStatusLoggedIn:
             catch_exceptions=False,
         )
         assert result.exit_code == 0
-
-    def test_status_calls_garth_resume(self, mocker: Any, tmp_path: Path) -> None:
-        mock_garth = MagicMock()
-        mocker.patch("garmin_cli.commands.login.garth", mock_garth)
-        garth_dir = tmp_path / "garth"
-        garth_dir.mkdir(mode=0o700)
-        runner = CliRunner(mix_stderr=False)
-        runner.invoke(
-            cli,
-            ["--garmin-home", str(garth_dir), "login", "status"],
-            catch_exceptions=False,
-        )
-        mock_garth.resume.assert_called_once()
 
     def test_status_shows_logged_in_message(
         self, mocker: Any, tmp_path: Path

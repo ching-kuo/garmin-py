@@ -137,4 +137,4 @@ class TestConnectApi:
 
 def test_raw_fallback_registry_tracks_update_paths() -> None:
     capabilities = {entry["capability"] for entry in backend.get_raw_fallback_registry()}
-    assert capabilities == {"workout_update", "workout_description_update"}
+    assert capabilities == {"workout_update"}

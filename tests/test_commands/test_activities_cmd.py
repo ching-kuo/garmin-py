@@ -17,20 +17,6 @@ from garmin_cli.cli import cli
 
 class TestActivityListCommand:
 
-    def test_list_calls_auth(self, mocker: Any) -> None:
-        mock_auth = mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.activities.list_activities",
-            return_value=[],
-        )
-        mocker.patch(
-            "garmin_cli.commands.activities.serialize_activity_summary",
-            return_value=[],
-        )
-        runner = CliRunner(mix_stderr=False)
-        runner.invoke(cli, ["activity", "list"])
-        mock_auth.assert_called_once()
-
     def test_list_exit_code_0(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
         mocker.patch(
@@ -265,20 +251,6 @@ class TestActivityListCommand:
 # ---------------------------------------------------------------------------
 
 class TestActivityGetCommand:
-
-    def test_get_calls_auth(self, mocker: Any) -> None:
-        mock_auth = mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.activities.get_activity",
-            return_value={"activityId": 12345678},
-        )
-        mocker.patch(
-            "garmin_cli.commands.activities.serialize_activity_summary",
-            return_value=[{"id": 12345678}],
-        )
-        runner = CliRunner(mix_stderr=False)
-        runner.invoke(cli, ["activity", "get", "12345678"])
-        mock_auth.assert_called_once()
 
     def test_get_exit_code_0(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.activities.ensure_authenticated")

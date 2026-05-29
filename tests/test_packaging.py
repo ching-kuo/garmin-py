@@ -5,7 +5,7 @@ from pathlib import Path
 import tomllib
 
 
-def test_pyproject_package_discovery_includes_src_and_local_garmin() -> None:
+def test_pyproject_package_discovery_includes_src() -> None:
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     config = tomllib.loads(pyproject.read_text())
 
@@ -14,6 +14,4 @@ def test_pyproject_package_discovery_includes_src_and_local_garmin() -> None:
     include = set(find_config.get("include", []))
 
     assert "src" in where
-    assert "." in where
     assert "garmin_cli*" in include
-    assert "garmin*" in include

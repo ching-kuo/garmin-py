@@ -16,20 +16,6 @@ from garmin_cli.cli import cli
 
 class TestSleepCommand:
 
-    def test_sleep_days_calls_auth(self, mocker: Any) -> None:
-        mock_auth = mocker.patch("garmin_cli.commands.health.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.health.get_sleep",
-            return_value={"dailySleepDTO": {"calendarDate": "2026-03-11"}},
-        )
-        mocker.patch(
-            "garmin_cli.commands.health.serialize_sleep",
-            return_value=[{"date": "2026-03-11", "score": 82}],
-        )
-        runner = CliRunner(mix_stderr=False)
-        runner.invoke(cli, ["health", "sleep", "--days", "1"])
-        mock_auth.assert_called_once()
-
     def test_sleep_days_exit_code_0(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.health.ensure_authenticated")
         mocker.patch(

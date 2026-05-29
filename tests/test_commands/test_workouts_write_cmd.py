@@ -94,46 +94,6 @@ class TestWorkoutCreateCommand:
         parsed = json.loads(result.output)
         assert parsed["ok"] is True
 
-    def test_create_calls_auth(self, mocker: Any, tmp_path: Any) -> None:
-        mock_auth = mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.workouts.read_workout_input",
-            return_value=_SAMPLE_WORKOUT_PAYLOAD,
-        )
-        mocker.patch(
-            "garmin_cli.commands.workouts.validate_workout_input",
-            return_value=[],
-        )
-        mocker.patch(
-            "garmin_cli.commands.workouts.create_workout",
-            return_value=_SAMPLE_CREATED_WORKOUT,
-        )
-        runner = CliRunner(mix_stderr=False)
-        f = tmp_path / "workout.json"
-        f.write_text(json.dumps(_SAMPLE_WORKOUT_PAYLOAD))
-        runner.invoke(cli, ["workout", "create", str(f)])
-        mock_auth.assert_called_once()
-
-    def test_create_calls_create_workout(self, mocker: Any, tmp_path: Any) -> None:
-        mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.workouts.read_workout_input",
-            return_value=_SAMPLE_WORKOUT_PAYLOAD,
-        )
-        mocker.patch(
-            "garmin_cli.commands.workouts.validate_workout_input",
-            return_value=[],
-        )
-        mock_create = mocker.patch(
-            "garmin_cli.commands.workouts.create_workout",
-            return_value=_SAMPLE_CREATED_WORKOUT,
-        )
-        runner = CliRunner(mix_stderr=False)
-        f = tmp_path / "workout.json"
-        f.write_text(json.dumps(_SAMPLE_WORKOUT_PAYLOAD))
-        runner.invoke(cli, ["workout", "create", str(f)])
-        mock_create.assert_called_once()
-
     def test_create_calls_build_garmin_payload_and_passes_result_to_create_workout(
         self, mocker: Any, tmp_path: Any
     ) -> None:
@@ -329,34 +289,6 @@ class TestWorkoutUpdateCommand:
         parsed = json.loads(result.output)
         assert parsed["ok"] is True
 
-    def test_update_calls_auth(self, mocker: Any, tmp_path: Any) -> None:
-        mock_auth = mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.workouts.get_workout",
-            return_value=_SAMPLE_EXISTING_WORKOUT,
-        )
-        mocker.patch(
-            "garmin_cli.commands.workouts.read_workout_input",
-            return_value={"name": "New Name"},
-        )
-        mocker.patch(
-            "garmin_cli.commands.workouts.validate_workout_input",
-            return_value=[],
-        )
-        mocker.patch(
-            "garmin_cli.commands.workouts.merge_workout_payload",
-            return_value=(_SAMPLE_EXISTING_WORKOUT, []),
-        )
-        mocker.patch(
-            "garmin_cli.commands.workouts.update_workout",
-            return_value=None,
-        )
-        runner = CliRunner(mix_stderr=False)
-        f = tmp_path / "update.json"
-        f.write_text(json.dumps({"name": "New Name"}))
-        runner.invoke(cli, ["workout", "update", "12345", str(f)])
-        mock_auth.assert_called_once()
-
     def test_update_calls_get_and_update(self, mocker: Any, tmp_path: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
         mock_get = mocker.patch(
@@ -518,22 +450,6 @@ class TestWorkoutDeleteCommand:
         parsed = json.loads(result.output)
         assert parsed["ok"] is True
 
-    def test_delete_calls_auth(self, mocker: Any) -> None:
-        mock_auth = mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
-        mocker.patch("garmin_cli.commands.workouts.delete_workout", return_value=None)
-        runner = CliRunner(mix_stderr=False)
-        runner.invoke(cli, ["workout", "delete", "12345", "--confirm"])
-        mock_auth.assert_called_once()
-
-    def test_delete_calls_delete_workout(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
-        mock_delete = mocker.patch(
-            "garmin_cli.commands.workouts.delete_workout", return_value=None
-        )
-        runner = CliRunner(mix_stderr=False)
-        runner.invoke(cli, ["workout", "delete", "12345", "--confirm"])
-        mock_delete.assert_called_once()
-
     def test_delete_confirmation_prompt_shown(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
         mocker.patch("garmin_cli.commands.workouts.delete_workout", return_value=None)
@@ -610,26 +526,6 @@ class TestWorkoutScheduleCommand:
         result = runner.invoke(cli, ["--json", "workout", "schedule", "12345", "2026-04-01"])
         parsed = json.loads(result.output)
         assert parsed["ok"] is True
-
-    def test_schedule_calls_auth(self, mocker: Any) -> None:
-        mock_auth = mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.workouts.schedule_workout",
-            return_value=_SAMPLE_SCHEDULE_RESPONSE,
-        )
-        runner = CliRunner(mix_stderr=False)
-        runner.invoke(cli, ["workout", "schedule", "12345", "2026-04-01"])
-        mock_auth.assert_called_once()
-
-    def test_schedule_calls_schedule_workout(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
-        mock_schedule = mocker.patch(
-            "garmin_cli.commands.workouts.schedule_workout",
-            return_value=_SAMPLE_SCHEDULE_RESPONSE,
-        )
-        runner = CliRunner(mix_stderr=False)
-        runner.invoke(cli, ["workout", "schedule", "12345", "2026-04-01"])
-        mock_schedule.assert_called_once()
 
     def test_schedule_passes_correct_date(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")

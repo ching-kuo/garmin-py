@@ -26,7 +26,6 @@ CYCLING_TYPE_KEYS: frozenset[str] = frozenset({
 })
 LAP_SWIM_TYPE_KEYS: frozenset[str] = frozenset({"lap_swimming"})
 OW_SWIM_TYPE_KEYS: frozenset[str] = frozenset({"open_water_swimming", "swimming"})
-SWIM_TYPE_KEYS: frozenset[str] = LAP_SWIM_TYPE_KEYS | OW_SWIM_TYPE_KEYS
 
 
 @dataclass(frozen=True)

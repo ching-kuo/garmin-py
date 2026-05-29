@@ -35,23 +35,6 @@ COLUMNS_SPO2 = ("date", "avg_spo2", "lowest_spo2")
 COLUMNS_RESTING_HR = ("date", "resting_hr")
 COLUMNS_READINESS = ("date", "score", "level")
 COLUMNS_STATUS = ("date", "training_status", "load_type")
-COLUMNS_DAILY_SUMMARY = (
-    "date",
-    "total_steps",
-    "distance_km",
-    "active_kilocalories",
-    "floors_ascended",
-    "floors_descended",
-    "moderate_intensity_minutes",
-    "vigorous_intensity_minutes",
-    "resting_heart_rate",
-)
-COLUMNS_STEPS = ("date", "total_steps", "total_distance", "step_goal")
-COLUMNS_INTENSITY_MINUTES = ("date", "moderate_value", "vigorous_value", "weekly_goal")
-COLUMNS_RACE_PREDICTIONS = ("race_type", "predicted_time_seconds", "distance_meters")
-COLUMNS_ENDURANCE_SCORE = ("date", "overall_score", "endurance_classification")
-COLUMNS_HILL_SCORE = ("date", "overall_score", "endurance_score", "strength_score")
-COLUMNS_DEVICE = ("device_id", "display_name", "device_type", "last_sync_time")
 COLUMNS_ACTIVITY_SUMMARY = (
     "id",
     "date",
@@ -106,10 +89,6 @@ def _hours(value: Any) -> float | None:
 
 def _km(value: Any) -> float | None:
     return None if value is None else value / 1000
-
-
-def _kmh(value: Any) -> float | None:
-    return None if value is None else value * 3.6
 
 
 def _get_nested(value: dict[str, Any], *keys: str) -> Any:

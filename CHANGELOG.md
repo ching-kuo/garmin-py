@@ -8,6 +8,10 @@
 - `mcp-server` subcommand now defaults `--host` to `127.0.0.1` for SSE and streamable-http transports. Non-loopback binds (`0.0.0.0`, any external interface) require the `GARMIN_MCP_BEARER_TOKEN` environment variable to be set; when set, the server wires the MCP SDK's `TokenVerifier` / `AuthSettings` middleware so all tools (read and write) require `Authorization: Bearer <token>` on every request. Empty / whitespace-only token values are rejected at startup with a clear error. Loopback binds and the `stdio` transport are unchanged -- no auth gating applies there.
 - New module `garmin_cli.mcp_auth.StaticBearerTokenVerifier` implements the SDK's `TokenVerifier` protocol with `hmac.compare_digest` for constant-time comparison; the token value is read once at startup and never logged.
 
+### Removed
+- Dropped the orphaned top-level `garmin` package (`garmin/api.py`, `auth.py`, `zones.py`, `extras.py`). It was a pre-v2.0.0 `garth`-based prototype superseded by `garmin_cli`, imported by nothing in the CLI or MCP server, and is no longer included in the installed distribution (`pyproject.toml` package discovery now scopes to `src/garmin_cli` only).
+- Internal dead-code cleanup with no user-facing surface change: removed the unused `_kmh` serializer helper, the unused `SWIM_TYPE_KEYS` registry constant, and seven unused `COLUMNS_*` table constants (`COLUMNS_DAILY_SUMMARY`, `COLUMNS_STEPS`, `COLUMNS_INTENSITY_MINUTES`, `COLUMNS_RACE_PREDICTIONS`, `COLUMNS_ENDURANCE_SCORE`, `COLUMNS_HILL_SCORE`, `COLUMNS_DEVICE`) whose serializers are MCP-only and emit JSON rather than column tables. Dropped the stale `workout_description_update` entry from `backend.RAW_FALLBACKS`; it documented the deleted `garmin` prototype and duplicated the live `workout_update` raw-transport entry.
+
 ## [2.1.0] - 2026-05-11
 
 ### Added

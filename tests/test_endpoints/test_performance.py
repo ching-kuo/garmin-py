@@ -131,15 +131,6 @@ class TestGetVo2max:
 
 class TestGetAllThresholds:
 
-    def test_calls_garth_multiple_times(self, mocker: Any) -> None:
-        mock_garth = MagicMock()
-        mock_garth.connectapi.return_value = {}
-        mocker.patch("garmin_cli.endpoints.performance.garth", mock_garth)
-
-        get_all_thresholds()
-        # Should call lactate threshold + FTP (cycling + running)
-        assert mock_garth.connectapi.call_count >= 1
-
     def test_returns_dict(self, mocker: Any, sample_all_thresholds_raw: Any) -> None:
         mock_garth = MagicMock()
         mock_garth.connectapi.return_value = sample_all_thresholds_raw

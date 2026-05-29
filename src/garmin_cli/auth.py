@@ -86,8 +86,11 @@ def ensure_authenticated(config: CliConfig) -> None:
         ) from exc
     except GarminCliError:
         raise
-    except Exception:
-        pass  # session expired or missing — fall through to login
+    except Exception as exc:
+        # Session expired/missing/corrupt — fall through to login. Broad by
+        # design: garth/garminconnect exception shapes vary across versions, so
+        # any resume failure should re-auth rather than crash. Logged for triage.
+        logger.debug("Garmin session resume failed, falling through to login: %s", exc)
 
     if not config.email or not config.password:
         raise GarminCliError(

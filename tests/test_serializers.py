@@ -83,47 +83,19 @@ class TestSerializeSleep:
         result = serialize_sleep(sample_sleep_raw)
         assert len(result) == 1
 
-    def test_contains_date_key(self, sample_sleep_raw: Any) -> None:
-        result = serialize_sleep(sample_sleep_raw)
-        assert "date" in result[0]
-
     def test_date_value_correct(self, sample_sleep_raw: Any) -> None:
         result = serialize_sleep(sample_sleep_raw)
         assert result[0]["date"] == "2026-03-11"
-
-    def test_duration_hours_present(self, sample_sleep_raw: Any) -> None:
-        result = serialize_sleep(sample_sleep_raw)
-        assert "duration_hours" in result[0]
 
     def test_duration_hours_correct(self, sample_sleep_raw: Any) -> None:
         result = serialize_sleep(sample_sleep_raw)
         # 27000 seconds / 3600 = 7.5 hours
         assert result[0]["duration_hours"] == pytest.approx(7.5, rel=0.01)
 
-    def test_deep_min_present(self, sample_sleep_raw: Any) -> None:
-        result = serialize_sleep(sample_sleep_raw)
-        assert "deep_min" in result[0]
-
     def test_deep_min_correct(self, sample_sleep_raw: Any) -> None:
         result = serialize_sleep(sample_sleep_raw)
         # 5400 seconds / 60 = 90 minutes
         assert result[0]["deep_min"] == pytest.approx(90, rel=0.01)
-
-    def test_light_min_present(self, sample_sleep_raw: Any) -> None:
-        result = serialize_sleep(sample_sleep_raw)
-        assert "light_min" in result[0]
-
-    def test_rem_min_present(self, sample_sleep_raw: Any) -> None:
-        result = serialize_sleep(sample_sleep_raw)
-        assert "rem_min" in result[0]
-
-    def test_awake_min_present(self, sample_sleep_raw: Any) -> None:
-        result = serialize_sleep(sample_sleep_raw)
-        assert "awake_min" in result[0]
-
-    def test_score_present(self, sample_sleep_raw: Any) -> None:
-        result = serialize_sleep(sample_sleep_raw)
-        assert "score" in result[0]
 
     def test_score_value(self, sample_sleep_raw: Any) -> None:
         result = serialize_sleep(sample_sleep_raw)

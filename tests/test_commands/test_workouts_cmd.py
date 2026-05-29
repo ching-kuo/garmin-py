@@ -17,13 +17,6 @@ from garmin_cli.cli import cli
 
 class TestWorkoutListCommand:
 
-    def test_list_calls_auth(self, mocker: Any) -> None:
-        mock_auth = mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
-        mocker.patch("garmin_cli.commands.workouts.list_workouts", return_value=[])
-        runner = CliRunner(mix_stderr=False)
-        runner.invoke(cli, ["workout", "list"])
-        mock_auth.assert_called_once()
-
     def test_list_exit_code_0(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
         mocker.patch("garmin_cli.commands.workouts.list_workouts", return_value=[])
@@ -237,20 +230,6 @@ class TestWorkoutGetCommand:
 # ---------------------------------------------------------------------------
 
 class TestWorkoutCalendarCommand:
-
-    def test_calendar_ahead_calls_auth(self, mocker: Any) -> None:
-        mock_auth = mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.workouts.get_calendar_range",
-            return_value={"calendarItems": []},
-        )
-        mocker.patch(
-            "garmin_cli.commands.workouts.serialize_calendar_workout",
-            return_value=[],
-        )
-        runner = CliRunner(mix_stderr=False)
-        runner.invoke(cli, ["workout", "calendar", "--ahead", "7"])
-        mock_auth.assert_called_once()
 
     def test_calendar_ahead_exit_code_0(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")

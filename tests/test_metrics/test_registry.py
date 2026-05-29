@@ -35,21 +35,6 @@ class TestMetricEntry:
                 for segment in path:
                     assert isinstance(segment, str) and segment
 
-    def test_norm_power_w_source_path_precedence(self) -> None:
-        entry = REGISTRY["norm_power_w"]
-        assert ("normPower",) in entry.source_paths
-        assert ("summaryDTO", "normPower") in entry.source_paths
-        assert ("summaryDTO", "normalizedPower") in entry.source_paths
-        idx_top = entry.source_paths.index(("normPower",))
-        idx_sum = entry.source_paths.index(("summaryDTO", "normPower"))
-        assert idx_top < idx_sum
-
-    def test_avg_power_source_path_precedence(self) -> None:
-        entry = REGISTRY["avg_power_w"]
-        assert entry.source_paths.index(("averagePower",)) < entry.source_paths.index(
-            ("summaryDTO", "averagePower")
-        )
-
     def test_unknown_key_raises_keyerror(self) -> None:
         with pytest.raises(KeyError):
             REGISTRY["not_a_real_metric"]

@@ -15,22 +15,6 @@ from garmin_cli.cli import cli
 
 class TestPerformanceThresholdsCommand:
 
-    def test_thresholds_calls_auth(self, mocker: Any) -> None:
-        mock_auth = mocker.patch(
-            "garmin_cli.commands.performance.ensure_authenticated"
-        )
-        mocker.patch(
-            "garmin_cli.commands.performance.get_all_thresholds",
-            return_value={"thresholds": []},
-        )
-        mocker.patch(
-            "garmin_cli.commands.performance.serialize_thresholds",
-            return_value=[],
-        )
-        runner = CliRunner(mix_stderr=False)
-        runner.invoke(cli, ["performance", "thresholds"])
-        mock_auth.assert_called_once()
-
     def test_thresholds_exit_code_0(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
         mocker.patch(

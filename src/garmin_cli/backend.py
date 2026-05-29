@@ -26,13 +26,6 @@ RAW_FALLBACKS: tuple[dict[str, str], ...] = (
         "tests": "tests/test_endpoints/test_workouts_write.py, tests/test_backend.py",
         "removal_condition": "Use an upstream typed update method once python-garminconnect exposes one.",
     },
-    {
-        "capability": "workout_description_update",
-        "why": "garmin.api.update_workout_description mutates an existing workout via PUT after merging description text.",
-        "transport": "Garmin.client.put('connectapi', '/workout-service/workout/{id}', json=payload)",
-        "tests": "tests/test_backend.py",
-        "removal_condition": "Use an upstream typed update method once python-garminconnect exposes one.",
-    },
 )
 
 _backend: Garmin | None = None
