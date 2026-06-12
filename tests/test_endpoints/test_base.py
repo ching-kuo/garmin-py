@@ -6,7 +6,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from garmin_cli.endpoints._base import extract_status_code, _make_write_request
+from garmin_cli.endpoints._base import (
+    _resolve_retry_delays,
+    extract_status_code,
+    _make_write_request,
+)
 from garmin_cli.exceptions import GarminCliError
 from tests.helpers import make_http_error as _http_error
 
@@ -141,3 +145,59 @@ class TestMakeWriteRequest:
         mock_fn = MagicMock(side_effect=RuntimeError("unexpected"))
         with pytest.raises(RuntimeError, match="unexpected"):
             _make_write_request(mock_fn, "POST", "/workout-service/workout", json={})
+
+
+# ---------------------------------------------------------------------------
+# _resolve_retry_delays
+# ---------------------------------------------------------------------------
+
+class TestResolveRetryDelays:
+
+    def test_default_when_env_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("GARMIN_CLI_RETRY_DELAYS", raising=False)
+        assert _resolve_retry_delays() == [2, 4, 8]
+
+    def test_env_var_overrides_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GARMIN_CLI_RETRY_DELAYS", "1,2,4")
+        assert _resolve_retry_delays() == [1.0, 2.0, 4.0]
+
+    def test_float_values_accepted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GARMIN_CLI_RETRY_DELAYS", "0.5,1.5,3.0")
+        assert _resolve_retry_delays() == [0.5, 1.5, 3.0]
+
+    def test_invalid_string_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GARMIN_CLI_RETRY_DELAYS", "not,valid")
+        assert _resolve_retry_delays() == [2, 4, 8]
+
+    def test_zero_value_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GARMIN_CLI_RETRY_DELAYS", "1,0,4")
+        assert _resolve_retry_delays() == [2, 4, 8]
+
+    def test_negative_value_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GARMIN_CLI_RETRY_DELAYS", "1,-2,4")
+        assert _resolve_retry_delays() == [2, 4, 8]
+
+    def test_empty_env_var_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GARMIN_CLI_RETRY_DELAYS", "")
+        assert _resolve_retry_delays() == [2, 4, 8]
+
+    def test_env_read_at_call_time(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("GARMIN_CLI_RETRY_DELAYS", raising=False)
+        first = _resolve_retry_delays()
+        monkeypatch.setenv("GARMIN_CLI_RETRY_DELAYS", "5,10")
+        second = _resolve_retry_delays()
+        assert first == [2, 4, 8]
+        assert second == [5.0, 10.0]
+
+    def test_retry_loop_uses_env_delay(
+        self, monkeypatch: pytest.MonkeyPatch, mocker: Any
+    ) -> None:
+        monkeypatch.setenv("GARMIN_CLI_RETRY_DELAYS", "0.1")
+        mock_sleep = mocker.patch("time.sleep")
+        mock_fn = MagicMock(side_effect=[_http_error(429), _http_error(429)])
+        with pytest.raises(GarminCliError) as exc_info:
+            _make_write_request(mock_fn, "POST", "/test", json={})
+        assert exc_info.value.error_code == "RATE_LIMITED"
+        mock_sleep.assert_called_once_with(0.1)

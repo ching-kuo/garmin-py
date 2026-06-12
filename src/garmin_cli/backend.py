@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import types
 from datetime import date
 from typing import Any
 
@@ -16,6 +17,45 @@ from garmin_cli.token_store import (
 )
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_HTTP_TIMEOUT: float = 30.0
+
+
+def _resolve_http_timeout() -> float:
+    """Return the configured HTTP timeout in seconds.
+
+    Reads ``GARMIN_CLI_HTTP_TIMEOUT`` from the environment.  Invalid or
+    non-positive values are silently ignored and the default (30 s) is used.
+    """
+    raw = os.environ.get("GARMIN_CLI_HTTP_TIMEOUT", "")
+    if raw:
+        try:
+            value = float(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return _DEFAULT_HTTP_TIMEOUT
+
+
+def _apply_timeout(garmin: Garmin) -> None:
+    """Wrap *garmin.client._run_request* to enforce the configured timeout.
+
+    The upstream ``garminconnect.client.Client._run_request`` injects
+    ``timeout=15`` when the caller omits it.  We replace that default with
+    our configurable value by wrapping the bound method at the instance level
+    so every API call inherits it without touching the installed package.
+    """
+    timeout = _resolve_http_timeout()
+    inner_client = garmin.client
+    original_run_request = inner_client._run_request.__func__  # type: ignore[attr-defined]
+
+    def _patched_run_request(self: Any, method: str, path: str, **kwargs: Any) -> Any:
+        if "timeout" not in kwargs:
+            kwargs["timeout"] = timeout
+        return original_run_request(self, method, path, **kwargs)
+
+    inner_client._run_request = types.MethodType(_patched_run_request, inner_client)  # type: ignore[method-assign]
 
 
 RAW_FALLBACKS: tuple[dict[str, str], ...] = (
@@ -72,6 +112,7 @@ def login(
     """Authenticate with Garmin Connect without persisting the tokenstore yet."""
     normalized_home = _normalize_home(garth_home)
     client = Garmin(email, password, prompt_mfa=prompt_mfa)
+    _apply_timeout(client)
     previous_env = os.environ.pop("GARMINTOKENS", None)
     try:
         client.login()
@@ -99,6 +140,7 @@ def resume(garth_home: str) -> None:
         raise FileNotFoundError("No garmin_tokens.json found in the Garmin home directory")
 
     client = Garmin()
+    _apply_timeout(client)
     client.login(tokenstore=garth_home)
     _set_backend(client, garth_home)
     logger.debug("Garmin session resumed from %s", garth_home)

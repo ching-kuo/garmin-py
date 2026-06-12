@@ -1,6 +1,7 @@
 """Shared HTTP request helper with retry/error handling for Garmin endpoints."""
 from __future__ import annotations
 
+import os
 import time
 import re
 from datetime import date, timedelta
@@ -8,7 +9,26 @@ from typing import Any, Callable
 
 from garmin_cli.exceptions import GarminCliError
 
-_RETRY_DELAYS: list[int] = [2, 4, 8]
+_RETRY_DELAYS: list[float] = [2, 4, 8]
+
+
+def _resolve_retry_delays() -> list[float]:
+    """Return the configured retry delay sequence.
+
+    Reads ``GARMIN_CLI_RETRY_DELAYS`` from the environment as a
+    comma-separated list of positive floats (e.g. ``"1,2,4"``).  Any parse
+    error or non-positive value causes the whole env var to be ignored and
+    the default ``[2, 4, 8]`` is used instead.
+    """
+    raw = os.environ.get("GARMIN_CLI_RETRY_DELAYS", "")
+    if raw:
+        try:
+            delays = [float(s.strip()) for s in raw.split(",")]
+            if delays and all(d > 0 for d in delays):
+                return delays
+        except ValueError:
+            pass
+    return list(_RETRY_DELAYS)
 
 
 def _validate_numeric_id(value: Any, name: str) -> int:
@@ -49,7 +69,8 @@ def _retry_loop(
         immediate_errors: Maps HTTP status codes to (error_message, error_code)
             tuples for errors that should raise immediately without retry.
     """
-    for attempt in range(len(_RETRY_DELAYS) + 1):
+    delays = _resolve_retry_delays()
+    for attempt in range(len(delays) + 1):
         try:
             return call()
         except Exception as exc:
@@ -60,16 +81,16 @@ def _retry_loop(
                 raise GarminCliError(error=error_msg, error_code=error_code) from exc
 
             if code == 429:
-                if attempt < len(_RETRY_DELAYS):
-                    time.sleep(_RETRY_DELAYS[attempt])
+                if attempt < len(delays):
+                    time.sleep(delays[attempt])
                     continue
                 raise GarminCliError(
                     error="Rate limited by Garmin API.", error_code="RATE_LIMITED"
                 ) from exc
 
             if code is not None and code >= 500:
-                if attempt < len(_RETRY_DELAYS):
-                    time.sleep(_RETRY_DELAYS[attempt])
+                if attempt < len(delays):
+                    time.sleep(delays[attempt])
                     continue
                 raise GarminCliError(
                     error="Garmin API server error.", error_code="SERVER_ERROR"
