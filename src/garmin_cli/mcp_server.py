@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
 from datetime import date
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 WriteOutcome = Literal[
     "success",
@@ -36,8 +38,6 @@ from garmin_cli.endpoints.activities import (
     is_multisport_parent,
     list_activities,
 )
-from garmin_cli.metrics.registry import LAP_SWIM_TYPE_KEYS
-from garmin_cli.metrics.sport_profile import profile_for
 from garmin_cli.endpoints.devices import get_devices
 from garmin_cli.endpoints.health import (
     get_body_battery_range,
@@ -109,10 +109,16 @@ from garmin_cli.serializers import (
     serialize_workout_summary,
     serialize_zones,
 )
+from garmin_cli.services.activities import (
+    build_capability_manifest,
+    fetch_laps_for_activity,
+)
 
 _MAX_DAYS = 90
 
 _logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True)
@@ -178,6 +184,53 @@ def _classify_garmin_error(exc: GarminCliError) -> WriteOutcome:
     return "failed-upstream"
 
 
+class _WriteAudit:
+    """Records exactly one structured log event for a write-tool invocation.
+
+    Holds the invocation's invariant metadata (``tool``, ``dry_run``,
+    ``workout_id``, ``name_len``, ``description_len``) as a base
+    :class:`WriteLogEvent`; each terminal helper emits that base with the
+    outcome (and any per-outcome field) filled in. A single ``_done`` guard
+    ensures one and only one log line per invocation.
+    """
+
+    def __init__(self, base: WriteLogEvent) -> None:
+        self._base = base
+        self._done = False
+
+    def _emit(self, **overrides: Any) -> None:
+        _emit_write_log(replace(self._base, **overrides))
+        self._done = True
+
+    def fail_validation(self, errors_count: int) -> None:
+        self._emit(outcome="failed-validation", errors_count=errors_count)
+
+    def dry_run(self) -> None:
+        self._emit(outcome="dry-run")
+
+    def success(self, **overrides: Any) -> None:
+        self._emit(outcome="success", **overrides)
+
+
+@contextmanager
+def _write_audit(base: WriteLogEvent) -> Iterator[_WriteAudit]:
+    """Own the write-audit logging lifecycle for a single write tool.
+
+    Yields a :class:`_WriteAudit` for terminal outcomes (validation failure,
+    dry-run, success). If a :class:`GarminCliError` escapes the ``with`` body
+    and no event has been recorded yet, the classified ``failed-auth`` /
+    ``failed-upstream`` outcome is logged before the error is converted to the
+    caller-facing :class:`ToolError` (same translation as the read tools).
+    """
+    audit = _WriteAudit(base)
+    try:
+        yield audit
+    except GarminCliError as exc:
+        if not audit._done:
+            audit._emit(outcome=_classify_garmin_error(exc))
+        raise _handle_error(exc) from exc
+
+
 def _parse_date(value: str, name: str) -> date:
     try:
         return date.fromisoformat(value)
@@ -218,6 +271,16 @@ def _envelope(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {"count": len(rows), "rows": rows}
 
 
+def _identity_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return rows
+
+
+def _weather_rows(raw: Any) -> list[dict[str, Any]]:
+    if isinstance(raw, dict) and raw:
+        return [{k: raw.get(k) for k in COLUMNS_ACTIVITY_WEATHER}]
+    return []
+
+
 def _handle_error(exc: GarminCliError) -> ToolError:
     msg = exc.error
     if exc.error_code == "AUTH_MISSING":
@@ -225,31 +288,53 @@ def _handle_error(exc: GarminCliError) -> ToolError:
     return ToolError(msg)
 
 
-def _fetch_one_activity_laps(activity: dict[str, Any], activity_id: Any) -> list[dict[str, Any]]:
-    profile = profile_for(activity_type_key(activity))
-    if profile.type_keys & LAP_SWIM_TYPE_KEYS:
-        splits_payload = get_activity_typed_splits(activity_id)
-    else:
-        splits_payload = get_activity_splits(activity_id)
-    return serialize_activity_laps(activity, splits_payload, profile)
-
-
 def _fetch_laps_rows_for_activity(activity: dict[str, Any], activity_id: Any) -> list[dict[str, Any]]:
-    """Fetch laps; for multisport parents, fan out to children with leg_index."""
-    if is_multisport_parent(activity):
-        children = get_multisport_children(activity)
-        if children:
-            rows: list[dict[str, Any]] = []
-            for idx, child in enumerate(children):
-                child_id = child.get("activityId")
-                if child_id is None:
-                    continue
-                child_rows = _fetch_one_activity_laps(child, child_id)
-                for row in child_rows:
-                    row["leg_index"] = idx
-                rows.extend(child_rows)
-            return rows
-    return _fetch_one_activity_laps(activity, activity_id)
+    """Fetch laps; for multisport parents, fan out to children with leg_index.
+
+    Thin wrapper over :func:`garmin_cli.services.activities.fetch_laps_for_activity`
+    that binds this module's endpoint/serializer references so test patches on
+    ``garmin_cli.mcp_server.*`` stay effective. The service returns a
+    ``(rows, profile)`` pair; the MCP front-end uses only the rows.
+    """
+    rows, _profile = fetch_laps_for_activity(
+        activity,
+        activity_id,
+        activity_type_key=activity_type_key,
+        is_multisport_parent=is_multisport_parent,
+        get_multisport_children=get_multisport_children,
+        splits_fn=get_activity_splits,
+        typed_splits_fn=get_activity_typed_splits,
+        serialize_laps=serialize_activity_laps,
+    )
+    return rows
+
+
+def _authenticated(config: CliConfig, produce: Callable[[], _T]) -> _T:
+    """Ensure auth, run ``produce``, and translate GarminCliError to ToolError.
+
+    Centralizes the ``ensure_authenticated(config)`` -> fetch -> ``except
+    GarminCliError: raise _handle_error(exc)`` pattern. ``produce`` runs inside
+    the same ``try`` so upstream Garmin errors are translated consistently.
+    """
+    try:
+        ensure_authenticated(config)
+        return produce()
+    except GarminCliError as exc:
+        raise _handle_error(exc) from exc
+
+
+def _run_tool(
+    config: CliConfig,
+    fetch: Callable[[], Any],
+    serialize: Callable[[Any], list[dict[str, Any]]] = _identity_rows,
+) -> dict[str, Any]:
+    """Auth, fetch, serialize, and envelope a read tool's rows.
+
+    Collapses the read tools' identical 4-step body. Input parsing/validation
+    stays in the tool (it must raise ``ToolError`` directly); ``serialize``
+    defaults to identity for endpoints already returning row dicts.
+    """
+    return _envelope(serialize(_authenticated(config, fetch)))
 
 
 def create_mcp_server(
@@ -283,133 +368,73 @@ def create_mcp_server(
     def health_sleep(start_date: str, end_date: str) -> dict[str, Any]:
         """Get sleep data for a date range (YYYY-MM-DD). Returns date, duration_hours, deep/light/rem/awake minutes, and sleep score."""
         start, end = _parse_date_range(start_date, end_date)
-        try:
-            ensure_authenticated(config)
-            raw = get_sleep(start, end)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_sleep(raw))
+        return _run_tool(config, lambda: get_sleep(start, end), serialize_sleep)
 
     @mcp.tool()
     def health_hrv(start_date: str, end_date: str) -> dict[str, Any]:
         """Get HRV data for a date range (YYYY-MM-DD). Returns date, weekly_avg, last_night, status."""
         start, end = _parse_date_range(start_date, end_date)
-        try:
-            ensure_authenticated(config)
-            raw = get_hrv(start, end)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_hrv(raw))
+        return _run_tool(config, lambda: get_hrv(start, end), serialize_hrv)
 
     @mcp.tool()
     def health_weight(start_date: str, end_date: str) -> dict[str, Any]:
         """Get weight data for a date range (YYYY-MM-DD). Returns date, weight_kg, bmi, body_fat_pct."""
         start, end = _parse_date_range(start_date, end_date)
-        try:
-            ensure_authenticated(config)
-            raw = get_weight(start, end)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_weight(raw))
+        return _run_tool(config, lambda: get_weight(start, end), serialize_weight)
 
     @mcp.tool()
     def health_daily_summary(start_date: str, end_date: str) -> dict[str, Any]:
         """Get daily summary data for a date range (YYYY-MM-DD). Returns date, total_steps, distance_km, calories, floors, intensity minutes, and resting heart rate. Note: large ranges may be slow (one API call per day)."""
         start, end = _parse_date_range(start_date, end_date)
-        try:
-            ensure_authenticated(config)
-            raw = get_daily_summary_range(start, end)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_daily_summary(raw))
+        return _run_tool(config, lambda: get_daily_summary_range(start, end), serialize_daily_summary)
 
     @mcp.tool()
     def health_steps(start_date: str, end_date: str) -> dict[str, Any]:
         """Get steps data for a date range (YYYY-MM-DD). Returns date, total_steps, total_distance, step_goal."""
         start, end = _parse_date_range(start_date, end_date)
-        try:
-            ensure_authenticated(config)
-            raw = get_steps_range(start, end)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_steps(raw))
+        return _run_tool(config, lambda: get_steps_range(start, end), serialize_steps)
 
     @mcp.tool()
     def health_intensity_minutes(start_date: str, end_date: str) -> dict[str, Any]:
         """Get intensity minutes for a date range (YYYY-MM-DD). Returns date, moderate_value, vigorous_value, weekly_goal."""
         start, end = _parse_date_range(start_date, end_date)
-        try:
-            ensure_authenticated(config)
-            raw = get_intensity_minutes_range(start, end)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_intensity_minutes(raw))
+        return _run_tool(config, lambda: get_intensity_minutes_range(start, end), serialize_intensity_minutes)
 
     @mcp.tool()
     def health_body_battery(start_date: str, end_date: str) -> dict[str, Any]:
         """Get body battery for a date range (YYYY-MM-DD). Returns date, start_level, end_level. Note: large ranges may be slow (one API call per day)."""
         start, end = _parse_date_range(start_date, end_date)
-        try:
-            ensure_authenticated(config)
-            raw = get_body_battery_range(start, end)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_body_battery(raw))
+        return _run_tool(config, lambda: get_body_battery_range(start, end), serialize_body_battery)
 
     @mcp.tool()
     def health_stress(start_date: str, end_date: str) -> dict[str, Any]:
         """Get stress data for a date range (YYYY-MM-DD). Returns date, avg_stress, max_stress. Note: large ranges may be slow (one API call per day)."""
         start, end = _parse_date_range(start_date, end_date)
-        try:
-            ensure_authenticated(config)
-            raw = get_stress_range(start, end)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_stress(raw))
+        return _run_tool(config, lambda: get_stress_range(start, end), serialize_stress)
 
     @mcp.tool()
     def health_spo2(start_date: str, end_date: str) -> dict[str, Any]:
         """Get SpO2 data for a date range (YYYY-MM-DD). Returns date, avg_spo2, lowest_spo2. Note: large ranges may be slow (one API call per day)."""
         start, end = _parse_date_range(start_date, end_date)
-        try:
-            ensure_authenticated(config)
-            raw = get_spo2_range(start, end)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_spo2(raw))
+        return _run_tool(config, lambda: get_spo2_range(start, end), serialize_spo2)
 
     @mcp.tool()
     def health_resting_hr(start_date: str, end_date: str) -> dict[str, Any]:
         """Get resting heart rate for a date range (YYYY-MM-DD). Returns date, resting_hr. Note: large ranges may be slow (one API call per day)."""
         start, end = _parse_date_range(start_date, end_date)
-        try:
-            ensure_authenticated(config)
-            raw = get_resting_hr_range(start, end)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_resting_hr(raw))
+        return _run_tool(config, lambda: get_resting_hr_range(start, end), serialize_resting_hr)
 
     @mcp.tool()
     def health_readiness(start_date: str, end_date: str) -> dict[str, Any]:
         """Get training readiness for a date range (YYYY-MM-DD). Returns date, score, level. Note: large ranges may be slow (one API call per day)."""
         start, end = _parse_date_range(start_date, end_date)
-        try:
-            ensure_authenticated(config)
-            raw = get_training_readiness_range(start, end)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_training_readiness(raw))
+        return _run_tool(config, lambda: get_training_readiness_range(start, end), serialize_training_readiness)
 
     @mcp.tool()
     def health_training_status(date: str) -> dict[str, Any]:
         """Get training status for a single date (YYYY-MM-DD). Returns date, training_status, load_type."""
         parsed = _parse_date(date, "date")
-        try:
-            ensure_authenticated(config)
-            raw = get_training_status(parsed)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_training_status(raw))
+        return _run_tool(config, lambda: get_training_status(parsed), serialize_training_status)
 
     # -- Activity tools -----------------------------------------------------
 
@@ -431,97 +456,64 @@ def create_mcp_server(
             raise ToolError("start_date and end_date must be provided together")
         if start_date is not None and end_date is not None:
             parsed_start, parsed_end = _parse_date_range(start_date, end_date)
-        try:
-            ensure_authenticated(config)
-            raw = list_activities(limit, start, activity_type, search, parsed_start, parsed_end)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_activity_summary(raw))
+        return _run_tool(
+            config,
+            lambda: list_activities(limit, start, activity_type, search, parsed_start, parsed_end),
+            serialize_activity_summary,
+        )
 
     @mcp.tool()
     def activity_get(activity_id: int, detail: bool = False) -> dict[str, Any]:
         """Get a single activity by ID. For multisport activities (triathlon etc.), includes child activities with per-sport details. Returns compact activity fields by default, or extended sport-aware metrics including running dynamics (GCT, vertical oscillation/ratio, stride length), cycling power suite (avg/max/normalized power, TSS, IF), swim aggregates (SWOLF, strokes), and training response (aerobic/anaerobic training effect, vO2max, recovery time) when detail=True. When detail=True, the response carries an additional ``unavailable`` array (when non-empty) annotating which registry-known metrics are not applicable to this sport (``not_applicable_to_sport``) or unexpectedly absent (``absent_in_response``)."""
         _validate_positive_id(activity_id, "activity_id")
-        try:
-            ensure_authenticated(config)
+
+        def produce() -> dict[str, Any]:
             raw = get_activity(activity_id)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        rows = serialize_activity_detail(raw) if detail else serialize_activity_summary(raw)
-        result = _envelope(rows)
-        children: list[dict[str, Any]] = []
-        if is_multisport_parent(raw):
-            try:
+            rows = serialize_activity_detail(raw) if detail else serialize_activity_summary(raw)
+            result = _envelope(rows)
+            children: list[dict[str, Any]] = []
+            if is_multisport_parent(raw):
                 fetched = get_multisport_children(raw)
-            except GarminCliError as exc:
-                raise _handle_error(exc) from exc
-            if fetched:
-                children = fetched
-                result["children"] = serialize_multisport_children(fetched)
-        if detail:
-            manifest: list[dict[str, Any]] = []
-            if children:
-                for idx, child in enumerate(children):
-                    child_row = serialize_activity_detail(child)
-                    child_projected = child_row[0] if child_row else None
-                    manifest.extend(serialize_capability_manifest(
-                        child, child_projected, leg_index=idx,
-                    ))
-            else:
-                projected = rows[0] if rows else None
-                manifest = serialize_capability_manifest(raw, projected)
-            if manifest:
-                result["unavailable"] = manifest
-        return result
+                if fetched:
+                    children = fetched
+                    result["children"] = serialize_multisport_children(fetched)
+            if detail:
+                manifest = build_capability_manifest(
+                    raw,
+                    rows,
+                    children,
+                    serialize_detail=serialize_activity_detail,
+                    serialize_manifest=serialize_capability_manifest,
+                )
+                if manifest:
+                    result["unavailable"] = manifest
+            return result
+
+        return _authenticated(config, produce)
 
     @mcp.tool()
     def activity_weather(activity_id: int) -> dict[str, Any]:
         """Get weather for an activity. Returns temperature, weatherIconCode, windSpeed, windDirectionDegrees, humidity, precipProbability."""
         _validate_positive_id(activity_id, "activity_id")
-        try:
-            ensure_authenticated(config)
-            raw = get_activity_weather(activity_id)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        if isinstance(raw, dict) and raw:
-            rows = [{k: raw.get(k) for k in COLUMNS_ACTIVITY_WEATHER}]
-        else:
-            rows = []
-        return _envelope(rows)
+        return _run_tool(config, lambda: get_activity_weather(activity_id), _weather_rows)
 
     @mcp.tool()
     def activity_laps(activity_id: int) -> dict[str, Any]:
         """Get lap-by-lap data for an activity. For pool-swim activities returns per-pool-length rows with SWOLF, stroke type, and stroke counts; for run/bike activities returns per-lap rows with HR, power (cycling), and running dynamics. For multisport parents (triathlon etc.), returns each child leg's laps concatenated with a 0-based ``leg_index`` stamped on every row."""
         _validate_positive_id(activity_id, "activity_id")
-        try:
-            ensure_authenticated(config)
-            activity = get_activity(activity_id)
-            rows = _fetch_laps_rows_for_activity(activity, activity_id)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(rows)
+        return _run_tool(config, lambda: _fetch_laps_rows_for_activity(get_activity(activity_id), activity_id))
 
     @mcp.tool()
     def activity_hr_zones(activity_id: int) -> dict[str, Any]:
         """Get HR time-in-zone breakdown for an activity. Returns one row per zone: zone, zone_low_bpm, zone_high_bpm, seconds_in_zone, minutes_in_zone."""
         _validate_positive_id(activity_id, "activity_id")
-        try:
-            ensure_authenticated(config)
-            raw = get_activity_hr_in_timezones(activity_id)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_activity_hr_zones(raw))
+        return _run_tool(config, lambda: get_activity_hr_in_timezones(activity_id), serialize_activity_hr_zones)
 
     @mcp.tool()
     def activity_metrics_describe(activity_id: int) -> dict[str, Any]:
         """Describe the dynamic metric schema of an activity's detail stream. Returns one row per metric descriptor: key, unit, metricsIndex. Use this to discover what metrics a watch recorded for a specific activity before requesting samples."""
         _validate_positive_id(activity_id, "activity_id")
-        try:
-            ensure_authenticated(config)
-            raw = get_activity_details(activity_id)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_metrics_descriptors(raw))
+        return _run_tool(config, lambda: get_activity_details(activity_id), serialize_metrics_descriptors)
 
     # -- Workout tools ------------------------------------------------------
 
@@ -529,35 +521,22 @@ def create_mcp_server(
     def workout_list(limit: int = 20) -> dict[str, Any]:
         """List saved workouts. Returns id, name, sport, duration_min, description."""
         _validate_limit(limit)
-        try:
-            ensure_authenticated(config)
-            raw = list_workouts(limit)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_workout_summary(raw))
+        return _run_tool(config, lambda: list_workouts(limit), serialize_workout_summary)
 
     @mcp.tool()
     def workout_get(workout_id: int) -> dict[str, Any]:
         """Get workout detail by ID. Returns id, name, sport, duration_min, description, steps_summary, steps[]."""
         _validate_positive_id(workout_id, "workout_id")
-        try:
-            ensure_authenticated(config)
-            raw = get_workout(workout_id)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_workout_detail(raw))
+        return _run_tool(config, lambda: get_workout(workout_id), serialize_workout_detail)
 
     @mcp.tool()
     def workout_calendar(start_date: str, end_date: str) -> dict[str, Any]:
         """Get scheduled workouts for a date range (YYYY-MM-DD). Returns date, id, name, type, duration_min, description."""
         start, end = _parse_date_range(start_date, end_date)
-        try:
-            ensure_authenticated(config)
-            raw = get_calendar_range(start, end)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        rows = serialize_calendar_workout({"calendarItems": raw})
-        return _envelope(rows)
+        return _run_tool(
+            config, lambda: get_calendar_range(start, end),
+            lambda raw: serialize_calendar_workout({"calendarItems": raw}),
+        )
 
     @mcp.tool()
     def workout_create(
@@ -604,63 +583,39 @@ def create_mcp_server(
         error_code: "INVALID_INPUT", errors: [<field-path messages>]``.
         On success, returns ``ok: True, action: "created", workout_id``.
         """
-        errors = validate_workout_input(workout, partial=False)
-        if errors:
-            _emit_write_log(WriteLogEvent(
-                tool="workout_create",
-                outcome="failed-validation",
-                dry_run=dry_run,
-                errors_count=len(errors),
-                name_len=_workout_name_len(workout),
-                description_len=_workout_description_len(workout),
-            ))
-            return _validation_envelope(errors)
-
-        payload = build_garmin_payload(workout)
-
-        if dry_run:
-            _emit_write_log(WriteLogEvent(
-                tool="workout_create",
-                outcome="dry-run",
-                dry_run=True,
-                name_len=_workout_name_len(workout),
-                description_len=_workout_description_len(workout),
-            ))
-            return _envelope([{
-                "ok": True,
-                "dry_run": True,
-                "wire_payload": payload,
-                "validation_report": {"ok": True},
-            }])
-
-        try:
-            ensure_authenticated(config)
-            raw = create_workout(payload)
-        except GarminCliError as exc:
-            outcome = _classify_garmin_error(exc)
-            _emit_write_log(WriteLogEvent(
-                tool="workout_create",
-                outcome=outcome,
-                dry_run=False,
-                name_len=_workout_name_len(workout),
-                description_len=_workout_description_len(workout),
-            ))
-            raise _handle_error(exc) from exc
-
-        workout_id = _extract_workout_id(raw)
-        _emit_write_log(WriteLogEvent(
+        base = WriteLogEvent(
             tool="workout_create",
             outcome="success",
-            dry_run=False,
-            workout_id=workout_id,
+            dry_run=dry_run,
             name_len=_workout_name_len(workout),
             description_len=_workout_description_len(workout),
-        ))
-        return _envelope([{
-            "ok": True,
-            "action": "created",
-            "workout_id": workout_id,
-        }])
+        )
+        with _write_audit(base) as audit:
+            errors = validate_workout_input(workout, partial=False)
+            if errors:
+                audit.fail_validation(len(errors))
+                return _validation_envelope(errors)
+
+            payload = build_garmin_payload(workout)
+
+            if dry_run:
+                audit.dry_run()
+                return _envelope([{
+                    "ok": True,
+                    "dry_run": True,
+                    "wire_payload": payload,
+                    "validation_report": {"ok": True},
+                }])
+
+            ensure_authenticated(config)
+            raw = create_workout(payload)
+            workout_id = _extract_workout_id(raw)
+            audit.success(workout_id=workout_id)
+            return _envelope([{
+                "ok": True,
+                "action": "created",
+                "workout_id": workout_id,
+            }])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
     def workout_schedule(workout_id: int, date: str) -> dict[str, Any]:
@@ -672,31 +627,19 @@ def create_mcp_server(
         """
         _validate_positive_id(workout_id, "workout_id")
         parsed_date = _parse_date(date, "date")
-        try:
+        base = WriteLogEvent(tool="workout_schedule", outcome="success", workout_id=workout_id)
+        with _write_audit(base) as audit:
             ensure_authenticated(config)
             raw = schedule_workout(workout_id, parsed_date)
-        except GarminCliError as exc:
-            outcome = _classify_garmin_error(exc)
-            _emit_write_log(WriteLogEvent(
-                tool="workout_schedule",
-                outcome=outcome,
-                workout_id=workout_id,
-            ))
-            raise _handle_error(exc) from exc
-
-        raw_dict = raw if isinstance(raw, dict) else {}
-        _emit_write_log(WriteLogEvent(
-            tool="workout_schedule",
-            outcome="success",
-            workout_id=workout_id,
-        ))
-        return _envelope([{
-            "ok": True,
-            "action": "scheduled",
-            "workout_id": workout_id,
-            "workout_schedule_id": raw_dict.get("workoutScheduleId"),
-            "date": raw_dict.get("calendarDate") or parsed_date.isoformat(),
-        }])
+            raw_dict = raw if isinstance(raw, dict) else {}
+            audit.success()
+            return _envelope([{
+                "ok": True,
+                "action": "scheduled",
+                "workout_id": workout_id,
+                "workout_schedule_id": raw_dict.get("workoutScheduleId"),
+                "date": raw_dict.get("calendarDate") or parsed_date.isoformat(),
+            }])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
     def workout_update(
@@ -720,84 +663,46 @@ def create_mcp_server(
         workout_id``.
         """
         _validate_positive_id(workout_id, "workout_id")
-        errors = validate_workout_input(workout, partial=True)
-        if errors:
-            _emit_write_log(WriteLogEvent(
-                tool="workout_update",
-                outcome="failed-validation",
-                dry_run=dry_run,
-                workout_id=workout_id,
-                errors_count=len(errors),
-                name_len=_workout_name_len(workout),
-                description_len=_workout_description_len(workout),
-            ))
-            return _validation_envelope(errors)
-
-        try:
-            ensure_authenticated(config)
-            existing = get_workout(workout_id)
-            merged, warnings = merge_workout_payload(existing, workout)
-        except GarminCliError as exc:
-            outcome = _classify_garmin_error(exc)
-            _emit_write_log(WriteLogEvent(
-                tool="workout_update",
-                outcome=outcome,
-                dry_run=dry_run,
-                workout_id=workout_id,
-                name_len=_workout_name_len(workout),
-                description_len=_workout_description_len(workout),
-            ))
-            raise _handle_error(exc) from exc
-
-        if dry_run:
-            _emit_write_log(WriteLogEvent(
-                tool="workout_update",
-                outcome="dry-run",
-                dry_run=True,
-                workout_id=workout_id,
-                name_len=_workout_name_len(workout),
-                description_len=_workout_description_len(workout),
-            ))
-            return _envelope([{
-                "ok": True,
-                "dry_run": True,
-                "wire_payload": merged,
-                "validation_report": {
-                    "ok": True,
-                    "warnings": list(warnings),
-                },
-            }])
-
-        # update_workout routes through _write_request(capability="workout_update"),
-        # i.e. the governed raw fallback. R9 in the plan defers migration off
-        # RAW_FALLBACKS until python-garminconnect exposes a typed helper.
-        try:
-            update_workout(workout_id, merged)
-        except GarminCliError as exc:
-            outcome = _classify_garmin_error(exc)
-            _emit_write_log(WriteLogEvent(
-                tool="workout_update",
-                outcome=outcome,
-                dry_run=False,
-                workout_id=workout_id,
-                name_len=_workout_name_len(workout),
-                description_len=_workout_description_len(workout),
-            ))
-            raise _handle_error(exc) from exc
-
-        _emit_write_log(WriteLogEvent(
+        base = WriteLogEvent(
             tool="workout_update",
             outcome="success",
-            dry_run=False,
+            dry_run=dry_run,
             workout_id=workout_id,
             name_len=_workout_name_len(workout),
             description_len=_workout_description_len(workout),
-        ))
-        return _envelope([{
-            "ok": True,
-            "action": "updated",
-            "workout_id": workout_id,
-        }])
+        )
+        with _write_audit(base) as audit:
+            errors = validate_workout_input(workout, partial=True)
+            if errors:
+                audit.fail_validation(len(errors))
+                return _validation_envelope(errors)
+
+            ensure_authenticated(config)
+            existing = get_workout(workout_id)
+            merged, warnings = merge_workout_payload(existing, workout)
+
+            if dry_run:
+                audit.dry_run()
+                return _envelope([{
+                    "ok": True,
+                    "dry_run": True,
+                    "wire_payload": merged,
+                    "validation_report": {
+                        "ok": True,
+                        "warnings": list(warnings),
+                    },
+                }])
+
+            # update_workout routes through _write_request(capability="workout_update"),
+            # i.e. the governed raw fallback. R9 in the plan defers migration off
+            # RAW_FALLBACKS until python-garminconnect exposes a typed helper.
+            update_workout(workout_id, merged)
+            audit.success()
+            return _envelope([{
+                "ok": True,
+                "action": "updated",
+                "workout_id": workout_id,
+            }])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
     def workout_delete(workout_id: int) -> dict[str, Any]:
@@ -807,111 +712,67 @@ def create_mcp_server(
         ``ok: True, action: "deleted", workout_id`` on success.
         """
         _validate_positive_id(workout_id, "workout_id")
-        try:
+        base = WriteLogEvent(tool="workout_delete", outcome="success", workout_id=workout_id)
+        with _write_audit(base) as audit:
             ensure_authenticated(config)
             delete_workout(workout_id)
-        except GarminCliError as exc:
-            outcome = _classify_garmin_error(exc)
-            _emit_write_log(WriteLogEvent(
-                tool="workout_delete",
-                outcome=outcome,
-                workout_id=workout_id,
-            ))
-            raise _handle_error(exc) from exc
-
-        _emit_write_log(WriteLogEvent(
-            tool="workout_delete",
-            outcome="success",
-            workout_id=workout_id,
-        ))
-        return _envelope([{
-            "ok": True,
-            "action": "deleted",
-            "workout_id": workout_id,
-        }])
+            audit.success()
+            return _envelope([{
+                "ok": True,
+                "action": "deleted",
+                "workout_id": workout_id,
+            }])
 
     # -- Performance tools --------------------------------------------------
 
     @mcp.tool()
     def performance_race_predictions() -> dict[str, Any]:
         """Get latest race predictions. Returns race_type, predicted_time_seconds, distance_meters."""
-        try:
-            ensure_authenticated(config)
-            raw = get_race_predictions()
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_race_predictions(raw))
+        return _run_tool(config, get_race_predictions, serialize_race_predictions)
 
     @mcp.tool()
     def performance_endurance_score(start_date: str, end_date: str) -> dict[str, Any]:
         """Get endurance score for a date range (YYYY-MM-DD). Returns date, overall_score, endurance_classification."""
         start, end = _parse_date_range(start_date, end_date)
-        try:
-            ensure_authenticated(config)
-            raw = get_endurance_score_range(start, end)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_endurance_score(raw))
+        return _run_tool(config, lambda: get_endurance_score_range(start, end), serialize_endurance_score)
 
     @mcp.tool()
     def performance_hill_score(start_date: str, end_date: str) -> dict[str, Any]:
         """Get hill score for a date range (YYYY-MM-DD). Returns date, overall_score, endurance_score, strength_score."""
         start, end = _parse_date_range(start_date, end_date)
-        try:
-            ensure_authenticated(config)
-            raw = get_hill_score_range(start, end)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_hill_score(raw))
+        return _run_tool(config, lambda: get_hill_score_range(start, end), serialize_hill_score)
 
     @mcp.tool()
     def performance_thresholds() -> dict[str, Any]:
         """Get all available threshold metrics. Returns sport, lt_hr_bpm, lt_pace, ftp_watts, weight_kg."""
-        try:
-            ensure_authenticated(config)
-            raw = get_all_thresholds()
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_thresholds(raw))
+        return _run_tool(config, get_all_thresholds, serialize_thresholds)
 
     @mcp.tool()
     def performance_vo2max(date: str | None = None) -> dict[str, Any]:
         """Get VO2 max. Pass a date (YYYY-MM-DD) for a specific day, or omit for latest. Returns date, vo2max, sport."""
-        try:
-            ensure_authenticated(config)
+
+        def fetch() -> Any:
             if date is not None:
-                parsed = _parse_date(date, "date")
-                raw = get_vo2max(parsed)
-            else:
-                raw = get_latest_vo2max()
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        rows = serialize_vo2max(raw)
-        if date is None:
-            rows = select_latest_dated_rows(rows)
-        return _envelope(rows)
+                return get_vo2max(_parse_date(date, "date"))
+            return get_latest_vo2max()
+
+        def serialize(raw: Any) -> list[dict[str, Any]]:
+            rows = serialize_vo2max(raw)
+            return rows if date is not None else select_latest_dated_rows(rows)
+
+        return _run_tool(config, fetch, serialize)
 
     @mcp.tool()
     def performance_zones() -> dict[str, Any]:
         """Get lactate-threshold-derived zone inputs. Returns sport, lt_hr_bpm, lt_pace."""
-        try:
-            ensure_authenticated(config)
-            raw = get_lactate_threshold()
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_zones(raw))
+        return _run_tool(config, get_lactate_threshold, serialize_zones)
 
     # -- Device tools -------------------------------------------------------
 
     @mcp.tool()
     def device_list() -> dict[str, Any]:
         """List registered Garmin devices. Returns device_id, display_name, device_type, last_sync_time."""
-        try:
-            ensure_authenticated(config)
-            raw = get_devices()
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return _envelope(serialize_device(raw))
+        return _run_tool(config, get_devices, serialize_device)
 
     # -- Login status -------------------------------------------------------
 

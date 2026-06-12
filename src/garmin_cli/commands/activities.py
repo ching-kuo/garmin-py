@@ -19,8 +19,7 @@ from garmin_cli.endpoints.activities import (
     is_multisport_parent,
     list_activities,
 )
-from garmin_cli.metrics.registry import LAP_SWIM_TYPE_KEYS
-from garmin_cli.metrics.sport_profile import SportProfile, profile_for
+from garmin_cli.metrics.sport_profile import SportProfile
 from garmin_cli.output import (
     echo_csv,
     echo_json,
@@ -44,6 +43,10 @@ from garmin_cli.serializers import (
     serialize_activity_summary,
     serialize_capability_manifest,
     serialize_multisport_children,
+)
+from garmin_cli.services.activities import (
+    build_capability_manifest,
+    fetch_laps_for_activity,
 )
 
 
@@ -94,22 +97,6 @@ def list_cmd(
     )
 
 
-def _fetch_one_activity_laps(raw: dict, activity_id: object) -> tuple[list[dict], SportProfile]:
-    """Fetch laps for a single (non-multisport) activity, auto-routing by sport.
-
-    pool-swim activities use the typed_splits endpoint to get per-pool-length
-    rows; everything else uses the raw-URL splits endpoint.
-    """
-    type_key = activity_type_key(raw)
-    profile = profile_for(type_key)
-    if profile.type_keys & LAP_SWIM_TYPE_KEYS:
-        splits_payload = get_activity_typed_splits(activity_id)
-    else:
-        splits_payload = get_activity_splits(activity_id)
-    rows = serialize_activity_laps(raw, splits_payload, profile)
-    return rows, profile
-
-
 def _fetch_laps_for_activity(raw: dict, activity_id: str) -> tuple[list[dict], SportProfile]:
     """Fetch laps for an activity, handling multisport parents.
 
@@ -117,21 +104,21 @@ def _fetch_laps_for_activity(raw: dict, activity_id: str) -> tuple[list[dict], S
     and stamps ``leg_index`` (0-based) onto every returned row. The returned
     profile is the parent's profile (for table column hint); per-row
     sport-specificity remains intact via the columns each row carries.
+
+    Thin wrapper over :func:`garmin_cli.services.activities.fetch_laps_for_activity`
+    that binds this module's endpoint/serializer references so test patches on
+    ``garmin_cli.commands.activities.*`` stay effective.
     """
-    if is_multisport_parent(raw):
-        children = get_multisport_children(raw)
-        if children:
-            all_rows: list[dict] = []
-            for idx, child in enumerate(children):
-                child_id = child.get("activityId")
-                if child_id is None:
-                    continue
-                child_rows, _ = _fetch_one_activity_laps(child, child_id)
-                for row in child_rows:
-                    row["leg_index"] = idx
-                all_rows.extend(child_rows)
-            return all_rows, profile_for(activity_type_key(raw))
-    return _fetch_one_activity_laps(raw, activity_id)
+    return fetch_laps_for_activity(
+        raw,
+        activity_id,
+        activity_type_key=activity_type_key,
+        is_multisport_parent=is_multisport_parent,
+        get_multisport_children=get_multisport_children,
+        splits_fn=get_activity_splits,
+        typed_splits_fn=get_activity_typed_splits,
+        serialize_laps=serialize_activity_laps,
+    )
 
 
 @activity.command("get")
@@ -174,16 +161,13 @@ def get_cmd(ctx: click.Context, activity_id: str, detail: bool, include_laps: bo
     # envelopes union per-child manifests with leg_index attached.
     manifest: list[dict] = []
     if detail:
-        if children_raw:
-            for idx, child in enumerate(children_raw):
-                child_row = serialize_activity_detail(child)
-                child_projected = child_row[0] if child_row else None
-                manifest.extend(serialize_capability_manifest(
-                    child, child_projected, leg_index=idx,
-                ))
-        else:
-            projected = data[0] if data else None
-            manifest = serialize_capability_manifest(raw, projected)
+        manifest = build_capability_manifest(
+            raw,
+            data,
+            children_raw,
+            serialize_detail=serialize_activity_detail,
+            serialize_manifest=serialize_capability_manifest,
+        )
 
     if fmt == "json":
         envelope = make_envelope(command="activity get", data=data)
