@@ -64,3 +64,4 @@ ignore = [
 files = ["src"]
 ignore_missing_imports = true
 follow_imports = "silent"
+disable_error_code = ["import-untyped"]

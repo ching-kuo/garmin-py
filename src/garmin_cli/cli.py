@@ -57,7 +57,9 @@ def _json_requested(args: Sequence[str] | None) -> bool:
 class SafeGroup(click.Group):
     """Top-level group with centralized exception handling."""
 
-    def main(self, args: Sequence[str] | None = None, prog_name: str | None = None, **extra: Any) -> Any:
+    def main(  # type: ignore[override]
+        self, args: Sequence[str] | None = None, prog_name: str | None = None, **extra: Any
+    ) -> Any:
         extra["standalone_mode"] = False
         try:
             return super().main(args=args, prog_name=prog_name, **extra)
