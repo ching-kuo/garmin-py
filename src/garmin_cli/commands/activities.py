@@ -11,6 +11,7 @@ from garmin_cli.date_utils import CLICK_DATE_TYPE, resolve_click_dates
 from garmin_cli.endpoints.activities import (
     activity_type_key,
     get_activity,
+    get_activity_details,
     get_activity_hr_in_timezones,
     get_activity_splits,
     get_activity_typed_splits,
@@ -33,6 +34,7 @@ from garmin_cli.serializers import (
     COLUMNS_ACTIVITY_HR_ZONES,
     COLUMNS_ACTIVITY_SUMMARY,
     COLUMNS_ACTIVITY_WEATHER,
+    COLUMNS_METRICS_DESCRIPTORS,
     COLUMNS_MULTISPORT_CHILDREN,
     columns_for_lap,
     columns_for_sport,
@@ -42,6 +44,7 @@ from garmin_cli.serializers import (
     serialize_activity_laps,
     serialize_activity_summary,
     serialize_capability_manifest,
+    serialize_metrics_descriptors,
     serialize_multisport_children,
 )
 from garmin_cli.services.activities import (
@@ -241,3 +244,18 @@ def weather_cmd(ctx: click.Context, activity_id: str) -> None:
     raw = get_activity_weather(activity_id)
     data = [raw] if isinstance(raw, dict) else (raw or [])
     render_output(ctx.obj["config"].output_format, "activity weather", data, COLUMNS_ACTIVITY_WEATHER)
+
+
+@activity.command("metrics-describe")
+@click.argument("activity_id")
+@click.pass_context
+def metrics_describe_cmd(ctx: click.Context, activity_id: str) -> None:
+    """Describe the dynamic metric schema for an activity's detail stream.
+
+    Returns one row per metric descriptor: key, unit, metricsIndex.
+    Use this to discover what metrics a watch recorded for a specific activity.
+    """
+    ensure_authenticated(ctx.obj["config"])
+    raw = get_activity_details(activity_id)
+    rows = serialize_metrics_descriptors(raw)
+    render_output(ctx.obj["config"].output_format, "activity metrics-describe", rows, COLUMNS_METRICS_DESCRIPTORS)

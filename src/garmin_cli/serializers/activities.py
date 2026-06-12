@@ -314,6 +314,8 @@ def serialize_activity_hr_zones(zones: Any) -> list[dict[str, Any]]:
 
 # --- Activity metric descriptors --------------------------------------------
 
+COLUMNS_METRICS_DESCRIPTORS: tuple[str, ...] = ("key", "unit", "metricsIndex")
+
 
 def serialize_metrics_descriptors(details: Any) -> list[dict[str, Any]]:
     """Project metricDescriptors entries from get_activity_details payload."""

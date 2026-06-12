@@ -103,6 +103,16 @@ garmin-cli --json health readiness --days 7
 
 # Training status (single day only) -- fields: date, training_status, load_type
 garmin-cli --json health status --date 2026-03-11
+
+# Steps -- fields: date, total_steps, total_distance, step_goal
+garmin-cli --json health steps --days 7
+
+# Daily summary -- fields: date, total_steps, distance_km, calories, floors, moderate_intensity_minutes, vigorous_intensity_minutes, resting_hr
+# Note: one API call per day — large ranges may be slow
+garmin-cli --json health daily-summary --days 7
+
+# Intensity minutes -- fields: date, moderate_value, vigorous_value, weekly_goal
+garmin-cli --json health intensity-minutes --days 7
 ```
 
 ### Activities
@@ -139,6 +149,10 @@ garmin-cli --json activity zones 12345678901
 
 # Weather for an activity -- fields: temperature, weatherIconCode, windSpeed, windDirectionDegrees, humidity, precipProbability
 garmin-cli --json activity weather 12345678901
+
+# Metric descriptors for an activity's detail stream -- fields: key, unit, metricsIndex
+# Use to discover what metrics a watch recorded before requesting samples
+garmin-cli --json activity metrics-describe 12345678901
 ```
 
 `--limit` defaults to 20, max 100. `--type` filters by Garmin activity type key (e.g., `running`, `cycling`, `swimming`).
@@ -387,6 +401,24 @@ garmin-cli --json performance vo2max --date 2026-03-11
 
 # Lactate threshold zones -- fields: sport, lt_hr_bpm, lt_pace
 garmin-cli --json performance zones
+
+# Race predictions -- fields: race_type, predicted_time_seconds, distance_meters
+garmin-cli --json performance race-predictions
+
+# Endurance score -- fields: date, overall_score, endurance_classification
+# Note: one API call per day — large ranges may be slow
+garmin-cli --json performance endurance-score --days 7
+
+# Hill score -- fields: date, overall_score, endurance_score, strength_score
+# Note: one API call per day — large ranges may be slow
+garmin-cli --json performance hill-score --days 7
+```
+
+### Devices
+
+```bash
+# List registered devices -- fields: device_id, display_name, device_type, last_sync_time
+garmin-cli --json device list
 ```
 
 ## Patterns for agents

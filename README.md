@@ -114,25 +114,31 @@ Exit code is always `0` on success, `1` on error.
 ### Health
 
 ```bash
-garmin-cli health sleep       [--date DATE | --from DATE --to DATE | --days N]
-garmin-cli health hrv         [--date DATE | --from DATE --to DATE | --days N]
-garmin-cli health weight      [--date DATE | --from DATE --to DATE | --days N]
-garmin-cli health body-battery [--date DATE | --from DATE --to DATE | --days N]
-garmin-cli health stress      [--date DATE | --from DATE --to DATE | --days N]
-garmin-cli health spo2        [--date DATE | --from DATE --to DATE | --days N]
-garmin-cli health resting-hr  [--date DATE | --from DATE --to DATE | --days N]
-garmin-cli health readiness   [--date DATE | --from DATE --to DATE | --days N]
-garmin-cli health status      [--date DATE]
+garmin-cli health sleep            [--date DATE | --from DATE --to DATE | --days N]
+garmin-cli health hrv              [--date DATE | --from DATE --to DATE | --days N]
+garmin-cli health weight           [--date DATE | --from DATE --to DATE | --days N]
+garmin-cli health body-battery     [--date DATE | --from DATE --to DATE | --days N]
+garmin-cli health stress           [--date DATE | --from DATE --to DATE | --days N]
+garmin-cli health spo2             [--date DATE | --from DATE --to DATE | --days N]
+garmin-cli health resting-hr       [--date DATE | --from DATE --to DATE | --days N]
+garmin-cli health readiness        [--date DATE | --from DATE --to DATE | --days N]
+garmin-cli health status           [--date DATE]
+garmin-cli health steps            [--date DATE | --from DATE --to DATE | --days N]
+garmin-cli health daily-summary    [--date DATE | --from DATE --to DATE | --days N]
+garmin-cli health intensity-minutes [--date DATE | --from DATE --to DATE | --days N]
 ```
+
+`health daily-summary` makes one API call per day — large date ranges may be slow.
 
 ### Activities
 
 ```bash
-garmin-cli activity list    [--limit N] [--type TYPE] [--search TEXT] [--date DATE | --from DATE --to DATE | --days N]
-garmin-cli activity get     ACTIVITY_ID [--detail] [--laps]  # --detail/-d shows sport-aware metrics; --laps appends lap data
-garmin-cli activity laps    ACTIVITY_ID  # per-lap rows (run/bike) or per-pool-length rows (lap_swimming)
-garmin-cli activity zones   ACTIVITY_ID  # HR time-in-zone breakdown
-garmin-cli activity weather ACTIVITY_ID
+garmin-cli activity list             [--limit N] [--type TYPE] [--search TEXT] [--date DATE | --from DATE --to DATE | --days N]
+garmin-cli activity get              ACTIVITY_ID [--detail] [--laps]  # --detail/-d shows sport-aware metrics; --laps appends lap data
+garmin-cli activity laps             ACTIVITY_ID  # per-lap rows (run/bike) or per-pool-length rows (lap_swimming)
+garmin-cli activity zones            ACTIVITY_ID  # HR time-in-zone breakdown
+garmin-cli activity weather          ACTIVITY_ID
+garmin-cli activity metrics-describe ACTIVITY_ID  # metric descriptors: key, unit, metricsIndex
 ```
 
 `--limit` defaults to 20, max 100. `--type` filters by activity type key (e.g., `running`, `cycling`).
@@ -193,6 +199,17 @@ YAML input requires `pyyaml`: `pip install pyyaml`. See [SKILL.md](SKILL.md) for
 garmin-cli performance thresholds
 garmin-cli performance zones
 garmin-cli performance vo2max
+garmin-cli performance race-predictions
+garmin-cli performance endurance-score [--date DATE | --from DATE --to DATE | --days N]
+garmin-cli performance hill-score      [--date DATE | --from DATE --to DATE | --days N]
+```
+
+`performance endurance-score` and `performance hill-score` make one API call per day — large date ranges may be slow.
+
+### Devices
+
+```bash
+garmin-cli device list  # registered devices: device_id, display_name, device_type, last_sync_time
 ```
 
 ## Normalized JSON Schemas

@@ -8,6 +8,7 @@ import click
 
 from garmin_cli import __version__
 from garmin_cli.commands.activities import activity
+from garmin_cli.commands.devices import device
 from garmin_cli.commands.health import health
 from garmin_cli.commands.login import login
 from garmin_cli.commands.performance import performance
@@ -137,6 +138,7 @@ cli.add_command(health)
 cli.add_command(activity)
 cli.add_command(performance)
 cli.add_command(workout)
+cli.add_command(device)
 cli.add_command(login)
 cli.add_command(mcp_server_cmd)
 
