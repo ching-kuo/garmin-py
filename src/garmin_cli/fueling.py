@@ -1,12 +1,11 @@
-"""Garmin Connect API calls used by the fueling workflow."""
-
+"""Fueling-workflow API helpers backed by Garmin Connect APIs."""
 from __future__ import annotations
 
 import logging
 from datetime import datetime
 
 from garmin_cli import backend as garth
-from .zones import ms_to_pace
+from garmin_cli.zones import ms_to_pace
 
 logger = logging.getLogger(__name__)
 

@@ -2,7 +2,6 @@
 
 Pure functions — no Garmin API dependency.
 """
-
 from __future__ import annotations
 
 
@@ -16,7 +15,7 @@ def ms_to_pace(speed_ms: float) -> str:
     return f"{minutes}:{seconds:02d} /km"
 
 
-def calculate_running_zones(lt_pace_ms: float) -> dict:
+def calculate_running_zones(lt_pace_ms: float) -> dict[str, dict[str, str]]:
     """Return running pace zones based on lactate-threshold pace (m/s)."""
     return {
         "Zone 1 (Recovery)": {
@@ -56,7 +55,7 @@ def calculate_running_zones(lt_pace_ms: float) -> dict:
     }
 
 
-def calculate_cycling_zones(ftp_watts: int) -> dict:
+def calculate_cycling_zones(ftp_watts: int) -> dict[str, str]:
     """Return cycling power zones based on FTP (watts)."""
     return {
         "Zone 1 (Active Recovery)": f"< {int(ftp_watts * 0.55)} W",
