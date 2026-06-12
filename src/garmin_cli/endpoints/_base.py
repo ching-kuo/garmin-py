@@ -3,11 +3,10 @@ from __future__ import annotations
 
 import os
 import time
-import re
 from datetime import date, timedelta
 from typing import Any, Callable
 
-from garmin_cli.exceptions import GarminCliError
+from garmin_cli.exceptions import GarminCliError, extract_status_code
 
 _RETRY_DELAYS: list[float] = [2, 4, 8]
 
@@ -39,18 +38,6 @@ def _validate_numeric_id(value: Any, name: str) -> int:
             error=f"{name} must be a valid integer",
             error_code="INVALID_INPUT",
         ) from exc
-
-
-def extract_status_code(exc: Exception) -> int | None:
-    if hasattr(exc, "response") and hasattr(exc.response, "status_code"):
-        return exc.response.status_code
-    # GarthHTTPError stores the HTTPError at exc.error.response.status_code
-    if hasattr(exc, "error") and hasattr(exc.error, "response") and hasattr(exc.error.response, "status_code"):
-        return exc.error.response.status_code
-    match = re.search(r"\b([1-5]\d{2})\b", str(exc))
-    if match is not None:
-        return int(match.group(1))
-    return None
 
 
 def _retry_loop(

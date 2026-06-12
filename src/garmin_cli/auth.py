@@ -8,8 +8,7 @@ from typing import Any
 
 from garmin_cli import backend as garth
 from garmin_cli.config import CliConfig
-from garmin_cli.endpoints._base import extract_status_code
-from garmin_cli.exceptions import GarminCliError
+from garmin_cli.exceptions import GarminCliError, extract_status_code
 from garmin_cli.token_store import ensure_secure_directory
 
 logger = logging.getLogger(__name__)

@@ -1,4 +1,4 @@
-"""Tests for extract_status_code and _make_write_request from garmin_cli.endpoints._base."""
+"""Tests for _make_write_request from garmin_cli.endpoints._base and extract_status_code from garmin_cli.exceptions."""
 from __future__ import annotations
 
 from typing import Any
@@ -8,10 +8,9 @@ import pytest
 
 from garmin_cli.endpoints._base import (
     _resolve_retry_delays,
-    extract_status_code,
     _make_write_request,
 )
-from garmin_cli.exceptions import GarminCliError
+from garmin_cli.exceptions import GarminCliError, extract_status_code
 from tests.helpers import make_http_error as _http_error
 
 

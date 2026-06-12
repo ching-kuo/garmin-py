@@ -7,10 +7,10 @@ from typing import Any
 from garmin_cli import backend as garth
 from garmin_cli.endpoints._base import _make_request
 from garmin_cli.exceptions import GarminCliError
-from garmin_cli.serializers import (
-    _format_pace_seconds,
-    _pace_from_speed,
-    _parse_flat_lactate,
+from garmin_cli.units import (
+    format_pace_seconds,
+    pace_from_speed,
+    parse_flat_lactate,
 )
 
 
@@ -75,9 +75,9 @@ def _merge_threshold(
     normalized_payload = dict(payload)
     pace_value = normalized_payload.get("lactateThresholdPace")
     if isinstance(pace_value, (int, float)):
-        normalized_payload["lactateThresholdPace"] = _format_pace_seconds(pace_value)
+        normalized_payload["lactateThresholdPace"] = format_pace_seconds(pace_value)
     elif normalized_payload.get("lactateThresholdPace") is None:
-        normalized_payload["lactateThresholdPace"] = _pace_from_speed(
+        normalized_payload["lactateThresholdPace"] = pace_from_speed(
             normalized_payload.get("lactateThresholdSpeed")
         )
     for field in (
@@ -116,7 +116,7 @@ def get_all_thresholds() -> dict[str, Any]:
 
     lactate_items = _iter_dict_items(lactate)
     if lactate_items and all(item.get("sport") is None for item in lactate_items):
-        for sport, payload in _parse_flat_lactate(lactate_items).items():
+        for sport, payload in parse_flat_lactate(lactate_items).items():
             _merge_threshold(thresholds_by_sport, sport, payload)
     else:
         for item in lactate_items:

@@ -24,7 +24,6 @@ from mcp.types import ToolAnnotations
 from garmin_cli import backend as garth
 from garmin_cli.auth import _probe_session, _secure_directory, ensure_authenticated
 from garmin_cli.config import CliConfig
-from garmin_cli.endpoints._base import extract_status_code
 from garmin_cli.endpoints.activities import (
     activity_type_key,
     get_activity,
@@ -74,7 +73,7 @@ from garmin_cli.endpoints.workouts import (
     schedule_workout,
     update_workout,
 )
-from garmin_cli.exceptions import GarminCliError
+from garmin_cli.exceptions import GarminCliError, extract_status_code
 from garmin_cli.workout_builder import build_garmin_payload, merge_workout_payload
 from garmin_cli.workout_schema import validate_workout_input
 from garmin_cli.serializers import (

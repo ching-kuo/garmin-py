@@ -16,6 +16,11 @@ from garmin_cli.metrics.sport_profile import (
     columns_for_sport,  # noqa: F401  (re-exported: commands/activities.py imports from here)
     profile_for,
 )
+from garmin_cli.units import (
+    format_pace_seconds,
+    pace_from_speed,
+    parse_flat_lactate,
+)
 
 
 COLUMNS_SLEEP = (
@@ -136,37 +141,6 @@ def _listify(raw: Any) -> list[dict[str, Any]]:
     return []
 
 
-def _pace_from_speed(speed: Any) -> str | None:
-    if speed is None:
-        return None
-    try:
-        speed_value = float(speed)
-    except (TypeError, ValueError):
-        return None
-    if speed_value <= 0:
-        return None
-    total_seconds = int(1000 / speed_value)
-    minutes, seconds = divmod(total_seconds, 60)
-    return f"{minutes}:{seconds:02d}"
-
-
-def _format_pace_seconds(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        if ":" in value:
-            return value
-        try:
-            value = float(value)
-        except ValueError:
-            return value
-    if isinstance(value, (int, float)):
-        total_seconds = int(value)
-        minutes, seconds = divmod(total_seconds, 60)
-        return f"{minutes}:{seconds:02d}"
-    return None
-
-
 def select_latest_dated_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     dated_rows = [
         row for row in rows if isinstance(row.get("date"), str) and row.get("date")
@@ -178,35 +152,6 @@ def select_latest_dated_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 
 _VO2MAX_NON_SPORT_KEYS: frozenset[str] = frozenset({"userId", "heatAltitudeAcclimation"})
-
-
-def _garmin_pace(speed: Any) -> str | None:
-    if speed is None:
-        return None
-    try:
-        return _pace_from_speed(float(speed) * 10)
-    except (TypeError, ValueError):
-        return None
-
-
-def _parse_flat_lactate(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Parse flat Garmin lactate threshold items (no sport key) into per-sport dicts."""
-    by_sport: dict[str, dict[str, Any]] = {}
-    for item in items:
-        # "hearRate" is Garmin's typo on the wire, not ours.
-        hr = item.get("hearRate") or item.get("heartRate")
-        if hr is not None:
-            by_sport.setdefault("running", {})["lactateThresholdHeartRate"] = hr
-        speed = item.get("speed")
-        if speed is not None:
-            by_sport.setdefault("running", {})["lactateThresholdPace"] = _garmin_pace(speed)
-        cycling_hr = item.get("heartRateCycling")
-        if cycling_hr is not None:
-            by_sport.setdefault("cycling", {})["lactateThresholdHeartRate"] = cycling_hr
-        row_speed = item.get("rowSpeed")
-        if row_speed is not None:
-            by_sport.setdefault("rowing", {})["lactateThresholdPace"] = _garmin_pace(row_speed)
-    return by_sport
 
 
 def _normalize_workout_base(workout: dict[str, Any]) -> dict[str, Any]:
@@ -844,7 +789,7 @@ def serialize_multisport_children(children: list[dict[str, Any]]) -> list[dict[s
                 "distance_km": _km(distance),
                 "duration_min": _minutes(duration),
                 "avg_hr": avg_hr,
-                "avg_pace": _pace_from_speed(avg_speed) if show_pace else None,
+                "avg_pace": pace_from_speed(avg_speed) if show_pace else None,
                 "calories": calories,
             }
         )
@@ -945,7 +890,7 @@ def serialize_vo2max(raw: Any) -> list[dict[str, Any]]:
 def serialize_zones(raw: Any) -> list[dict[str, Any]]:
     items = _listify(raw.get("value") if isinstance(raw, dict) and isinstance(raw.get("value"), dict) else raw)
     if items and all(item.get("sport") is None for item in items):
-        by_sport = _parse_flat_lactate(items)
+        by_sport = parse_flat_lactate(items)
         return [
             {
                 "sport": sport,
@@ -957,8 +902,8 @@ def serialize_zones(raw: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for item in items:
         pace = _coalesce(
-            _format_pace_seconds(item.get("lactateThresholdPace")),
-            _pace_from_speed(item.get("lactateThresholdSpeed")),
+            format_pace_seconds(item.get("lactateThresholdPace")),
+            pace_from_speed(item.get("lactateThresholdSpeed")),
         )
         rows.append(
             {
@@ -985,7 +930,7 @@ def serialize_thresholds(raw: Any) -> list[dict[str, Any]]:
             {
                 "sport": threshold.get("sport"),
                 "lt_hr_bpm": threshold.get("lactateThresholdHeartRate"),
-                "lt_pace": _format_pace_seconds(threshold.get("lactateThresholdPace")),
+                "lt_pace": format_pace_seconds(threshold.get("lactateThresholdPace")),
                 "ftp_watts": threshold.get("functionalThresholdPower"),
                 "weight_kg": threshold.get("weight"),
             }

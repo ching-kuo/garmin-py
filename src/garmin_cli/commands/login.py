@@ -7,8 +7,7 @@ import click
 
 from garmin_cli import backend as garth
 from garmin_cli.auth import _probe_session, _secure_directory
-from garmin_cli.endpoints._base import extract_status_code
-from garmin_cli.exceptions import GarminCliError
+from garmin_cli.exceptions import GarminCliError, extract_status_code
 from garmin_cli.output import echo_json, make_envelope
 from garmin_cli.token_store import tokenstore_path
 
