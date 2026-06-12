@@ -1,0 +1,208 @@
+"""Serializer helpers for Garmin Connect payloads.
+
+This package replaces the former monolithic ``serializers.py`` module. The
+public surface is unchanged: every name that ``serializers.py`` exposed is
+re-exported here so existing ``from garmin_cli.serializers import ...`` lines
+keep working. Implementations live in domain modules mirroring
+``garmin_cli.endpoints`` (:mod:`~garmin_cli.serializers.health`,
+:mod:`~garmin_cli.serializers.activities`,
+:mod:`~garmin_cli.serializers.workouts`,
+:mod:`~garmin_cli.serializers.performance`,
+:mod:`~garmin_cli.serializers.devices`) with shared private helpers in
+:mod:`~garmin_cli.serializers._common`.
+"""
+from __future__ import annotations
+
+# Re-exported for back-compat: ``columns_for_sport`` was importable from
+# ``garmin_cli.serializers`` (commands/activities.py relies on this).
+from garmin_cli.metrics.registry import (
+    CYCLING_TYPE_KEYS,
+    LAP_SWIM_TYPE_KEYS,
+    REGISTRY,
+    RUNNING_TYPE_KEYS,
+)
+from garmin_cli.metrics.sport_profile import (
+    UNION_COLUMNS,
+    SportProfile,
+    columns_for_sport,
+    profile_for,
+)
+from garmin_cli.serializers._common import (
+    _coalesce,
+    _get_nested,
+    _hours,
+    _km,
+    _kmh,
+    _listify,
+    _minutes,
+    select_latest_dated_rows,
+)
+from garmin_cli.serializers.activities import (
+    COLUMNS_ACTIVITY_DETAIL,
+    COLUMNS_ACTIVITY_HR_ZONES,
+    COLUMNS_ACTIVITY_LAPS_CYCLING,
+    COLUMNS_ACTIVITY_LAPS_RUN_BIKE,
+    COLUMNS_ACTIVITY_LAPS_RUNNING,
+    COLUMNS_ACTIVITY_LAPS_SWIM,
+    COLUMNS_ACTIVITY_SUMMARY,
+    COLUMNS_ACTIVITY_WEATHER,
+    COLUMNS_MULTISPORT_CHILDREN,
+    MANIFEST_REASON_ABSENT,
+    MANIFEST_REASON_NOT_APPLICABLE,
+    columns_for_lap,
+    manifest_summary_counts,
+    serialize_activity_detail,
+    serialize_activity_hr_zones,
+    serialize_activity_laps,
+    serialize_activity_summary,
+    serialize_capability_manifest,
+    serialize_metrics_descriptors,
+    serialize_multisport_children,
+)
+from garmin_cli.serializers.devices import (
+    COLUMNS_DEVICE,
+    serialize_device,
+)
+from garmin_cli.serializers.health import (
+    COLUMNS_BODY_BATTERY,
+    COLUMNS_DAILY_SUMMARY,
+    COLUMNS_HRV,
+    COLUMNS_INTENSITY_MINUTES,
+    COLUMNS_READINESS,
+    COLUMNS_RESTING_HR,
+    COLUMNS_SLEEP,
+    COLUMNS_SPO2,
+    COLUMNS_STATUS,
+    COLUMNS_STEPS,
+    COLUMNS_STRESS,
+    COLUMNS_WEIGHT,
+    serialize_body_battery,
+    serialize_daily_summary,
+    serialize_hrv,
+    serialize_intensity_minutes,
+    serialize_resting_hr,
+    serialize_sleep,
+    serialize_spo2,
+    serialize_steps,
+    serialize_stress,
+    serialize_training_readiness,
+    serialize_training_status,
+    serialize_weight,
+)
+from garmin_cli.serializers.performance import (
+    COLUMNS_ENDURANCE_SCORE,
+    COLUMNS_HILL_SCORE,
+    COLUMNS_RACE_PREDICTIONS,
+    COLUMNS_THRESHOLDS,
+    COLUMNS_VO2MAX,
+    COLUMNS_ZONES,
+    serialize_endurance_score,
+    serialize_hill_score,
+    serialize_race_predictions,
+    serialize_thresholds,
+    serialize_vo2max,
+    serialize_zones,
+)
+from garmin_cli.serializers.workouts import (
+    COLUMNS_CALENDAR_WORKOUT,
+    COLUMNS_WORKOUT,
+    COLUMNS_WORKOUT_DETAIL,
+    COLUMNS_WORKOUT_MUTATE,
+    serialize_calendar_workout,
+    serialize_workout_detail,
+    serialize_workout_mutate,
+    serialize_workout_summary,
+)
+
+__all__ = (
+    # --- Cross-domain helpers (_common) ---
+    "select_latest_dated_rows",
+    # --- Re-exports from metrics (back-compat surface) ---
+    "CYCLING_TYPE_KEYS",
+    "LAP_SWIM_TYPE_KEYS",
+    "REGISTRY",
+    "RUNNING_TYPE_KEYS",
+    "SportProfile",
+    "UNION_COLUMNS",
+    "columns_for_sport",
+    "profile_for",
+    # --- Health domain ---
+    "COLUMNS_SLEEP",
+    "COLUMNS_HRV",
+    "COLUMNS_WEIGHT",
+    "COLUMNS_BODY_BATTERY",
+    "COLUMNS_STRESS",
+    "COLUMNS_SPO2",
+    "COLUMNS_RESTING_HR",
+    "COLUMNS_READINESS",
+    "COLUMNS_STATUS",
+    "COLUMNS_DAILY_SUMMARY",
+    "COLUMNS_STEPS",
+    "COLUMNS_INTENSITY_MINUTES",
+    "serialize_sleep",
+    "serialize_hrv",
+    "serialize_weight",
+    "serialize_body_battery",
+    "serialize_stress",
+    "serialize_spo2",
+    "serialize_resting_hr",
+    "serialize_training_readiness",
+    "serialize_training_status",
+    "serialize_daily_summary",
+    "serialize_steps",
+    "serialize_intensity_minutes",
+    # --- Activities domain ---
+    "COLUMNS_ACTIVITY_SUMMARY",
+    "COLUMNS_ACTIVITY_DETAIL",
+    "COLUMNS_ACTIVITY_WEATHER",
+    "COLUMNS_MULTISPORT_CHILDREN",
+    "COLUMNS_ACTIVITY_HR_ZONES",
+    "COLUMNS_ACTIVITY_LAPS_RUN_BIKE",
+    "COLUMNS_ACTIVITY_LAPS_SWIM",
+    "COLUMNS_ACTIVITY_LAPS_CYCLING",
+    "COLUMNS_ACTIVITY_LAPS_RUNNING",
+    "MANIFEST_REASON_NOT_APPLICABLE",
+    "MANIFEST_REASON_ABSENT",
+    "serialize_activity_summary",
+    "serialize_activity_detail",
+    "serialize_activity_laps",
+    "serialize_activity_hr_zones",
+    "serialize_metrics_descriptors",
+    "serialize_capability_manifest",
+    "serialize_multisport_children",
+    "manifest_summary_counts",
+    "columns_for_lap",
+    # --- Workouts domain ---
+    "COLUMNS_CALENDAR_WORKOUT",
+    "COLUMNS_WORKOUT",
+    "COLUMNS_WORKOUT_DETAIL",
+    "COLUMNS_WORKOUT_MUTATE",
+    "serialize_calendar_workout",
+    "serialize_workout_summary",
+    "serialize_workout_detail",
+    "serialize_workout_mutate",
+    # --- Performance domain ---
+    "COLUMNS_RACE_PREDICTIONS",
+    "COLUMNS_ENDURANCE_SCORE",
+    "COLUMNS_HILL_SCORE",
+    "COLUMNS_THRESHOLDS",
+    "COLUMNS_VO2MAX",
+    "COLUMNS_ZONES",
+    "serialize_race_predictions",
+    "serialize_endurance_score",
+    "serialize_hill_score",
+    "serialize_thresholds",
+    "serialize_vo2max",
+    "serialize_zones",
+    # --- Devices domain ---
+    "COLUMNS_DEVICE",
+    "serialize_device",
+    # --- Private helpers preserved for back-compat attribute access ---
+    "_minutes",
+    "_hours",
+    "_km",
+    "_kmh",
+    "_get_nested",
+    "_coalesce",
+    "_listify",
+)

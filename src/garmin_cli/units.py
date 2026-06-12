@@ -10,6 +10,26 @@ from __future__ import annotations
 from typing import Any
 
 
+def to_minutes(value: Any) -> float | None:
+    """Convert a seconds value to minutes (None-safe, no rounding)."""
+    return None if value is None else value / 60
+
+
+def to_hours(value: Any) -> float | None:
+    """Convert a seconds value to hours (None-safe, no rounding)."""
+    return None if value is None else value / 3600
+
+
+def to_km(value: Any) -> float | None:
+    """Convert a meters value to kilometers (None-safe, no rounding)."""
+    return None if value is None else value / 1000
+
+
+def to_kmh(value: Any) -> float | None:
+    """Convert a meters-per-second value to km/h (None-safe, no rounding)."""
+    return None if value is None else value * 3.6
+
+
 def pace_from_speed(speed: Any) -> str | None:
     if speed is None:
         return None

@@ -4,6 +4,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping
 
+from garmin_cli.units import to_km as _to_km
+from garmin_cli.units import to_kmh as _to_kmh
+from garmin_cli.units import to_minutes as _to_minutes
+
 
 # Sport typeKey families. These mirror the values Garmin Connect emits in
 # ``activityType.typeKey``.
@@ -82,18 +86,8 @@ def resolve(
 
 
 # --- Value transforms (preserve existing serializer semantics) ---------------
-
-
-def _to_km(value: Any) -> float | None:
-    return None if value is None else value / 1000
-
-
-def _to_kmh(value: Any) -> float | None:
-    return None if value is None else value * 3.6
-
-
-def _to_minutes(value: Any) -> float | None:
-    return None if value is None else value / 60
+# Canonical converters live in ``garmin_cli.units``; the private aliases above
+# keep the formatter references below readable.
 
 
 # --- Registry entries --------------------------------------------------------
