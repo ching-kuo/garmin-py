@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-06-13
+
 ### Added
 - `report_snapshot` MCP tool: assembles a fixed-shape morning/evening/weekly report in a single call, fanning out the underlying health/activity/performance/workout reads server-side under one auth check. `morning` returns sleep, HRV, readiness, body battery, and today's planned workouts; `evening` returns steps, intensity minutes, stress, body battery, today's activities, and tomorrow's planned workouts; `weekly` returns 7-day sleep/HRV/stress/steps/resting-HR/body-battery trends plus the window's activities, endurance score, and race predictions. `date` defaults to today; the weekly window is the anchor day and the six prior days. Each section is always present in `sections`; a section with no data is an empty list and is noted in `unavailable` with a `reason` (`not_found` / `no_data`) so a report never silently drops a metric. Auth, rate-limit, and server/network failures fail the whole call rather than returning a partial snapshot.
 - CLI commands reaching parity with the MCP tool surface: `health steps`, `health daily-summary`, `health intensity-minutes`, `performance race-predictions`, `performance endurance-score`, `performance hill-score`, `device list` (new `device` group), and `activity metrics-describe`. Each wires the same endpoint/serializer/columns the matching MCP tool already used, so CLI and MCP emit identical rows.
