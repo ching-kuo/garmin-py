@@ -97,13 +97,6 @@ class TestReadWorkoutInput:
         with pytest.raises(GarminCliError):
             read_workout_input(file_path="/nonexistent/path/workout.json")
 
-    def test_yaml_not_installed_raises_garmin_cli_error(self, tmp_path: Any, mocker: Any) -> None:
-        f = tmp_path / "workout.yaml"
-        f.write_text(_VALID_YAML)
-        mocker.patch("garmin_cli.input_reader.yaml", None)
-        with pytest.raises(GarminCliError):
-            read_workout_input(file_path=str(f))
-
     def test_file_path_none_stdin_true_reads_stdin(self, mocker: Any) -> None:
         mock_stream = MagicMock()
         mock_stream.read.return_value = _VALID_JSON

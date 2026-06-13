@@ -196,7 +196,7 @@ garmin-cli --json workout create workout.json
 # Create from stdin (pipe from LLM output)
 echo '{"name":"Easy Run","sport":"running","steps":[{"type":"warmup","duration":{"type":"time","value":300},"target":{"type":"no.target"}}]}' | garmin-cli --json workout create --stdin
 
-# Create from YAML file (requires: pip install pyyaml)
+# Create from YAML file
 garmin-cli --json workout create workout.yaml
 
 # Update an existing workout (partial -- only fields provided are changed)

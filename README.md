@@ -177,7 +177,7 @@ garmin-cli workout schedule WORKOUT_ID DATE        # DATE = YYYY-MM-DD
 
 `--ahead N` shows the next N days of planned workouts (future-facing). `--days N` shows past N days.
 
-YAML input requires `pyyaml`: `pip install pyyaml`. See [SKILL.md](SKILL.md) for the full workout JSON schema reference and step/target types.
+YAML input is supported out of the box. See [SKILL.md](SKILL.md) for the full workout JSON schema reference and step/target types.
 
 ### Performance
 

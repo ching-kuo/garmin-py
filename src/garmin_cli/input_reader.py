@@ -5,13 +5,9 @@ import json
 from typing import Any
 
 import click
+import yaml
 
 from garmin_cli.exceptions import GarminCliError
-
-try:
-    import yaml
-except ImportError:
-    yaml = None  # type: ignore[assignment]
 
 
 def read_workout_input(
@@ -46,11 +42,6 @@ def read_workout_input(
         )
 
     if fmt == "yaml":
-        if yaml is None:
-            raise GarminCliError(
-                error="YAML support requires pyyaml: pip install garmin-cli[yaml]",
-                error_code="INVALID_INPUT",
-            )
         try:
             result = yaml.safe_load(raw_text)
         except Exception as exc:
