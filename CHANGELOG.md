@@ -22,6 +22,7 @@
 - MCP transport plumbing (the `mcp-server` command, transport options, auth resolution, validation) moved out of `cli.py` into `mcp_cli.py`; `cli.py` is again just the entrypoint (392 → 145 lines).
 - Cross-layer imports cleaned up: pace/lactate helpers moved to a neutral `garmin_cli.units` module (endpoints no longer import private serializer helpers); `extract_status_code` moved to `garmin_cli.exceptions`. Duplicate unit converters deduplicated into `units` after byte-identical verification.
 - Per-command Click option duplication collapsed behind a shared `date_range_options` decorator; `--limit` validation unified across `activity list` and `workout list`.
+- Post-review consolidations (no behavior change): env-var float parsing (HTTP timeout, auth probe TTL, daily-call delay) shares a single `garmin_cli._env._env_float`; the 401/403/404 immediate-fail policy is a shared `_AUTH_NOT_FOUND_ERRORS` base map across the `_make_*` request helpers; and the `report_snapshot` fatal-code denylist became a one-entry `_SNAPSHOT_RECOVERABLE_CODES` allowlist so unknown error codes fail the snapshot safely.
 
 ### Removed
 - The shadow top-level `garmin/` package (shipped to every install but never imported by production code). Its useful pure functions moved to `garmin_cli.zones` and `garmin_cli.fueling`; the dead `extras.py` and the strictly-inferior `auth.py` shim were dropped. Wheels now ship only `garmin_cli`.

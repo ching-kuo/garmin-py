@@ -408,7 +408,7 @@ See [SKILL.md](SKILL.md#mcp-server-alternative) for the full tool list and param
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/            # unit tests (730+ tests)
+pytest tests/            # unit tests (1100+ tests)
 pytest tests/ --e2e      # unit + e2e tests (requires GARMIN_HOME/garmin_tokens.json)
 ```
 
