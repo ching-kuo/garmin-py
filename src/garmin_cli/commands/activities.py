@@ -305,6 +305,11 @@ def download_cmd(
             error=f"Output file already exists: {target}. Use --force to overwrite.",
             error_code="INVALID_INPUT",
         )
+    if not target.parent.is_dir():
+        raise GarminCliError(
+            error=f"Output directory does not exist: {target.parent}",
+            error_code="INVALID_INPUT",
+        )
     payload = download_activity(activity_id, fmt)
     target.write_bytes(payload)
     rows = serialize_activity_download(activity_id, fmt, str(target), len(payload))

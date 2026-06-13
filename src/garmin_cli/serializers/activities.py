@@ -415,24 +415,30 @@ def serialize_activity_upload(
     file_path: str,
     raw_response: Any,
 ) -> list[dict[str, Any]]:
-    """Build one-row serialization for a successful activity upload.
+    """Build one-row serialization for an activity upload result.
 
     Extracts the new activity ID from the upstream response when available.
     The upstream shape is variable: a dict with ``detailedImportResult`` or
-    ``{status, fileName}`` or a bare dict with ``activityId``.
+    ``{status, fileName}`` or a bare dict with ``activityId``. Garmin returns
+    HTTP 200 even when an import is rejected (e.g. duplicate activity), so a
+    ``detailedImportResult`` carrying ``failures`` with no ``successes`` is
+    reported as ``rejected`` rather than ``uploaded``.
     """
     activity_id: Any = None
     status = "uploaded"
 
     if isinstance(raw_response, dict):
-        # Shape 1: {detailedImportResult: {successes: [{internalId: N}]}}
+        # Shape 1: {detailedImportResult: {successes: [...], failures: [...]}}
         detailed = raw_response.get("detailedImportResult")
         if isinstance(detailed, dict):
             successes = detailed.get("successes") or []
+            failures = detailed.get("failures") or []
             if successes and isinstance(successes[0], dict):
                 activity_id = successes[0].get("internalId")
+            elif failures:
+                status = "rejected"
         # Shape 2: bare activityId key
-        if activity_id is None:
+        if activity_id is None and status != "rejected":
             activity_id = raw_response.get("activityId") or raw_response.get("activity_id")
         # Honour explicit status from upstream
         upstream_status = raw_response.get("status")

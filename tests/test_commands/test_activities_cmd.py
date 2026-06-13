@@ -1156,6 +1156,16 @@ class TestActivityDownloadCommand:
         result = runner.invoke(cli, ["activity", "download", "1", "--fmt", "pdf"])
         assert result.exit_code != 0
 
+    def test_download_missing_output_dir_fails_before_network(self, mocker: Any, tmp_path: Any) -> None:
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        dl = mocker.patch("garmin_cli.commands.activities.download_activity", return_value=b"X")
+        missing = tmp_path / "no_such_dir" / "out.zip"
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["--json", "activity", "download", "1", "--output", str(missing)])
+        assert result.exit_code == 1
+        assert json.loads(result.stdout)["error_code"] == "INVALID_INPUT"
+        dl.assert_not_called()
+
 
 class TestActivityUploadCommand:
 
@@ -1184,6 +1194,23 @@ class TestActivityUploadCommand:
         result = runner.invoke(cli, ["--json", "activity", "upload", str(tmp_path / "nope.fit")])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["error_code"] == "INVALID_INPUT"
+
+    def test_upload_rejected_import_reports_rejected(self, mocker: Any, tmp_path: Any) -> None:
+        # Garmin returns HTTP 200 with failures (e.g. duplicate activity); the
+        # row must not claim success.
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.commands.activities.upload_activity",
+            return_value={"detailedImportResult": {"successes": [], "failures": [{"messages": ["dupe"]}]}},
+        )
+        f = tmp_path / "run.fit"
+        f.write_bytes(b"FIT")
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["--json", "activity", "upload", str(f)])
+        assert result.exit_code == 0
+        row = json.loads(result.stdout)["data"][0]
+        assert row["status"] == "rejected"
+        assert row["activity_id"] is None
 
 
 class TestActivityDeleteCommand:

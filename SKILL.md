@@ -590,6 +590,10 @@ Use `report_snapshot` to build a recurring morning/evening/weekly report in a si
 
 Because the section set is fixed, a report can never silently drop a metric: an absent metric is an empty section plus an `unavailable` entry, so the agent can state the gap rather than infer a value. Auth, rate-limit, and server/network failures fail the whole call (the snapshot would be untrustworthy); only per-day "no data" gaps degrade to `unavailable`.
 
+`date_range` reports the anchor day (or the 7-day window for `weekly`). The `evening` `planned_tomorrow` section deliberately holds the day *after* the anchor and so falls outside `date_range` — it is a forward-looking section, not part of the reported window.
+
+Latency note: `weekly` (and the `daily-summary`/`endurance-score`/`hill-score` reads generally) fan out one upstream request per day with a short inter-call delay, so a weekly snapshot makes tens of sequential calls and can take 10-20s. Tune `GARMIN_CLI_DAILY_CALL_DELAY` (seconds, default `0.5`) down if your MCP client times out, up to be gentler on Garmin's rate limits.
+
 `activity_get(detail=true)` may carry an `unavailable[]` array (omitted when empty) annotating registry-known metrics with `not_applicable_to_sport` (the metric isn't meaningful for the sport) or `absent_in_response` (the metric applies but the upstream payload didn't include it). Multisport parents union per-child manifests with a 0-based `leg_index` attached. `activity_laps`, `activity_hr_zones`, and `activity_metrics_describe` do not carry the manifest in this release; use `activity_get(detail=true)` for sport-applicability checks.
 
 Planned but not yet implemented: `activity_swim_lengths` (covered by `activity_laps` for `lap_swimming`) and `activity_metrics_series` (down-sampling policy pending). Hardware/profile manifest reasons (`requires_hardware`, `requires_profile_config`) will land alongside a future profile/threshold fetch.

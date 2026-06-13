@@ -374,7 +374,7 @@ def _collect_report_sections(
             if exc.error_code in _SNAPSHOT_FATAL_CODES:
                 raise
             sections[name] = []
-            unavailable.append({"section": name, "reason": "not_found"})
+            unavailable.append({"section": name, "reason": exc.error_code.lower()})
             continue
         sections[name] = rows
         if not rows:
