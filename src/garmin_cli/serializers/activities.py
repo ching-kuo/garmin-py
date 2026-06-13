@@ -2,7 +2,8 @@
 
 Covers the activity list/summary/detail surface (registry-driven union
 projection), lap and HR-zone breakdowns, metric descriptors, the capability
-manifest, multisport children, and the activity-weather column constant.
+manifest, multisport children, the activity-weather column constant, and
+lifecycle mutation (download/upload/delete) result rows.
 """
 from __future__ import annotations
 
@@ -391,6 +392,59 @@ def manifest_summary_counts(manifest: list[dict[str, Any]]) -> tuple[int, int]:
     not_applicable = sum(1 for e in manifest if e.get("reason") == MANIFEST_REASON_NOT_APPLICABLE)
     absent = sum(1 for e in manifest if e.get("reason") == MANIFEST_REASON_ABSENT)
     return not_applicable, absent
+
+
+# --- Activity lifecycle (download / upload / delete) ------------------------
+
+COLUMNS_ACTIVITY_DOWNLOAD: tuple[str, ...] = ("id", "format", "path", "size_bytes")
+COLUMNS_ACTIVITY_UPLOAD: tuple[str, ...] = ("file", "status", "activity_id")
+COLUMNS_ACTIVITY_DELETE: tuple[str, ...] = ("id", "status")
+
+
+def serialize_activity_download(
+    activity_id: Any,
+    fmt: str,
+    path: str,
+    size_bytes: int,
+) -> list[dict[str, Any]]:
+    """Build one-row serialization for a successful activity download."""
+    return [{"id": activity_id, "format": fmt, "path": path, "size_bytes": size_bytes}]
+
+
+def serialize_activity_upload(
+    file_path: str,
+    raw_response: Any,
+) -> list[dict[str, Any]]:
+    """Build one-row serialization for a successful activity upload.
+
+    Extracts the new activity ID from the upstream response when available.
+    The upstream shape is variable: a dict with ``detailedImportResult`` or
+    ``{status, fileName}`` or a bare dict with ``activityId``.
+    """
+    activity_id: Any = None
+    status = "uploaded"
+
+    if isinstance(raw_response, dict):
+        # Shape 1: {detailedImportResult: {successes: [{internalId: N}]}}
+        detailed = raw_response.get("detailedImportResult")
+        if isinstance(detailed, dict):
+            successes = detailed.get("successes") or []
+            if successes and isinstance(successes[0], dict):
+                activity_id = successes[0].get("internalId")
+        # Shape 2: bare activityId key
+        if activity_id is None:
+            activity_id = raw_response.get("activityId") or raw_response.get("activity_id")
+        # Honour explicit status from upstream
+        upstream_status = raw_response.get("status")
+        if upstream_status:
+            status = str(upstream_status)
+
+    return [{"file": file_path, "status": status, "activity_id": activity_id}]
+
+
+def serialize_activity_delete(activity_id: Any) -> list[dict[str, Any]]:
+    """Build one-row serialization for a successful activity delete."""
+    return [{"id": activity_id, "status": "deleted"}]
 
 
 def serialize_multisport_children(children: list[dict[str, Any]]) -> list[dict[str, Any]]:

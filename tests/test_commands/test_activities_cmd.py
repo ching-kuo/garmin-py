@@ -1086,3 +1086,130 @@ class TestActivityWeatherCommand:
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["activity", "weather", "99999999"])
         assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# activity download / upload / delete commands
+# ---------------------------------------------------------------------------
+
+class TestActivityDownloadCommand:
+
+    def test_download_writes_file_and_reports_envelope(self, mocker: Any, tmp_path: Any) -> None:
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        mocker.patch("garmin_cli.commands.activities.download_activity", return_value=b"FITBYTES")
+        out = tmp_path / "ride.zip"
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(
+            cli, ["--json", "activity", "download", "12345", "--output", str(out)]
+        )
+        assert result.exit_code == 0
+        assert out.read_bytes() == b"FITBYTES"
+        envelope = json.loads(result.stdout)
+        assert envelope["ok"] is True
+        row = envelope["data"][0]
+        assert row["id"] == "12345"
+        assert row["format"] == "original"
+        assert row["path"] == str(out)
+        assert row["size_bytes"] == len(b"FITBYTES")
+
+    def test_download_refuses_overwrite_without_force(self, mocker: Any, tmp_path: Any) -> None:
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        dl = mocker.patch("garmin_cli.commands.activities.download_activity", return_value=b"X")
+        existing = tmp_path / "exists.zip"
+        existing.write_bytes(b"OLD")
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(
+            cli, ["--json", "activity", "download", "1", "--output", str(existing)]
+        )
+        assert result.exit_code == 1
+        envelope = json.loads(result.stdout)
+        assert envelope["ok"] is False
+        assert envelope["error_code"] == "INVALID_INPUT"
+        dl.assert_not_called()
+        assert existing.read_bytes() == b"OLD"
+
+    def test_download_force_overwrites(self, mocker: Any, tmp_path: Any) -> None:
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        mocker.patch("garmin_cli.commands.activities.download_activity", return_value=b"NEW")
+        existing = tmp_path / "exists.zip"
+        existing.write_bytes(b"OLD")
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(
+            cli, ["activity", "download", "1", "--output", str(existing), "--force"]
+        )
+        assert result.exit_code == 0
+        assert existing.read_bytes() == b"NEW"
+
+    def test_download_default_filename(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        mocker.patch("garmin_cli.commands.activities.download_activity", return_value=b"D")
+        runner = CliRunner(mix_stderr=False)
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, ["--json", "activity", "download", "777", "--fmt", "gpx"])
+            assert result.exit_code == 0
+            envelope = json.loads(result.stdout)
+            assert envelope["data"][0]["path"].endswith("activity_777.gpx")
+
+    def test_download_rejects_unknown_format_at_parse_time(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["activity", "download", "1", "--fmt", "pdf"])
+        assert result.exit_code != 0
+
+
+class TestActivityUploadCommand:
+
+    def test_upload_reports_new_activity_id(self, mocker: Any, tmp_path: Any) -> None:
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.commands.activities.upload_activity",
+            return_value={"detailedImportResult": {"successes": [{"internalId": 555}]}},
+        )
+        f = tmp_path / "run.fit"
+        f.write_bytes(b"FIT")
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["--json", "activity", "upload", str(f)])
+        assert result.exit_code == 0
+        row = json.loads(result.stdout)["data"][0]
+        assert row["activity_id"] == 555
+        assert row["status"] == "uploaded"
+
+    def test_upload_missing_file_errors(self, mocker: Any, tmp_path: Any) -> None:
+        from garmin_cli.exceptions import GarminCliError
+
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        up = mocker.patch("garmin_cli.commands.activities.upload_activity")
+        up.side_effect = GarminCliError(error="File not found", error_code="INVALID_INPUT")
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["--json", "activity", "upload", str(tmp_path / "nope.fit")])
+        assert result.exit_code == 1
+        assert json.loads(result.stdout)["error_code"] == "INVALID_INPUT"
+
+
+class TestActivityDeleteCommand:
+
+    def test_delete_with_confirm_flag(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        dele = mocker.patch("garmin_cli.commands.activities.delete_activity")
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["--json", "activity", "delete", "12345", "--confirm"])
+        assert result.exit_code == 0
+        row = json.loads(result.stdout)["data"][0]
+        assert row == {"id": "12345", "status": "deleted"}
+        dele.assert_called_once_with("12345")
+
+    def test_delete_aborts_when_declined(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        dele = mocker.patch("garmin_cli.commands.activities.delete_activity")
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["activity", "delete", "12345"], input="n\n")
+        assert result.exit_code != 0
+        dele.assert_not_called()
+
+    def test_delete_proceeds_when_confirmed_interactively(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        dele = mocker.patch("garmin_cli.commands.activities.delete_activity")
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["activity", "delete", "12345"], input="y\n")
+        assert result.exit_code == 0
+        dele.assert_called_once_with("12345")

@@ -153,6 +153,17 @@ garmin-cli --json activity weather 12345678901
 # Metric descriptors for an activity's detail stream -- fields: key, unit, metricsIndex
 # Use to discover what metrics a watch recorded before requesting samples
 garmin-cli --json activity metrics-describe 12345678901
+
+# Download an activity file to disk -- fields: id, format, path, size_bytes
+# --fmt: original (FIT in a ZIP, default), tcx, gpx, kml, csv. Never prints
+# binary to stdout; refuses to overwrite unless --force.
+garmin-cli --json activity download 12345678901 --fmt gpx --output run.gpx
+
+# Upload an activity file (.fit / .gpx / .tcx) -- fields: file, status, activity_id
+garmin-cli --json activity upload run.fit
+
+# Delete an activity (--confirm skips the interactive prompt) -- fields: id, status
+garmin-cli --json activity delete 12345678901 --confirm
 ```
 
 `--limit` defaults to 20, max 100. `--type` filters by Garmin activity type key (e.g., `running`, `cycling`, `swimming`).

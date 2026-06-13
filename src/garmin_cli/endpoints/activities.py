@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 from typing import Any
+
+from garminconnect import Garmin
 
 from garmin_cli import backend as garth
 from garmin_cli.endpoints._base import (
@@ -11,6 +14,27 @@ from garmin_cli.endpoints._base import (
     _validate_numeric_id,
 )
 from garmin_cli.exceptions import GarminCliError
+
+# Canonical format strings → ActivityDownloadFormat enum members
+_DOWNLOAD_FORMAT_MAP: dict[str, Any] = {
+    "original": Garmin.ActivityDownloadFormat.ORIGINAL,
+    "tcx": Garmin.ActivityDownloadFormat.TCX,
+    "gpx": Garmin.ActivityDownloadFormat.GPX,
+    "kml": Garmin.ActivityDownloadFormat.KML,
+    "csv": Garmin.ActivityDownloadFormat.CSV,
+}
+
+# File extension for each download format (used for default output filename)
+_DOWNLOAD_EXTENSIONS: dict[str, str] = {
+    "original": ".zip",
+    "tcx": ".tcx",
+    "gpx": ".gpx",
+    "kml": ".kml",
+    "csv": ".csv",
+}
+
+# Valid upload extensions (must match Garmin.ActivityUploadFormat members)
+_UPLOAD_EXTENSIONS: frozenset[str] = frozenset({"fit", "gpx", "tcx"})
 
 
 def _request(url: str, *, params: dict[str, Any] | None = None) -> Any:
@@ -164,3 +188,67 @@ def get_activity_weather(activity_id: Any) -> dict:
     validated = _validate_numeric_id(activity_id, "activity_id")
     result = _request(f"/activity-service/activity/{validated}/weather")
     return result if result is not None else {}
+
+
+def download_activity(activity_id: Any, fmt: str = "original") -> bytes:
+    """Download an activity in the requested format and return raw bytes.
+
+    *fmt* must be one of: original, tcx, gpx, kml, csv.
+    For ``original``, Garmin returns a ZIP archive containing the FIT file.
+    """
+    validated = _validate_numeric_id(activity_id, "activity_id")
+    fmt_lower = fmt.lower()
+    if fmt_lower not in _DOWNLOAD_FORMAT_MAP:
+        allowed = ", ".join(sorted(_DOWNLOAD_FORMAT_MAP))
+        raise GarminCliError(
+            error=f"Invalid download format '{fmt}'. Allowed values: {allowed}.",
+            error_code="INVALID_INPUT",
+        )
+    dl_fmt = _DOWNLOAD_FORMAT_MAP[fmt_lower]
+    result = _make_typed_request(garth.download_activity, validated, dl_fmt)
+    if not isinstance(result, (bytes, bytearray)):
+        raise GarminCliError(
+            error="Download returned unexpected non-bytes response.",
+            error_code="SERVER_ERROR",
+        )
+    return bytes(result)
+
+
+def extension_for_format(fmt: str) -> str:
+    """Return the file extension (with leading dot) for a download format string."""
+    return _DOWNLOAD_EXTENSIONS.get(fmt.lower(), f".{fmt.lower()}")
+
+
+def upload_activity(file_path: str) -> Any:
+    """Upload an activity file (FIT, GPX, or TCX) to Garmin Connect.
+
+    The file must exist on disk and have a supported extension.
+    """
+    p = Path(file_path)
+    if not p.exists():
+        raise GarminCliError(
+            error=f"File not found: {file_path}",
+            error_code="INVALID_INPUT",
+        )
+    if not p.is_file():
+        raise GarminCliError(
+            error=f"Path is not a file: {file_path}",
+            error_code="INVALID_INPUT",
+        )
+    ext = p.suffix.lstrip(".").lower()
+    if ext not in _UPLOAD_EXTENSIONS:
+        allowed = ", ".join(f".{e}" for e in sorted(_UPLOAD_EXTENSIONS))
+        raise GarminCliError(
+            error=f"Unsupported file extension '.{ext}'. Allowed: {allowed}.",
+            error_code="INVALID_INPUT",
+        )
+    return _make_typed_request(garth.upload_activity, str(p))
+
+
+def delete_activity(activity_id: Any) -> None:
+    """Delete an activity by ID."""
+    validated = _validate_numeric_id(activity_id, "activity_id")
+    _make_typed_request(
+        garth.delete_activity,
+        validated,
+    )

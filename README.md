@@ -140,9 +140,14 @@ garmin-cli activity laps             ACTIVITY_ID  # per-lap rows (run/bike) or p
 garmin-cli activity zones            ACTIVITY_ID  # HR time-in-zone breakdown
 garmin-cli activity weather          ACTIVITY_ID
 garmin-cli activity metrics-describe ACTIVITY_ID  # metric descriptors: key, unit, metricsIndex
+garmin-cli activity download         ACTIVITY_ID [--fmt original|tcx|gpx|kml|csv] [--output PATH] [--force]
+garmin-cli activity upload           FILE         # .fit / .gpx / .tcx
+garmin-cli activity delete           ACTIVITY_ID [--confirm]
 ```
 
 `--limit` defaults to 20, max 100. `--type` filters by activity type key (e.g., `running`, `cycling`).
+
+`activity download` writes the activity file to disk (it never prints binary to stdout). `--fmt` defaults to `original` (the FIT file inside a ZIP archive); the default output name is `activity_<id><ext>` in the current directory, and an existing file is not overwritten unless `--force` is given. `activity delete` prompts for confirmation unless `--confirm` is passed.
 
 #### Detailed sport-specific metrics
 

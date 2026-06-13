@@ -8,6 +8,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from garmin_cli.endpoints.activities import (
+    delete_activity,
+    download_activity,
+    extension_for_format,
     get_activity,
     get_activity_details,
     get_activity_hr_in_timezones,
@@ -17,6 +20,7 @@ from garmin_cli.endpoints.activities import (
     get_multisport_children,
     is_multisport_parent,
     list_activities,
+    upload_activity,
 )
 from garmin_cli.exceptions import GarminCliError
 from tests.helpers import make_http_error as _http_error
@@ -492,3 +496,127 @@ class TestGetMultisportChildren:
         with pytest.raises(GarminCliError) as exc_info:
             get_multisport_children(parent)
         assert exc_info.value.error_code == "RATE_LIMITED"
+
+
+# ---------------------------------------------------------------------------
+# Activity lifecycle: download / upload / delete (typed backend methods)
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadActivity:
+
+    def test_returns_bytes_and_invokes_typed_method(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.download_activity.return_value = b"FITDATA"
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        result = download_activity("12345", "original")
+
+        assert result == b"FITDATA"
+        mock_garth.download_activity.assert_called_once()
+        # numeric id is validated/coerced; format enum is passed through
+        args, _ = mock_garth.download_activity.call_args
+        assert args[0] == 12345
+
+    def test_invalid_format_raises_invalid_input_without_api_call(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc:
+            download_activity("12345", "pdf")
+
+        assert exc.value.error_code == "INVALID_INPUT"
+        mock_garth.download_activity.assert_not_called()
+
+    def test_non_bytes_response_raises_server_error(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.download_activity.return_value = {"unexpected": "json"}
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc:
+            download_activity(1, "gpx")
+
+        assert exc.value.error_code == "SERVER_ERROR"
+
+    def test_bytearray_is_coerced_to_bytes(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.download_activity.return_value = bytearray(b"abc")
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        result = download_activity(7, "tcx")
+        assert result == b"abc"
+        assert isinstance(result, bytes)
+
+
+class TestExtensionForFormat:
+
+    def test_known_formats(self) -> None:
+        assert extension_for_format("original") == ".zip"
+        assert extension_for_format("tcx") == ".tcx"
+        assert extension_for_format("gpx") == ".gpx"
+        assert extension_for_format("kml") == ".kml"
+        assert extension_for_format("csv") == ".csv"
+
+    def test_case_insensitive(self) -> None:
+        assert extension_for_format("GPX") == ".gpx"
+
+    def test_unknown_format_falls_back_to_dotted_name(self) -> None:
+        assert extension_for_format("xyz") == ".xyz"
+
+
+class TestUploadActivity:
+
+    def test_happy_path_invokes_typed_method(self, mocker: Any, tmp_path: Any) -> None:
+        f = tmp_path / "ride.fit"
+        f.write_bytes(b"FIT")
+        mock_garth = MagicMock()
+        mock_garth.upload_activity.return_value = {"detailedImportResult": {"successes": [{"internalId": 99}]}}
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        result = upload_activity(str(f))
+
+        mock_garth.upload_activity.assert_called_once_with(str(f))
+        assert result["detailedImportResult"]["successes"][0]["internalId"] == 99
+
+    def test_missing_file_raises_invalid_input(self, mocker: Any, tmp_path: Any) -> None:
+        mock_garth = MagicMock()
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc:
+            upload_activity(str(tmp_path / "nope.fit"))
+
+        assert exc.value.error_code == "INVALID_INPUT"
+        mock_garth.upload_activity.assert_not_called()
+
+    def test_directory_path_raises_invalid_input(self, mocker: Any, tmp_path: Any) -> None:
+        mock_garth = MagicMock()
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc:
+            upload_activity(str(tmp_path))
+
+        assert exc.value.error_code == "INVALID_INPUT"
+
+    def test_unsupported_extension_raises_invalid_input(self, mocker: Any, tmp_path: Any) -> None:
+        f = tmp_path / "data.csv"
+        f.write_text("x")
+        mock_garth = MagicMock()
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc:
+            upload_activity(str(f))
+
+        assert exc.value.error_code == "INVALID_INPUT"
+        mock_garth.upload_activity.assert_not_called()
+
+
+class TestDeleteActivity:
+
+    def test_invokes_typed_method_with_validated_id(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.delete_activity.return_value = None
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        delete_activity("12345")
+
+        mock_garth.delete_activity.assert_called_once_with(12345)

@@ -2,14 +2,19 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 import click
 
 from garmin_cli.auth import ensure_authenticated
 from garmin_cli.commands._options import validate_limit
+from garmin_cli.exceptions import GarminCliError
 from garmin_cli.date_utils import CLICK_DATE_TYPE, resolve_click_dates
 from garmin_cli.endpoints.activities import (
     activity_type_key,
+    delete_activity,
+    download_activity,
+    extension_for_format,
     get_activity,
     get_activity_details,
     get_activity_hr_in_timezones,
@@ -19,6 +24,7 @@ from garmin_cli.endpoints.activities import (
     get_multisport_children,
     is_multisport_parent,
     list_activities,
+    upload_activity,
 )
 from garmin_cli.metrics.sport_profile import SportProfile
 from garmin_cli.output import (
@@ -30,19 +36,25 @@ from garmin_cli.output import (
     render_output,
 )
 from garmin_cli.serializers import (
+    COLUMNS_ACTIVITY_DELETE,
     COLUMNS_ACTIVITY_DETAIL,
+    COLUMNS_ACTIVITY_DOWNLOAD,
     COLUMNS_ACTIVITY_HR_ZONES,
     COLUMNS_ACTIVITY_SUMMARY,
+    COLUMNS_ACTIVITY_UPLOAD,
     COLUMNS_ACTIVITY_WEATHER,
     COLUMNS_METRICS_DESCRIPTORS,
     COLUMNS_MULTISPORT_CHILDREN,
     columns_for_lap,
     columns_for_sport,
     manifest_summary_counts,
+    serialize_activity_delete,
     serialize_activity_detail,
+    serialize_activity_download,
     serialize_activity_hr_zones,
     serialize_activity_laps,
     serialize_activity_summary,
+    serialize_activity_upload,
     serialize_capability_manifest,
     serialize_metrics_descriptors,
     serialize_multisport_children,
@@ -259,3 +271,66 @@ def metrics_describe_cmd(ctx: click.Context, activity_id: str) -> None:
     raw = get_activity_details(activity_id)
     rows = serialize_metrics_descriptors(raw)
     render_output(ctx.obj["config"].output_format, "activity metrics-describe", rows, COLUMNS_METRICS_DESCRIPTORS)
+
+
+@activity.command("download")
+@click.argument("activity_id")
+@click.option(
+    "--fmt",
+    type=click.Choice(["original", "tcx", "gpx", "kml", "csv"]),
+    default="original",
+    help="Download format. 'original' is the FIT file in a ZIP archive.",
+)
+@click.option(
+    "--output",
+    "output_path",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Output file path. Defaults to activity_<id><ext> in the current directory.",
+)
+@click.option("--force", is_flag=True, default=False, help="Overwrite the output file if it exists.")
+@click.pass_context
+def download_cmd(
+    ctx: click.Context,
+    activity_id: str,
+    fmt: str,
+    output_path: str | None,
+    force: bool,
+) -> None:
+    """Download an activity's file (original FIT/ZIP, TCX, GPX, KML, or CSV) to disk."""
+    ensure_authenticated(ctx.obj["config"])
+    target = Path(output_path) if output_path else Path.cwd() / f"activity_{activity_id}{extension_for_format(fmt)}"
+    if target.exists() and not force:
+        raise GarminCliError(
+            error=f"Output file already exists: {target}. Use --force to overwrite.",
+            error_code="INVALID_INPUT",
+        )
+    payload = download_activity(activity_id, fmt)
+    target.write_bytes(payload)
+    rows = serialize_activity_download(activity_id, fmt, str(target), len(payload))
+    render_output(ctx.obj["config"].output_format, "activity download", rows, COLUMNS_ACTIVITY_DOWNLOAD)
+
+
+@activity.command("upload")
+@click.argument("file_path", metavar="FILE", type=click.Path(dir_okay=False))
+@click.pass_context
+def upload_cmd(ctx: click.Context, file_path: str) -> None:
+    """Upload an activity file (FIT, GPX, or TCX) to Garmin Connect."""
+    ensure_authenticated(ctx.obj["config"])
+    raw = upload_activity(file_path)
+    rows = serialize_activity_upload(file_path, raw)
+    render_output(ctx.obj["config"].output_format, "activity upload", rows, COLUMNS_ACTIVITY_UPLOAD)
+
+
+@activity.command("delete")
+@click.argument("activity_id")
+@click.option("--confirm", is_flag=True, default=False)
+@click.pass_context
+def delete_cmd(ctx: click.Context, activity_id: str, confirm: bool) -> None:
+    """Delete an activity by ID."""
+    ensure_authenticated(ctx.obj["config"])
+    if not confirm:
+        click.confirm(f"Delete activity {activity_id}?", abort=True)
+    delete_activity(activity_id)
+    rows = serialize_activity_delete(activity_id)
+    render_output(ctx.obj["config"].output_format, "activity delete", rows, COLUMNS_ACTIVITY_DELETE)

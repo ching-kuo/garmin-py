@@ -253,3 +253,29 @@ def get_activity_hr_in_timezones(activity_id: int | str) -> Any:
     """Use the typed upstream HR-time-in-zone helper."""
     client = _require_backend()
     return client.get_activity_hr_in_timezones(activity_id)
+
+
+def download_activity(activity_id: int | str, dl_fmt: Any) -> bytes:
+    """Use the typed upstream activity-download helper.
+
+    *dl_fmt* must be a ``Garmin.ActivityDownloadFormat`` enum member.
+    Returns raw bytes — caller is responsible for writing to disk.
+    """
+    client = _require_backend()
+    return client.download_activity(str(activity_id), dl_fmt=dl_fmt)
+
+
+def upload_activity(activity_path: str) -> Any:
+    """Use the typed upstream activity-upload helper.
+
+    *activity_path* must exist on disk and have a FIT, GPX, or TCX extension.
+    Returns the upstream response payload (shape varies by file format).
+    """
+    client = _require_backend()
+    return client.upload_activity(activity_path)
+
+
+def delete_activity(activity_id: int | str) -> Any:
+    """Use the typed upstream activity-delete helper."""
+    client = _require_backend()
+    return client.delete_activity(str(activity_id))
