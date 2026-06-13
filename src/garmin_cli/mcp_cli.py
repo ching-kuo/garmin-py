@@ -148,7 +148,9 @@ def _resolve_mcp_auth(
 
     resolved_port = port if port is not None else 8000
     base_url = f"http://{host}:{resolved_port}"
-    auth = AuthSettings(issuer_url=base_url, resource_server_url=base_url)
+    # pydantic coerces these str URLs to AnyHttpUrl at construction; mypy only
+    # sees the strict annotation when the mcp SDK's types are resolvable.
+    auth = AuthSettings(issuer_url=base_url, resource_server_url=base_url)  # type: ignore[arg-type]
     return verifier, auth
 
 
