@@ -147,19 +147,11 @@ def _emit_write_log(event: WriteLogEvent) -> None:
     _logger.info("workout_write", extra={"event": event.__dict__})
 
 
-def _workout_name_len(workout: Any) -> int | None:
+def _workout_str_len(workout: Any, key: str) -> int | None:
     if isinstance(workout, dict):
-        name = workout.get("name")
-        if isinstance(name, str):
-            return len(name)
-    return None
-
-
-def _workout_description_len(workout: Any) -> int | None:
-    if isinstance(workout, dict):
-        description = workout.get("description")
-        if isinstance(description, str):
-            return len(description)
+        value = workout.get(key)
+        if isinstance(value, str):
+            return len(value)
     return None
 
 
@@ -341,13 +333,12 @@ def _run_tool(
     return _envelope(serialize(_authenticated(config, fetch)))
 
 
-# Error codes that should fail the whole snapshot rather than degrade one
-# section. NOT_FOUND is treated as a recoverable per-section gap (the metric
-# simply has no data for that window); everything else (auth, rate limiting,
-# server/network failures, bad input) means the snapshot is untrustworthy.
-_SNAPSHOT_FATAL_CODES: frozenset[str] = frozenset(
-    {"AUTH_MISSING", "AUTH_FAILED", "RATE_LIMITED", "SERVER_ERROR", "NETWORK_ERROR", "INVALID_INPUT", "INTERNAL_ERROR"}
-)
+# Only NOT_FOUND degrades to a per-section gap (the metric simply has no data
+# for that window). Every other error -- auth, rate limiting, server/network,
+# bad input, or any future/unknown code -- fails the whole snapshot, which
+# would otherwise be silently partial and untrustworthy. An allowlist makes the
+# safe direction (fail loudly) the default for codes not enumerated here.
+_SNAPSHOT_RECOVERABLE_CODES: frozenset[str] = frozenset({"NOT_FOUND"})
 
 # One report section: a stable name, a thunk that fetches raw upstream data,
 # and a serializer that turns it into rows.
@@ -371,7 +362,7 @@ def _collect_report_sections(
         try:
             rows = serialize(fetch())
         except GarminCliError as exc:
-            if exc.error_code in _SNAPSHOT_FATAL_CODES:
+            if exc.error_code not in _SNAPSHOT_RECOVERABLE_CODES:
                 raise
             sections[name] = []
             unavailable.append({"section": name, "reason": exc.error_code.lower()})
@@ -632,8 +623,8 @@ def create_mcp_server(
             tool="workout_create",
             outcome="success",
             dry_run=dry_run,
-            name_len=_workout_name_len(workout),
-            description_len=_workout_description_len(workout),
+            name_len=_workout_str_len(workout, "name"),
+            description_len=_workout_str_len(workout, "description"),
         )
         with _write_audit(base) as audit:
             errors = validate_workout_input(workout, partial=False)
@@ -713,8 +704,8 @@ def create_mcp_server(
             outcome="success",
             dry_run=dry_run,
             workout_id=workout_id,
-            name_len=_workout_name_len(workout),
-            description_len=_workout_description_len(workout),
+            name_len=_workout_str_len(workout, "name"),
+            description_len=_workout_str_len(workout, "description"),
         )
         with _write_audit(base) as audit:
             errors = validate_workout_input(workout, partial=True)

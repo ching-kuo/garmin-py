@@ -6,10 +6,20 @@ import time
 from datetime import date, timedelta
 from typing import Any, Callable
 
+from garmin_cli._env import _env_float
 from garmin_cli.exceptions import GarminCliError, extract_status_code
 
 _RETRY_DELAYS: list[float] = [2, 4, 8]
 _DEFAULT_DAILY_CALL_DELAY: float = 0.5
+
+# Shared immediate-fail policy across read, typed, and write helpers: auth
+# rejections and not-found never retry. Per-helper maps extend this (writes add
+# 400/409; the URL read overrides 404 with the URL-bearing message).
+_AUTH_NOT_FOUND_ERRORS: dict[int, tuple[str, str]] = {
+    401: ("Authentication failed.", "AUTH_FAILED"),
+    403: ("Authentication failed.", "AUTH_FAILED"),
+    404: ("Not found.", "NOT_FOUND"),
+}
 
 
 def _resolve_daily_call_delay() -> float:
@@ -19,15 +29,7 @@ def _resolve_daily_call_delay() -> float:
     non-negative float.  Any parse error or negative value causes the whole
     env var to be ignored and the default (0.5 s) is used instead.
     """
-    raw = os.environ.get("GARMIN_CLI_DAILY_CALL_DELAY", "")
-    if raw:
-        try:
-            value = float(raw)
-            if value >= 0:
-                return value
-        except ValueError:
-            pass
-    return _DEFAULT_DAILY_CALL_DELAY
+    return _env_float("GARMIN_CLI_DAILY_CALL_DELAY", _DEFAULT_DAILY_CALL_DELAY)
 
 
 def _resolve_retry_delays() -> list[float]:
@@ -116,10 +118,8 @@ def _make_write_request(
     return _retry_loop(
         lambda: connectapi_fn(url, method=method, json=json),
         immediate_errors={
+            **_AUTH_NOT_FOUND_ERRORS,
             400: ("Invalid input.", "INVALID_INPUT"),
-            401: ("Authentication failed.", "AUTH_FAILED"),
-            403: ("Authentication failed.", "AUTH_FAILED"),
-            404: ("Not found.", "NOT_FOUND"),
             409: ("Invalid input.", "INVALID_INPUT"),
         },
     )
@@ -139,8 +139,7 @@ def _make_request(
     return _retry_loop(
         lambda: connectapi_fn(url, params=params),
         immediate_errors={
-            401: ("Authentication failed.", "AUTH_FAILED"),
-            403: ("Authentication failed.", "AUTH_FAILED"),
+            **_AUTH_NOT_FOUND_ERRORS,
             404: (f"Not found: {url}", "NOT_FOUND"),
         },
     )
@@ -155,11 +154,7 @@ def _make_typed_request(typed_method: Callable[..., Any], *args: Any, **kwargs: 
     """
     return _retry_loop(
         lambda: typed_method(*args, **kwargs),
-        immediate_errors={
-            401: ("Authentication failed.", "AUTH_FAILED"),
-            403: ("Authentication failed.", "AUTH_FAILED"),
-            404: ("Not found.", "NOT_FOUND"),
-        },
+        immediate_errors=_AUTH_NOT_FOUND_ERRORS,
     )
 
 

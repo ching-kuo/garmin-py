@@ -146,7 +146,8 @@ def serialize_vo2max(raw: Any) -> list[dict[str, Any]]:
 
 
 def serialize_zones(raw: Any) -> list[dict[str, Any]]:
-    items = _listify(raw.get("value") if isinstance(raw, dict) and isinstance(raw.get("value"), dict) else raw)
+    value = raw.get("value") if isinstance(raw, dict) else None
+    items = _listify(value if isinstance(value, dict) else raw)
     if items and all(item.get("sport") is None for item in items):
         by_sport = parse_flat_lactate(items)
         return [

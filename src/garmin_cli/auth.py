@@ -9,6 +9,7 @@ from datetime import date
 from typing import Any
 
 from garmin_cli import backend as garth
+from garmin_cli._env import _env_float
 from garmin_cli.config import CliConfig
 from garmin_cli.exceptions import GarminCliError, extract_status_code
 from garmin_cli.token_store import ensure_secure_directory
@@ -35,15 +36,7 @@ def _get_probe_ttl() -> float:
     ``0`` disables caching entirely (today's behaviour).  Invalid or
     negative values fall back to the 600 s default.
     """
-    raw = os.environ.get("GARMIN_CLI_AUTH_PROBE_TTL", "")
-    if raw:
-        try:
-            value = float(raw)
-            if value >= 0:
-                return value
-        except ValueError:
-            pass
-    return _DEFAULT_PROBE_TTL
+    return _env_float("GARMIN_CLI_AUTH_PROBE_TTL", _DEFAULT_PROBE_TTL)
 
 
 def _probe_cache_hit(garth_home: str, ttl: float) -> bool:

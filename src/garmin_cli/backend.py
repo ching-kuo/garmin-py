@@ -10,6 +10,7 @@ from typing import Any
 
 from garminconnect import Garmin
 
+from garmin_cli._env import _env_float
 from garmin_cli.token_store import (
     detect_legacy_tokens,
     ensure_secure_directory,
@@ -31,15 +32,7 @@ def _resolve_http_timeout() -> float:
     Reads ``GARMIN_CLI_HTTP_TIMEOUT`` from the environment.  Invalid or
     non-positive values are silently ignored and the default (30 s) is used.
     """
-    raw = os.environ.get("GARMIN_CLI_HTTP_TIMEOUT", "")
-    if raw:
-        try:
-            value = float(raw)
-            if value > 0:
-                return value
-        except ValueError:
-            pass
-    return _DEFAULT_HTTP_TIMEOUT
+    return _env_float("GARMIN_CLI_HTTP_TIMEOUT", _DEFAULT_HTTP_TIMEOUT, allow_zero=False)
 
 
 def _apply_timeout(garmin: Garmin) -> None:
