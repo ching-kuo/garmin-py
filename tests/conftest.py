@@ -237,14 +237,19 @@ def sample_activities_list_raw() -> list[dict]:
 
 @pytest.fixture()
 def sample_activity_weather_raw() -> dict:
+    # Mirrors the real /activity/{id}/weather wire shape: temp/relativeHumidity/
+    # windDirection plus a nested weatherTypeDTO; no icon-code or precip field.
     return {
-        "activityId": 12345678,
-        "temperature": 12.5,
-        "weatherIconCode": 1,
-        "windSpeed": 10.0,
-        "windDirectionDegrees": 180,
-        "humidity": 65,
-        "precipProbability": 10,
+        "issueDate": "2026-06-12T23:50:00.000+00:00",
+        "temp": 74,
+        "apparentTemp": 74,
+        "dewPoint": 66,
+        "relativeHumidity": 72,
+        "windDirection": 158,
+        "windDirectionCompassPoint": "sse",
+        "windSpeed": 10,
+        "windGust": None,
+        "weatherTypeDTO": {"weatherTypePk": None, "desc": "Partly Cloudy", "image": None},
     }
 
 

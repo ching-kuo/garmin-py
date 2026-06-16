@@ -7,6 +7,7 @@ lifecycle mutation (download/upload/delete) result rows.
 """
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from garmin_cli.metrics.registry import (
@@ -24,8 +25,11 @@ from garmin_cli.metrics.sport_profile import (
 from garmin_cli.serializers._common import (
     _coalesce,
     _get_nested,
+    _gmt_local_offset,
     _km,
+    _local_from_gmt,
     _minutes,
+    _type_key,
 )
 from garmin_cli.units import pace_from_speed
 
@@ -51,11 +55,14 @@ COLUMNS_MULTISPORT_CHILDREN = (
 )
 COLUMNS_ACTIVITY_WEATHER = (
     "temperature",
-    "weatherIconCode",
-    "windSpeed",
-    "windDirectionDegrees",
+    "apparent_temp",
+    "dew_point",
     "humidity",
-    "precipProbability",
+    "wind_speed",
+    "wind_gust",
+    "wind_direction",
+    "wind_direction_compass",
+    "condition",
 )
 
 
@@ -75,7 +82,7 @@ def _normalize_activity_base(activity: dict[str, Any], summary: dict[str, Any]) 
         "id": activity.get("activityId"),
         "date": _coalesce(activity.get("startTimeLocal"), summary.get("startTimeLocal")),
         "name": activity.get("activityName"),
-        "type": _get_nested(activity, "activityType", "typeKey"),
+        "type": _type_key(activity),
         "distance_km": _km(_coalesce(activity.get("distance"), summary.get("distance"))),
         "duration_min": _minutes(_coalesce(activity.get("duration"), summary.get("duration"))),
         "avg_hr": _coalesce(activity.get("averageHR"), summary.get("averageHR")),
@@ -111,6 +118,40 @@ def serialize_activity_detail(raw: Any) -> list[dict[str, Any]]:
     return [_project_union_row(a, s) for a, s in _iter_activity_pairs(raw)]
 
 
+# --- Activity weather -------------------------------------------------------
+# Garmin's /activity/{id}/weather payload uses ``temp`` / ``relativeHumidity``
+# / ``windDirection`` and nests the condition under ``weatherTypeDTO``. The
+# response carries no precipitation-probability or icon-code field. Temperature
+# values are returned in the Garmin account's display unit (often Fahrenheit).
+
+
+def serialize_activity_weather(raw: Any) -> list[dict[str, Any]]:
+    """Map the raw activity-weather payload to stable output keys.
+
+    Renames Garmin's wire keys (``temp``, ``relativeHumidity``,
+    ``windDirection``, ...) to the output schema and pulls the textual
+    condition out of ``weatherTypeDTO``. Returns an empty list for a missing
+    or empty payload.
+    """
+    if not isinstance(raw, dict) or not raw:
+        return []
+    weather_type = raw.get("weatherTypeDTO")
+    condition = weather_type.get("desc") if isinstance(weather_type, dict) else None
+    return [
+        {
+            "temperature": raw.get("temp"),
+            "apparent_temp": raw.get("apparentTemp"),
+            "dew_point": raw.get("dewPoint"),
+            "humidity": raw.get("relativeHumidity"),
+            "wind_speed": raw.get("windSpeed"),
+            "wind_gust": raw.get("windGust"),
+            "wind_direction": raw.get("windDirection"),
+            "wind_direction_compass": raw.get("windDirectionCompassPoint"),
+            "condition": condition,
+        }
+    ]
+
+
 # --- Activity laps ----------------------------------------------------------
 # Run/bike laps share a single shape unioning cycling power + running dynamics;
 # non-applicable fields render as None. Pool-swim lengths use a swim-specific
@@ -118,6 +159,8 @@ def serialize_activity_detail(raw: Any) -> list[dict[str, Any]]:
 
 COLUMNS_ACTIVITY_LAPS_RUN_BIKE: tuple[str, ...] = (
     "lap_index",
+    "start_time_gmt",
+    "start_time_local",
     "duration_min",
     "distance_km",
     "avg_hr",
@@ -125,6 +168,8 @@ COLUMNS_ACTIVITY_LAPS_RUN_BIKE: tuple[str, ...] = (
     "avg_power_w",
     "max_power_w",
     "norm_power_w",
+    "avg_cadence_rpm",
+    "avg_cadence_spm",
     "avg_ground_contact_time",
     "avg_vertical_oscillation",
     "avg_vertical_ratio",
@@ -145,6 +190,8 @@ COLUMNS_ACTIVITY_LAPS_SWIM: tuple[str, ...] = (
 
 COLUMNS_ACTIVITY_LAPS_CYCLING: tuple[str, ...] = (
     "lap_index",
+    "start_time_gmt",
+    "start_time_local",
     "duration_min",
     "distance_km",
     "avg_hr",
@@ -152,15 +199,19 @@ COLUMNS_ACTIVITY_LAPS_CYCLING: tuple[str, ...] = (
     "avg_power_w",
     "max_power_w",
     "norm_power_w",
+    "avg_cadence_rpm",
 )
 
 
 COLUMNS_ACTIVITY_LAPS_RUNNING: tuple[str, ...] = (
     "lap_index",
+    "start_time_gmt",
+    "start_time_local",
     "duration_min",
     "distance_km",
     "avg_hr",
     "max_hr",
+    "avg_cadence_spm",
     "avg_ground_contact_time",
     "avg_vertical_oscillation",
     "avg_vertical_ratio",
@@ -172,9 +223,33 @@ def _is_swim_profile(profile: SportProfile) -> bool:
     return bool(profile.type_keys & LAP_SWIM_TYPE_KEYS)
 
 
-def _lap_row_run_bike(item: dict[str, Any], idx: int) -> dict[str, Any]:
+def _lap_local_offset(activity: dict[str, Any]) -> timedelta | None:
+    """Derive an activity's local-minus-GMT offset from its start stamps.
+
+    Lap rows carry only ``startTimeGMT``; the activity-level GMT/local pair
+    yields the offset used to reconstruct each lap's local start time. The
+    single offset is applied to every lap, so a ride that crosses a DST
+    transition would shift post-transition laps by an hour (Garmin exposes no
+    per-lap local time to correct this).
+    """
+    if not isinstance(activity, dict):
+        return None
+    summary = activity.get("summaryDTO")
+    summary = summary if isinstance(summary, dict) else {}
+    return _gmt_local_offset(
+        _coalesce(activity.get("startTimeGMT"), summary.get("startTimeGMT")),
+        _coalesce(activity.get("startTimeLocal"), summary.get("startTimeLocal")),
+    )
+
+
+def _lap_row_run_bike(
+    item: dict[str, Any], idx: int, offset: timedelta | None = None
+) -> dict[str, Any]:
+    start_gmt = item.get("startTimeGMT")
     return {
         "lap_index": idx,
+        "start_time_gmt": start_gmt,
+        "start_time_local": _local_from_gmt(start_gmt, offset),
         "duration_min": _minutes(item.get("duration")),
         "distance_km": _km(item.get("distance")),
         "avg_hr": item.get("averageHR"),
@@ -182,6 +257,11 @@ def _lap_row_run_bike(item: dict[str, Any], idx: int) -> dict[str, Any]:
         "avg_power_w": item.get("averagePower"),
         "max_power_w": item.get("maxPower"),
         "norm_power_w": _coalesce(item.get("normalizedPower"), item.get("normPower")),
+        "avg_cadence_rpm": item.get("averageBikeCadence"),
+        "avg_cadence_spm": _coalesce(
+            item.get("averageRunCadence"),
+            item.get("averageRunningCadenceInStepsPerMinute"),
+        ),
         "avg_ground_contact_time": item.get("avgGroundContactTime"),
         "avg_vertical_oscillation": item.get("avgVerticalOscillation"),
         "avg_vertical_ratio": item.get("avgVerticalRatio"),
@@ -235,8 +315,7 @@ def serialize_activity_laps(
     missing or empty.
     """
     if profile is None:
-        type_key = _get_nested(activity, "activityType", "typeKey") if isinstance(activity, dict) else None
-        profile = profile_for(type_key)
+        profile = profile_for(_type_key(activity))
 
     payload = splits_payload if isinstance(splits_payload, dict) else {}
 
@@ -248,9 +327,10 @@ def serialize_activity_laps(
             if isinstance(item, dict)
         ]
 
+    offset = _lap_local_offset(activity)
     items = payload.get("lapDTOs") or []
     return [
-        _lap_row_run_bike(item, idx)
+        _lap_row_run_bike(item, idx, offset)
         for idx, item in enumerate(items, start=1)
         if isinstance(item, dict)
     ]
@@ -363,11 +443,7 @@ def serialize_capability_manifest(
     surface as ``absent_in_response``. ``leg_index`` is set on every entry to
     attribute it to a specific multisport child leg when provided.
     """
-    type_key = None
-    if isinstance(activity, dict):
-        activity_type = activity.get("activityType")
-        if isinstance(activity_type, dict):
-            type_key = activity_type.get("typeKey")
+    type_key = _type_key(activity)
 
     entries: list[dict[str, Any]] = []
     for entry in REGISTRY.values():
@@ -458,8 +534,7 @@ def serialize_multisport_children(children: list[dict[str, Any]]) -> list[dict[s
     for child in children:
         if not isinstance(child, dict):
             continue
-        activity_type = child.get("activityType")
-        type_key = activity_type.get("typeKey") if isinstance(activity_type, dict) else None
+        type_key = _type_key(child)
         raw_summary = child.get("summaryDTO")
         summary = raw_summary if isinstance(raw_summary, dict) else {}
         distance = _coalesce(child.get("distance"), summary.get("distance"))

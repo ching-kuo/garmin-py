@@ -1030,7 +1030,7 @@ class TestActivityWeatherCommand:
         mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
         mocker.patch(
             "garmin_cli.commands.activities.get_activity_weather",
-            return_value={"temperature": 12.5},
+            return_value={"temp": 12.5},
         )
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["--json", "activity", "weather", "12345678"])
@@ -1040,12 +1040,14 @@ class TestActivityWeatherCommand:
         mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
         mocker.patch(
             "garmin_cli.commands.activities.get_activity_weather",
-            return_value={"temperature": 12.5, "windSpeed": 10.0},
+            return_value={"temp": 12.5, "windSpeed": 10.0, "relativeHumidity": 65},
         )
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["--json", "activity", "weather", "12345678"])
         parsed = json.loads(result.output)
         assert parsed["ok"] is True
+        assert parsed["data"][0]["temperature"] == 12.5
+        assert parsed["data"][0]["humidity"] == 65
 
     def test_weather_not_found_exit_1(self, mocker: Any) -> None:
         from garmin_cli.exceptions import GarminCliError

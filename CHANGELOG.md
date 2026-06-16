@@ -2,8 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+- `activity get --detail` now reports `elapsed_time_min` (total wall-clock time, from Garmin's `elapsedDuration`) alongside the existing `duration_min` (moving time), so stopped time is recoverable as `elapsed - moving`. Present in the MCP `activity_get` tool, the CLI's sport-aware detail tables, and the CSV/JSON union schema (appended last to preserve positional CSV back-compat).
+- `activity laps` rows now carry per-lap `start_time_gmt` (Garmin's lap `startTimeGMT`) and a derived `start_time_local` (the activity's GMT->local offset applied to each lap; a single offset is used, so rides crossing a DST transition shift post-transition laps by an hour), plus per-lap cadence (`avg_cadence_rpm` for cycling, `avg_cadence_spm` for running). Surfaced in both the CLI `activity laps` command and the MCP `activity_laps` tool.
+
 ### Fixed
 - `garmin_cli.__version__` (and `garmin-cli --version`) now derives from installed package metadata (`importlib.metadata`) instead of a hardcoded literal, which had silently drifted to `1.2.0` across the 2.0.0/2.1.0/2.2.0 releases. `pyproject.toml` is now the single source of truth; packaging regression tests assert the metadata version, the `garmin-cli --version` output, and the `console_scripts` entry point all stay in lockstep with it.
+- Cycling cadence (`avg_cadence_rpm`) was always `null`. The metric read only `averageBikingCadenceInRevPerMinute`, but Garmin emits cycling cadence under `averageBikeCadence` (both in the summary and on each lap). Both keys are now tried, so the activity summary and per-lap rows resolve cadence correctly.
+- Sport type (`type`) returned `null` for activities whose top-level `activityType` is null and whose sport is carried only under `activityTypeDTO` (observed on road cycling). The `type` metric, `activity_type_key`, multisport-parent detection, and the capability manifest now fall back to `activityTypeDTO.typeKey`. This also fixes a cascade where the null `type` made the detail `unavailable` manifest mark populated cycling metrics (power, TSS, intensity factor, cadence) as `not_applicable_to_sport`.
+- `activity weather` returned `null` for nearly every field. The output column names were being used directly as raw-payload lookup keys, but Garmin's weather feed uses `temp` / `relativeHumidity` / `windDirection` and nests the condition under `weatherTypeDTO`. Weather is now mapped from the real keys and exposes `temperature`, `apparent_temp`, `dew_point`, `humidity`, `wind_speed`, `wind_gust`, `wind_direction`, `wind_direction_compass`, and `condition`. The previously-listed `weatherIconCode` and `precipProbability` fields (absent from Garmin's feed) were removed. Temperature values are in the Garmin account's display unit (often Fahrenheit).
 
 ## [2.2.0] - 2026-06-13
 

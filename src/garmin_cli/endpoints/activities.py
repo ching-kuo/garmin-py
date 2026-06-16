@@ -156,11 +156,20 @@ def get_multisport_children(parent: dict) -> list[dict]:
 
 
 def activity_type_key(activity: Any) -> str | None:
-    """Return ``activityType.typeKey`` from an activity payload, or None."""
-    if isinstance(activity, dict):
-        activity_type = activity.get("activityType")
-        if isinstance(activity_type, dict):
-            return activity_type.get("typeKey")
+    """Return the sport ``typeKey`` from an activity payload, or None.
+
+    Garmin nulls the top-level ``activityType`` on some detail payloads and
+    carries the real sport under ``activityTypeDTO``; both are checked so
+    sport routing (lap columns, capability flags) never silently defaults.
+    """
+    if not isinstance(activity, dict):
+        return None
+    for container_key in ("activityType", "activityTypeDTO"):
+        container = activity.get(container_key)
+        if isinstance(container, dict):
+            type_key = container.get("typeKey")
+            if type_key is not None:
+                return type_key
     return None
 
 
@@ -176,11 +185,10 @@ def is_multisport_parent(activity: dict) -> bool:
             return True
     if activity.get("childIds"):
         return True
-    activity_type = activity.get("activityType")
-    if isinstance(activity_type, dict):
-        type_key = activity_type.get("typeKey", "")
-        if type_key in ("multi_sport", "multisport"):
-            return True
+    # Use the shared resolver so a null top-level activityType (sport carried
+    # under activityTypeDTO) still classifies a multisport parent correctly.
+    if activity_type_key(activity) in ("multi_sport", "multisport"):
+        return True
     return False
 
 

@@ -42,6 +42,11 @@ _BASE_SUMMARY_KEYS: tuple[str, ...] = (
 
 
 _UNIVERSAL_STANDARD_KEYS: tuple[str, ...] = (
+    # Sport-aware tables surface elapsed time next to the other time fields for
+    # readability; the CSV/JSON union (UNION_COLUMNS) instead appends it last to
+    # preserve positional back-compat. Table and CSV column orders already
+    # differ by design, so the placements diverge intentionally.
+    "elapsed_time_min",
     "max_hr",
     "calories",
     "elevation_gain_m",
@@ -179,12 +184,19 @@ _SWIM_APPENDED: tuple[str, ...] = (
     "distance_per_stroke",
 )
 
+# Appended after the legacy/sport blocks so existing positional CSV consumers
+# keep their column indices (new columns only ever land at the end).
+_APPENDED_UNIVERSAL: tuple[str, ...] = (
+    "elapsed_time_min",
+)
+
 
 UNION_COLUMNS: tuple[str, ...] = (
     _LEGACY_DETAIL_ORDER
     + _RUNNING_APPENDED
     + _RUN_BIKE_TRAINING_RESPONSE
     + _SWIM_APPENDED
+    + _APPENDED_UNIVERSAL
 )
 
 

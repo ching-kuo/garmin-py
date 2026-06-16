@@ -114,7 +114,10 @@ _ENTRIES: tuple[MetricEntry, ...] = (
     ),
     MetricEntry(
         key="type",
-        source_paths=(("activityType", "typeKey"),),
+        source_paths=(
+            ("activityType", "typeKey"),
+            ("activityTypeDTO", "typeKey"),
+        ),
         sports=None,
     ),
     MetricEntry(
@@ -131,6 +134,17 @@ _ENTRIES: tuple[MetricEntry, ...] = (
         source_paths=(
             ("duration",),
             ("summaryDTO", "duration"),
+        ),
+        sports=None,
+        formatter=_to_minutes,
+    ),
+    MetricEntry(
+        # Total wall-clock time including pauses/stops. ``duration_min`` is
+        # moving time, so elapsed - moving == time stopped.
+        key="elapsed_time_min",
+        source_paths=(
+            ("elapsedDuration",),
+            ("summaryDTO", "elapsedDuration"),
         ),
         sports=None,
         formatter=_to_minutes,
@@ -239,6 +253,8 @@ _ENTRIES: tuple[MetricEntry, ...] = (
     MetricEntry(
         key="avg_cadence_rpm",
         source_paths=(
+            ("averageBikeCadence",),
+            ("summaryDTO", "averageBikeCadence"),
             ("averageBikingCadenceInRevPerMinute",),
             ("summaryDTO", "averageBikingCadenceInRevPerMinute"),
         ),

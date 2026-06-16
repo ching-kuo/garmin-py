@@ -136,9 +136,9 @@ garmin-cli health intensity-minutes [--date DATE | --from DATE --to DATE | --day
 ```bash
 garmin-cli activity list             [--limit N] [--type TYPE] [--search TEXT] [--date DATE | --from DATE --to DATE | --days N]
 garmin-cli activity get              ACTIVITY_ID [--detail] [--laps]  # --detail/-d shows sport-aware metrics; --laps appends lap data
-garmin-cli activity laps             ACTIVITY_ID  # per-lap rows (run/bike) or per-pool-length rows (lap_swimming)
+garmin-cli activity laps             ACTIVITY_ID  # per-lap rows (run/bike: HR, power, cadence, start_time_gmt/local) or per-pool-length rows (lap_swimming)
 garmin-cli activity zones            ACTIVITY_ID  # HR time-in-zone breakdown
-garmin-cli activity weather          ACTIVITY_ID
+garmin-cli activity weather          ACTIVITY_ID  # temperature, apparent temp, dew point, humidity, wind, condition
 garmin-cli activity metrics-describe ACTIVITY_ID  # metric descriptors: key, unit, metricsIndex
 garmin-cli activity download         ACTIVITY_ID [--fmt original|tcx|gpx|kml|csv] [--output PATH] [--force]
 garmin-cli activity upload           FILE         # .fit / .gpx / .tcx
@@ -153,12 +153,14 @@ garmin-cli activity delete           ACTIVITY_ID [--confirm]
 
 `activity get --detail` projects metrics scoped by the activity's sport:
 
-| Sport | Detail-mode metrics (in addition to base summary, HR, calories, elevation, speed) |
+| Sport | Detail-mode metrics (in addition to base summary, HR, calories, elevation, speed, elapsed time) |
 |-------|-----------------------------------------------------------------------------------|
 | Cycling | avg/max/normalized power, cadence (rpm), TSS, intensity factor, training effect, vO2max, recovery time |
 | Running | cadence (spm), ground contact time, vertical oscillation/ratio, stride length, training effect, vO2max, recovery time |
 | Lap swimming | SWOLF, total strokes, average stroke rate, distance per stroke |
 | Open water swimming | universal extras only (no per-length stroke metrics) |
+
+`duration_min` is moving time; `elapsed_time_min` is total wall-clock time, so `elapsed - moving` is the time stopped.
 
 JSON and CSV output use a stable union schema — every key is present (with `null` for sport-inapplicable metrics) so downstream parsers see a stable shape. Table output is sport-aware: only sport-applicable columns appear, keeping tables dense.
 

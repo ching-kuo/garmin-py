@@ -866,11 +866,28 @@ class TestActivityTools:
     def test_activity_weather(self, mocker: Any) -> None:
 
         mocker.patch("garmin_cli.mcp_server.ensure_authenticated")
-        mocker.patch("garmin_cli.mcp_server.get_activity_weather", return_value={"temperature": 20, "weatherIconCode": "sunny", "windSpeed": 5, "windDirectionDegrees": 180, "humidity": 60, "precipProbability": 10})
+        mocker.patch(
+            "garmin_cli.mcp_server.get_activity_weather",
+            return_value={
+                "temp": 20,
+                "apparentTemp": 19,
+                "dewPoint": 10,
+                "relativeHumidity": 60,
+                "windSpeed": 5,
+                "windGust": 8,
+                "windDirection": 180,
+                "windDirectionCompassPoint": "s",
+                "weatherTypeDTO": {"desc": "Cloudy"},
+            },
+        )
         server = create_mcp_server(_config())
         result = _call(server, "activity_weather", {"activity_id": 123})
         assert result["count"] == 1
-        assert result["rows"][0]["temperature"] == 20
+        row = result["rows"][0]
+        assert row["temperature"] == 20
+        assert row["humidity"] == 60
+        assert row["wind_direction"] == 180
+        assert row["condition"] == "Cloudy"
 
     def test_activity_get_detail_emits_unavailable_manifest(self, mocker: Any) -> None:
         """U11: detail=True attaches unavailable[] to MCP envelope when non-empty."""

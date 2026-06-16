@@ -55,6 +55,7 @@ from garmin_cli.serializers import (
     serialize_activity_laps,
     serialize_activity_summary,
     serialize_activity_upload,
+    serialize_activity_weather,
     serialize_capability_manifest,
     serialize_metrics_descriptors,
     serialize_multisport_children,
@@ -254,7 +255,7 @@ def weather_cmd(ctx: click.Context, activity_id: str) -> None:
     """Get weather data for an activity."""
     ensure_authenticated(ctx.obj["config"])
     raw = get_activity_weather(activity_id)
-    data = [raw] if isinstance(raw, dict) else (raw or [])
+    data = serialize_activity_weather(raw)
     render_output(ctx.obj["config"].output_format, "activity weather", data, COLUMNS_ACTIVITY_WEATHER)
 
 

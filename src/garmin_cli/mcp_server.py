@@ -81,11 +81,11 @@ from garmin_cli.exceptions import GarminCliError, extract_status_code
 from garmin_cli.workout_builder import build_garmin_payload, merge_workout_payload
 from garmin_cli.workout_schema import validate_workout_input
 from garmin_cli.serializers import (
-    COLUMNS_ACTIVITY_WEATHER,
     select_latest_dated_rows,
     serialize_activity_detail,
     serialize_activity_hr_zones,
     serialize_activity_laps,
+    serialize_activity_weather,
     serialize_activity_summary,
     serialize_capability_manifest,
     serialize_metrics_descriptors,
@@ -269,12 +269,6 @@ def _envelope(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _identity_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
-
-
-def _weather_rows(raw: Any) -> list[dict[str, Any]]:
-    if isinstance(raw, dict) and raw:
-        return [{k: raw.get(k) for k in COLUMNS_ACTIVITY_WEATHER}]
-    return []
 
 
 def _handle_error(exc: GarminCliError) -> ToolError:
@@ -500,7 +494,7 @@ def create_mcp_server(
 
     @mcp.tool()
     def activity_get(activity_id: int, detail: bool = False) -> dict[str, Any]:
-        """Get a single activity by ID. For multisport activities (triathlon etc.), includes child activities with per-sport details. Returns compact activity fields by default, or extended sport-aware metrics including running dynamics (GCT, vertical oscillation/ratio, stride length), cycling power suite (avg/max/normalized power, TSS, IF), swim aggregates (SWOLF, strokes), and training response (aerobic/anaerobic training effect, vO2max, recovery time) when detail=True. When detail=True, the response carries an additional ``unavailable`` array (when non-empty) annotating which registry-known metrics are not applicable to this sport (``not_applicable_to_sport``) or unexpectedly absent (``absent_in_response``)."""
+        """Get a single activity by ID. For multisport activities (triathlon etc.), includes child activities with per-sport details. Returns compact activity fields by default, or extended sport-aware metrics including elapsed_time_min (total wall-clock time incl. stops; duration_min is moving time), running dynamics (GCT, vertical oscillation/ratio, stride length), cycling power suite (avg/max/normalized power, TSS, IF) and cadence, swim aggregates (SWOLF, strokes), and training response (aerobic/anaerobic training effect, vO2max, recovery time) when detail=True. When detail=True, the response carries an additional ``unavailable`` array (when non-empty) annotating which registry-known metrics are not applicable to this sport (``not_applicable_to_sport``) or unexpectedly absent (``absent_in_response``)."""
         _validate_positive_id(activity_id, "activity_id")
 
         def produce() -> dict[str, Any]:
@@ -529,13 +523,13 @@ def create_mcp_server(
 
     @mcp.tool()
     def activity_weather(activity_id: int) -> dict[str, Any]:
-        """Get weather for an activity. Returns temperature, weatherIconCode, windSpeed, windDirectionDegrees, humidity, precipProbability."""
+        """Get weather for an activity. Returns temperature, apparent_temp, dew_point, humidity, wind_speed, wind_gust, wind_direction, wind_direction_compass, and condition. Temperature fields are in the Garmin account's display unit (often Fahrenheit). Garmin's activity-weather feed has no precipitation-probability or icon-code field."""
         _validate_positive_id(activity_id, "activity_id")
-        return _run_tool(config, lambda: get_activity_weather(activity_id), _weather_rows)
+        return _run_tool(config, lambda: get_activity_weather(activity_id), serialize_activity_weather)
 
     @mcp.tool()
     def activity_laps(activity_id: int) -> dict[str, Any]:
-        """Get lap-by-lap data for an activity. For pool-swim activities returns per-pool-length rows with SWOLF, stroke type, and stroke counts; for run/bike activities returns per-lap rows with HR, power (cycling), and running dynamics. For multisport parents (triathlon etc.), returns each child leg's laps concatenated with a 0-based ``leg_index`` stamped on every row."""
+        """Get lap-by-lap data for an activity. For pool-swim activities returns per-pool-length rows with SWOLF, stroke type, and stroke counts; for run/bike activities returns per-lap rows with start_time_gmt/start_time_local, HR, power and cadence (cycling), and running dynamics. For multisport parents (triathlon etc.), returns each child leg's laps concatenated with a 0-based ``leg_index`` stamped on every row."""
         _validate_positive_id(activity_id, "activity_id")
         return _run_tool(config, lambda: _fetch_laps_rows_for_activity(get_activity(activity_id), activity_id))
 
