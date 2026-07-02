@@ -256,6 +256,35 @@ def schedule_workout(workout_id: int | str, schedule_date: date | str) -> dict[s
     return client.schedule_workout(workout_id, date_str)
 
 
+def get_activity_types() -> list[dict[str, Any]]:
+    """Use the typed upstream activity-types helper (sport typeKey/typeId table)."""
+    client = _require_backend()
+    return client.get_activity_types()
+
+
+def set_activity_name(activity_id: int | str, name: str) -> Any:
+    """Use the typed upstream activity-rename helper (PUT title)."""
+    client = _require_backend()
+    return client.set_activity_name(str(activity_id), name)
+
+
+def set_activity_type(
+    activity_id: int | str,
+    type_id: int,
+    type_key: str,
+    parent_type_id: int,
+) -> Any:
+    """Use the typed upstream activity-type helper (PUT activityTypeDTO)."""
+    client = _require_backend()
+    return client.set_activity_type(str(activity_id), type_id, type_key, parent_type_id)
+
+
+def unschedule_workout(scheduled_workout_id: int | str) -> Any:
+    """Use the typed upstream unschedule helper (removes a calendar entry)."""
+    client = _require_backend()
+    return client.unschedule_workout(scheduled_workout_id)
+
+
 def get_activity_typed_splits(activity_id: int | str) -> Any:
     """Use the typed upstream typed-splits helper (per-pool-length swim data)."""
     client = _require_backend()

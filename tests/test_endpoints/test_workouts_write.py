@@ -11,6 +11,7 @@ from garmin_cli.endpoints.workouts import (
     create_workout,
     delete_workout,
     schedule_workout,
+    unschedule_workout,
     update_workout,
 )
 from garmin_cli.exceptions import GarminCliError
@@ -217,3 +218,43 @@ class TestScheduleWorkout:
 
         result = schedule_workout(12345, date(2026, 4, 1))
         assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# unschedule_workout
+# ---------------------------------------------------------------------------
+
+class TestUnscheduleWorkout:
+
+    def test_calls_typed_unschedule_with_validated_id(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.unschedule_workout.return_value = None
+        mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
+
+        unschedule_workout(555)
+        mock_garth.unschedule_workout.assert_called_once_with(555)
+
+    def test_returns_none_on_success(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.unschedule_workout.return_value = None
+        mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
+
+        assert unschedule_workout(555) is None
+
+    def test_invalid_schedule_id_raises_invalid_input(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            unschedule_workout("not-a-number")
+        assert exc_info.value.error_code == "INVALID_INPUT"
+        mock_garth.unschedule_workout.assert_not_called()
+
+    def test_404_raises_not_found(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.unschedule_workout.side_effect = _http_error(404)
+        mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            unschedule_workout(99999)
+        assert exc_info.value.error_code == "NOT_FOUND"

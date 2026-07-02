@@ -16,6 +16,7 @@ from garmin_cli.endpoints.workouts import (
     get_workout,
     list_workouts,
     schedule_workout,
+    unschedule_workout,
     update_workout,
 )
 from garmin_cli.exceptions import GarminCliError
@@ -36,6 +37,7 @@ from garmin_cli.workout_schema import validate_workout_input
 
 COLUMNS_WORKOUT_DELETE = ("id", "status")
 COLUMNS_WORKOUT_SCHEDULE = ("workoutScheduleId", "date", "status")
+COLUMNS_WORKOUT_UNSCHEDULE = ("id", "status")
 
 
 @click.group()
@@ -192,4 +194,27 @@ def schedule_cmd(ctx: click.Context, workout_id: str, schedule_date: datetime) -
         "workout schedule",
         data,
         COLUMNS_WORKOUT_SCHEDULE,
+    )
+
+
+@workout.command("unschedule")
+@click.argument("schedule_id")
+@click.option("--confirm", is_flag=True, default=False)
+@click.pass_context
+def unschedule_cmd(ctx: click.Context, schedule_id: str, confirm: bool) -> None:
+    """Remove a scheduled workout from the calendar (keeps the template).
+
+    SCHEDULE_ID is the workoutScheduleId returned by `workout schedule`
+    (also shown by `workout calendar`), not the workout ID.
+    """
+    ensure_authenticated(ctx.obj["config"])
+    if not confirm:
+        click.confirm(f"Unschedule workout schedule {schedule_id}?", abort=True)
+    unschedule_workout(schedule_id)
+    data: list[dict[str, Any]] = [{"id": schedule_id, "status": "unscheduled"}]
+    render_output(
+        ctx.obj["config"].output_format,
+        "workout unschedule",
+        data,
+        COLUMNS_WORKOUT_UNSCHEDULE,
     )

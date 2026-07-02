@@ -8,10 +8,12 @@ inline at their own module scope instead.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import Future
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
 from datetime import date
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 from mcp.server.mcpserver.exceptions import ToolError
 
@@ -96,6 +98,110 @@ def _run_tool(
     defaults to identity for endpoints already returning row dicts.
     """
     return _envelope(serialize(_authenticated(config, fetch)))
+
+
+# --- Write-tool audit ------------------------------------------------------
+#
+# Shared by every write tool (workout create/schedule/update/delete, activity
+# download/upload/delete/rename/set-type). Each domain module keeps its own
+# module-level ``_emit_write_log`` (so tests patch it per domain and the log
+# channel name stays domain-specific) and passes it into ``_write_audit``.
+
+WriteOutcome = Literal[
+    "success",
+    "dry-run",
+    "failed-validation",
+    "failed-auth",
+    "failed-upstream",
+]
+
+EmitWriteLog = Callable[["WriteLogEvent"], None]
+
+
+@dataclass(frozen=True)
+class WriteLogEvent:
+    """Structured payload for a single write-tool invocation log line.
+
+    Only metadata is captured -- free-text fields (workout/activity ``name``,
+    ``description``, filesystem paths) are reduced to length-only integers so
+    PII never lands in logs. Bearer tokens are never read into this struct.
+    """
+
+    tool: str
+    outcome: WriteOutcome
+    dry_run: bool = False
+    workout_id: int | None = None
+    activity_id: int | None = None
+    errors_count: int | None = None
+    name_len: int | None = None
+    description_len: int | None = None
+    fmt: str | None = None
+    size_bytes: int | None = None
+    path_len: int | None = None
+    type_key: str | None = None
+
+
+def _validation_envelope(errors: list[str]) -> dict[str, Any]:
+    return _envelope(
+        [{"ok": False, "error_code": "INVALID_INPUT", "errors": list(errors)}]
+    )
+
+
+def _classify_garmin_error(exc: GarminCliError) -> WriteOutcome:
+    if exc.error_code in ("AUTH_MISSING", "AUTH_FAILED"):
+        return "failed-auth"
+    if exc.error_code == "INVALID_INPUT":
+        # Rejected input (e.g. unknown activity type key surfaced by the live
+        # type lookup) is a validation failure, not a Garmin/transport fault.
+        return "failed-validation"
+    return "failed-upstream"
+
+
+class _WriteAudit:
+    """Records exactly one structured log event for a write-tool invocation.
+
+    Holds the invocation's invariant metadata as a base :class:`WriteLogEvent`;
+    each terminal helper emits that base with the outcome (and any per-outcome
+    field) filled in via the caller-supplied ``emit`` function. A single
+    ``_done`` guard ensures one and only one log line per invocation.
+    """
+
+    def __init__(self, base: WriteLogEvent, emit: EmitWriteLog) -> None:
+        self._base = base
+        self._emit_fn = emit
+        self._done = False
+
+    def _emit(self, **overrides: Any) -> None:
+        self._emit_fn(replace(self._base, **overrides))
+        self._done = True
+
+    def fail_validation(self, errors_count: int) -> None:
+        self._emit(outcome="failed-validation", errors_count=errors_count)
+
+    def dry_run(self) -> None:
+        self._emit(outcome="dry-run")
+
+    def success(self, **overrides: Any) -> None:
+        self._emit(outcome="success", **overrides)
+
+
+@contextmanager
+def _write_audit(base: WriteLogEvent, emit: EmitWriteLog) -> Iterator[_WriteAudit]:
+    """Own the write-audit logging lifecycle for a single write tool.
+
+    Yields a :class:`_WriteAudit` for terminal outcomes (validation failure,
+    dry-run, success). If a :class:`GarminCliError` escapes the ``with`` body
+    and no event has been recorded yet, the classified ``failed-auth`` /
+    ``failed-upstream`` outcome is logged before the error is converted to the
+    caller-facing :class:`ToolError` (same translation as the read tools).
+    """
+    audit = _WriteAudit(base, emit)
+    try:
+        yield audit
+    except GarminCliError as exc:
+        if not audit._done:
+            audit._emit(outcome=_classify_garmin_error(exc))
+        raise _handle_error(exc) from exc
 
 
 # Only NOT_FOUND degrades to a per-section gap (the metric simply has no data

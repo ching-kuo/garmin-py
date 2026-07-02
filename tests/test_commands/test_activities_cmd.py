@@ -1251,3 +1251,57 @@ class TestActivityDeleteCommand:
         result = runner.invoke(cli, ["activity", "delete", "12345"], input="y\n")
         assert result.exit_code == 0
         dele.assert_called_once_with("12345")
+
+
+class TestActivityRenameCommand:
+
+    def test_rename_reports_new_name(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        rename = mocker.patch("garmin_cli.commands.activities.set_activity_name")
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["--json", "activity", "rename", "12345", "Evening Ride"])
+        assert result.exit_code == 0
+        row = json.loads(result.stdout)["data"][0]
+        assert row == {"id": "12345", "name": "Evening Ride", "status": "renamed"}
+        rename.assert_called_once_with("12345", "Evening Ride")
+
+    def test_rename_empty_name_exit_1(self, mocker: Any) -> None:
+        from garmin_cli.exceptions import GarminCliError
+
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.commands.activities.set_activity_name",
+            side_effect=GarminCliError(
+                error="Activity name must be non-empty.", error_code="INVALID_INPUT"
+            ),
+        )
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["activity", "rename", "12345", ""])
+        assert result.exit_code == 1
+
+
+class TestActivitySetTypeCommand:
+
+    def test_set_type_reports_type(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        set_type = mocker.patch("garmin_cli.commands.activities.set_activity_type")
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["--json", "activity", "set-type", "12345", "cycling"])
+        assert result.exit_code == 0
+        row = json.loads(result.stdout)["data"][0]
+        assert row == {"id": "12345", "type": "cycling", "status": "type-updated"}
+        set_type.assert_called_once_with("12345", "cycling")
+
+    def test_set_type_unknown_key_exit_1(self, mocker: Any) -> None:
+        from garmin_cli.exceptions import GarminCliError
+
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.commands.activities.set_activity_type",
+            side_effect=GarminCliError(
+                error="Unknown activity type key: 'quidditch'.", error_code="INVALID_INPUT"
+            ),
+        )
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["activity", "set-type", "12345", "quidditch"])
+        assert result.exit_code == 1

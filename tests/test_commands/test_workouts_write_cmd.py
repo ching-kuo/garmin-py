@@ -542,3 +542,73 @@ class TestWorkoutScheduleCommand:
         parsed = json.loads(result.output)
         row = parsed["data"][0]
         assert "workoutScheduleId" in row or "id" in row
+
+
+# ---------------------------------------------------------------------------
+# workout unschedule command
+# ---------------------------------------------------------------------------
+
+class TestWorkoutUnscheduleCommand:
+
+    def test_unschedule_exit_code_0_with_confirm_flag(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
+        mock_unschedule = mocker.patch(
+            "garmin_cli.commands.workouts.unschedule_workout", return_value=None
+        )
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["--json", "workout", "unschedule", "555", "--confirm"])
+        assert result.exit_code == 0
+        mock_unschedule.assert_called_once_with("555")
+
+    def test_unschedule_json_ok_true(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
+        mocker.patch("garmin_cli.commands.workouts.unschedule_workout", return_value=None)
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["--json", "workout", "unschedule", "555", "--confirm"])
+        parsed = json.loads(result.output)
+        assert parsed["ok"] is True
+        assert parsed["data"][0]["status"] == "unscheduled"
+
+    def test_unschedule_confirmation_prompt_shown(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
+        mock_unschedule = mocker.patch(
+            "garmin_cli.commands.workouts.unschedule_workout", return_value=None
+        )
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["workout", "unschedule", "555"], input="y\n")
+        assert "Unschedule workout schedule 555?" in result.output
+        assert result.exit_code == 0
+        mock_unschedule.assert_called_once()
+
+    def test_unschedule_aborted_on_no_confirmation(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
+        mock_unschedule = mocker.patch(
+            "garmin_cli.commands.workouts.unschedule_workout", return_value=None
+        )
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["workout", "unschedule", "555"], input="n\n")
+        assert result.exit_code == 1
+        assert mock_unschedule.call_count == 0
+
+    def test_unschedule_not_found_exit_1(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.commands.workouts.unschedule_workout",
+            side_effect=GarminCliError(error="Not found", error_code="NOT_FOUND"),
+        )
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["workout", "unschedule", "99999", "--confirm"])
+        assert result.exit_code == 1
+
+    def test_unschedule_invalid_id_exit_1(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.commands.workouts.unschedule_workout",
+            side_effect=GarminCliError(
+                error="scheduled_workout_id must be a valid integer",
+                error_code="INVALID_INPUT",
+            ),
+        )
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["workout", "unschedule", "not-a-number", "--confirm"])
+        assert result.exit_code == 1

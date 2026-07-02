@@ -18,9 +18,12 @@ from garmin_cli.endpoints.activities import (
     get_activity_splits,
     get_activity_typed_splits,
     get_activity_weather,
+    get_activity_types,
     get_multisport_children,
     is_multisport_parent,
     list_activities,
+    set_activity_name,
+    set_activity_type,
     upload_activity,
 )
 from garmin_cli.exceptions import GarminCliError
@@ -639,3 +642,141 @@ class TestDeleteActivity:
         delete_activity("12345")
 
         mock_garth.delete_activity.assert_called_once_with(12345)
+
+    def test_409_raises_invalid_input(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.delete_activity.side_effect = _http_error(409)
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            delete_activity(12345)
+        assert exc_info.value.error_code == "INVALID_INPUT"
+
+
+_ACTIVITY_TYPES = [
+    {"typeId": 1, "typeKey": "running", "parentTypeId": 17},
+    {"typeId": 2, "typeKey": "cycling", "parentTypeId": 17},
+]
+
+
+class TestSetActivityName:
+
+    def test_invokes_typed_method_with_validated_id(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.set_activity_name.return_value = None
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        set_activity_name("12345", "Morning Run")
+
+        mock_garth.set_activity_name.assert_called_once_with(12345, "Morning Run")
+
+    def test_invalid_id_raises_invalid_input(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            set_activity_name("not-a-number", "Morning Run")
+        assert exc_info.value.error_code == "INVALID_INPUT"
+        mock_garth.set_activity_name.assert_not_called()
+
+    @pytest.mark.parametrize("bad_name", ["", "   "])
+    def test_empty_name_raises_invalid_input(self, mocker: Any, bad_name: str) -> None:
+        mock_garth = MagicMock()
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            set_activity_name("12345", bad_name)
+        assert exc_info.value.error_code == "INVALID_INPUT"
+        mock_garth.set_activity_name.assert_not_called()
+
+    def test_400_raises_invalid_input(self, mocker: Any) -> None:
+        # A Garmin payload rejection must surface as a classified error, not
+        # escape the retry loop raw (writes use the 400/409 immediate map).
+        mock_garth = MagicMock()
+        mock_garth.set_activity_name.side_effect = _http_error(400)
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            set_activity_name("12345", "Morning Run")
+        assert exc_info.value.error_code == "INVALID_INPUT"
+
+
+class TestSetActivityType:
+
+    def test_resolves_key_and_invokes_typed_method(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.get_activity_types.return_value = _ACTIVITY_TYPES
+        mock_garth.set_activity_type.return_value = None
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        set_activity_type("12345", "Cycling")
+
+        mock_garth.set_activity_type.assert_called_once_with(12345, 2, "cycling", 17)
+
+    def test_unknown_key_raises_invalid_input_without_write(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.get_activity_types.return_value = _ACTIVITY_TYPES
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            set_activity_type("12345", "quidditch")
+        assert exc_info.value.error_code == "INVALID_INPUT"
+        mock_garth.set_activity_type.assert_not_called()
+
+    def test_blank_key_raises_invalid_input_without_lookup(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            set_activity_type("12345", "   ")
+        assert exc_info.value.error_code == "INVALID_INPUT"
+        mock_garth.get_activity_types.assert_not_called()
+
+    def test_invalid_id_raises_invalid_input(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            set_activity_type("not-a-number", "running")
+        assert exc_info.value.error_code == "INVALID_INPUT"
+
+    @pytest.mark.parametrize(
+        "bad_row",
+        (
+            {"typeId": "2", "typeKey": "cycling", "parentTypeId": 17},
+            {"typeId": True, "typeKey": "cycling", "parentTypeId": 17},
+            {"typeKey": "cycling", "parentTypeId": 17},
+        ),
+        ids=("string_type_id", "bool_type_id", "missing_type_id"),
+    )
+    def test_known_key_with_malformed_ids_raises_server_error(
+        self, mocker: Any, bad_row: dict
+    ) -> None:
+        # A key that exists in the table but carries malformed id fields must
+        # not be reported as "unknown key" (misleading) and must not write.
+        mock_garth = MagicMock()
+        mock_garth.get_activity_types.return_value = [bad_row]
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            set_activity_type("12345", "cycling")
+        assert exc_info.value.error_code == "SERVER_ERROR"
+        assert "malformed" in exc_info.value.error
+        mock_garth.set_activity_type.assert_not_called()
+
+
+class TestGetActivityTypes:
+
+    def test_returns_list(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.get_activity_types.return_value = _ACTIVITY_TYPES
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        assert get_activity_types() == _ACTIVITY_TYPES
+
+    def test_non_list_response_coerced_to_empty(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.get_activity_types.return_value = None
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        assert get_activity_types() == []

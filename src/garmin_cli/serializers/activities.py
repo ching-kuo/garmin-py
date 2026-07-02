@@ -530,6 +530,20 @@ def serialize_activity_delete(activity_id: Any) -> list[dict[str, Any]]:
     return [{"id": activity_id, "status": "deleted"}]
 
 
+COLUMNS_ACTIVITY_RENAME: tuple[str, ...] = ("id", "name", "status")
+COLUMNS_ACTIVITY_SET_TYPE: tuple[str, ...] = ("id", "type", "status")
+
+
+def serialize_activity_rename(activity_id: Any, name: str) -> list[dict[str, Any]]:
+    """Build one-row serialization for a successful activity rename."""
+    return [{"id": activity_id, "name": name, "status": "renamed"}]
+
+
+def serialize_activity_set_type(activity_id: Any, type_key: str) -> list[dict[str, Any]]:
+    """Build one-row serialization for a successful activity set-type."""
+    return [{"id": activity_id, "type": type_key, "status": "type-updated"}]
+
+
 def serialize_multisport_children(children: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for child in children:

@@ -111,6 +111,17 @@ def schedule_workout(workout_id: Any, schedule_date: date) -> dict:
     return _typed_write(lambda: garth.schedule_workout(validated, schedule_date))
 
 
+def unschedule_workout(scheduled_workout_id: Any) -> None:
+    """DELETE /workout-service/schedule/{scheduleId}.
+
+    Removes a calendar entry created by :func:`schedule_workout`; the workout
+    template itself is preserved. ``scheduled_workout_id`` is the
+    ``workoutScheduleId`` returned by scheduling (not the workout id).
+    """
+    validated = _validate_numeric_id(scheduled_workout_id, "scheduled_workout_id")
+    _typed_write(lambda: garth.unschedule_workout(validated))
+
+
 def get_calendar_range(start: date, end: date) -> list:
     """Iterate week by week from start to end, collecting calendarItems."""
     all_items: list = []

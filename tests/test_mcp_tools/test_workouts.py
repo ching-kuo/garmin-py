@@ -570,3 +570,63 @@ class TestMcpWorkoutDelete:
         event = log.call_args.args[0]
         expected_outcome = "failed-auth" if error_code == "AUTH_FAILED" else "failed-upstream"
         assert event.outcome == expected_outcome
+
+
+class TestMcpWorkoutUnschedule:
+
+    def test_happy_path(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_tools.workouts.ensure_authenticated")
+        unschedule = mocker.patch("garmin_cli.mcp_tools.workouts.unschedule_workout")
+        log = mocker.patch("garmin_cli.mcp_tools.workouts._emit_write_log")
+        server = create_mcp_server(_config())
+
+        result = _call(server, "workout_unschedule", {"schedule_id": 555})
+        row = result["rows"][0]
+        assert row == {"ok": True, "action": "unscheduled", "schedule_id": 555}
+        unschedule.assert_called_once_with(555)
+        event = log.call_args.args[0]
+        assert event.tool == "workout_unschedule"
+        assert event.outcome == "success"
+        assert event.workout_id == 555
+
+    def test_destructive_annotation(self) -> None:
+        server = create_mcp_server(_config())
+        ann = _tool_annotations(server, "workout_unschedule")
+        assert ann is not None
+        assert ann.destructive_hint is True
+
+    def test_invalid_schedule_id(self, mocker: Any) -> None:
+        unschedule = mocker.patch("garmin_cli.mcp_tools.workouts.unschedule_workout")
+        server = create_mcp_server(_config())
+        with pytest.raises(ToolError, match="positive"):
+            _call(server, "workout_unschedule", {"schedule_id": 0})
+        unschedule.assert_not_called()
+
+    def test_auth_missing(self, mocker: Any) -> None:
+        mocker.patch(
+            "garmin_cli.mcp_tools.workouts.ensure_authenticated",
+            side_effect=GarminCliError(error="No usable saved session", error_code="AUTH_MISSING"),
+        )
+        log = mocker.patch("garmin_cli.mcp_tools.workouts._emit_write_log")
+        server = create_mcp_server(_config())
+
+        with pytest.raises(ToolError, match="garmin-cli login"):
+            _call(server, "workout_unschedule", {"schedule_id": 555})
+
+        event = log.call_args.args[0]
+        assert event.outcome == "failed-auth"
+
+    def test_upstream_not_found(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_tools.workouts.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.mcp_tools.workouts.unschedule_workout",
+            side_effect=GarminCliError(error="Not found.", error_code="NOT_FOUND"),
+        )
+        log = mocker.patch("garmin_cli.mcp_tools.workouts._emit_write_log")
+        server = create_mcp_server(_config())
+
+        with pytest.raises(ToolError, match="Not found"):
+            _call(server, "workout_unschedule", {"schedule_id": 999})
+
+        event = log.call_args.args[0]
+        assert event.outcome == "failed-upstream"

@@ -538,7 +538,7 @@ See README.md for full HTTP transport options and authentication notes.
 
 ### Available tools
 
-Read tools and four workout write tools (`workout_create`, `workout_schedule`, `workout_update`, `workout_delete`) are exposed. Write tools carry the SDK `destructive_hint` annotation for schedule/update/delete; create and update accept `dry_run=True` for a no-write preview.
+Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, `workout_update`, `workout_delete`, `workout_unschedule`) and activities (`activity_download`, `activity_upload`, `activity_delete`, `activity_rename`, `activity_set_type`) are exposed. Mutating write tools carry the SDK `destructive_hint` annotation; workout create and update accept `dry_run=True` for a no-write preview.
 
 | Tool | Parameters | Returns |
 |------|-----------|---------|
@@ -567,6 +567,12 @@ Read tools and four workout write tools (`workout_create`, `workout_schedule`, `
 | `workout_schedule` | `workout_id`, `date` | `{count, rows}` — `ok: true, action: "scheduled", workout_id, workout_schedule_id, date`. **Destructive.** |
 | `workout_update` | `workout_id`, `workout`, `dry_run?` | `{count, rows}` — `ok: true, action: "updated", workout_id` on success; dry-run returns the merged wire payload (one Garmin read, no write). Merge semantics preserve `workoutId`/`ownerId`/`createdDate`/`atpPlanId`. **Destructive.** |
 | `workout_delete` | `workout_id` | `{count, rows}` — `ok: true, action: "deleted", workout_id`. **Destructive.** |
+| `workout_unschedule` | `schedule_id` | `{count, rows}` — `ok: true, action: "unscheduled", schedule_id`. Removes a calendar entry (the workout template is preserved); `schedule_id` is the `workout_schedule_id` returned by `workout_schedule`, not the workout id. **Destructive.** |
+| `activity_download` | `activity_id`, `fmt?` (`original`\|`tcx`\|`gpx`\|`kml`\|`csv`), `output_path?`, `overwrite?` | `{count, rows}` — `ok: true, action: "downloaded", activity_id, format, path, size_bytes`. Writes the file to disk (default `activity_<id><ext>` in the cwd); raw bytes are never returned. Refuses to overwrite an existing file unless `overwrite=true`. |
+| `activity_upload` | `file_path` (.fit/.gpx/.tcx) | `{count, rows}` — `ok: true, action: "uploaded", status, activity_id`. `status` is `rejected` when Garmin declines the import (e.g. duplicate); `activity_id` is then null. |
+| `activity_delete` | `activity_id` | `{count, rows}` — `ok: true, action: "deleted", activity_id`. **Destructive.** |
+| `activity_rename` | `activity_id`, `name` | `{count, rows}` — `ok: true, action: "renamed", activity_id, name`. **Destructive** (replaces the stored title). |
+| `activity_set_type` | `activity_id`, `type_key` | `{count, rows}` — `ok: true, action: "type-updated", activity_id, type`. `type_key` is resolved against Garmin's live sport-type table; unknown keys are rejected before any write. **Destructive** (replaces the sport classification). |
 | `performance_race_predictions` | *(none)* | `{count, rows}` — predicted times for 5K, 10K, half marathon, marathon |
 | `performance_endurance_score` | `start_date`, `end_date` | `{count, rows}` — endurance score and classification (one API call per day) |
 | `performance_hill_score` | `start_date`, `end_date` | `{count, rows}` — hill score, endurance score, strength score (one API call per day) |

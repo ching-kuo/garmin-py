@@ -151,6 +151,41 @@ def test_raw_fallback_registry_tracks_update_paths() -> None:
     assert capabilities == {"workout_update"}
 
 
+class TestTypedWriteWrappers:
+    """The new typed wrappers delegate to the upstream client verbatim."""
+
+    def test_set_activity_name_delegates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = MagicMock()
+        monkeypatch.setattr(backend, "_backend", client)
+
+        backend.set_activity_name(12345, "Morning Run")
+
+        client.set_activity_name.assert_called_once_with("12345", "Morning Run")
+
+    def test_set_activity_type_delegates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = MagicMock()
+        monkeypatch.setattr(backend, "_backend", client)
+
+        backend.set_activity_type(12345, 2, "cycling", 17)
+
+        client.set_activity_type.assert_called_once_with("12345", 2, "cycling", 17)
+
+    def test_get_activity_types_delegates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = MagicMock()
+        client.get_activity_types.return_value = [{"typeKey": "running"}]
+        monkeypatch.setattr(backend, "_backend", client)
+
+        assert backend.get_activity_types() == [{"typeKey": "running"}]
+
+    def test_unschedule_workout_delegates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = MagicMock()
+        monkeypatch.setattr(backend, "_backend", client)
+
+        backend.unschedule_workout(555)
+
+        client.unschedule_workout.assert_called_once_with(555)
+
+
 class TestResolveHttpTimeout:
     @pytest.mark.parametrize(
         "env_value",

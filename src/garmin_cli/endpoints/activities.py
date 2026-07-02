@@ -14,6 +14,7 @@ from garmin_cli.endpoints._base import (
     _cancel_futures_on_error,
     _make_request,
     _make_typed_request,
+    _make_typed_write,
     _validate_numeric_id,
 )
 from garmin_cli.exceptions import GarminCliError
@@ -219,7 +220,7 @@ def download_activity(activity_id: Any, fmt: str = "original") -> bytes:
             error_code="INVALID_INPUT",
         )
     dl_fmt = _DOWNLOAD_FORMAT_MAP[fmt_lower]
-    result = _make_typed_request(garth.download_activity, validated, dl_fmt)
+    result = _make_typed_write(garth.download_activity, validated, dl_fmt)
     if not isinstance(result, (bytes, bytearray)):
         raise GarminCliError(
             error="Download returned unexpected non-bytes response.",
@@ -256,13 +257,88 @@ def upload_activity(file_path: str) -> Any:
             error=f"Unsupported file extension '.{ext}'. Allowed: {allowed}.",
             error_code="INVALID_INPUT",
         )
-    return _make_typed_request(garth.upload_activity, str(p))
+    return _make_typed_write(garth.upload_activity, str(p))
 
 
 def delete_activity(activity_id: Any) -> None:
     """Delete an activity by ID."""
     validated = _validate_numeric_id(activity_id, "activity_id")
-    _make_typed_request(
+    _make_typed_write(
         garth.delete_activity,
         validated,
+    )
+
+
+def get_activity_types() -> list[dict]:
+    """Return the Garmin sport-type table (typeKey/typeId/parentTypeId rows)."""
+    result = _make_typed_request(garth.get_activity_types)
+    return result if isinstance(result, list) else []
+
+
+def _resolve_activity_type(type_key: str) -> tuple[int, int]:
+    """Resolve a sport ``typeKey`` to its ``(typeId, parentTypeId)`` pair.
+
+    The pair is looked up from the live Garmin type table rather than a
+    hardcoded list, so the accepted keys always track the account's server.
+    Raises ``INVALID_INPUT`` for a blank or unknown key.
+    """
+    normalized = type_key.strip().lower()
+    if not normalized:
+        raise GarminCliError(
+            error="Activity type key must be non-empty.",
+            error_code="INVALID_INPUT",
+        )
+    key_found_malformed = False
+    for entry in get_activity_types():
+        if not isinstance(entry, dict) or entry.get("typeKey") != normalized:
+            continue
+        type_id = entry.get("typeId")
+        parent_type_id = entry.get("parentTypeId")
+        if (
+            isinstance(type_id, int)
+            and not isinstance(type_id, bool)
+            and isinstance(parent_type_id, int)
+            and not isinstance(parent_type_id, bool)
+        ):
+            return type_id, parent_type_id
+        key_found_malformed = True
+    if key_found_malformed:
+        raise GarminCliError(
+            error=(
+                f"Activity type '{type_key}' exists but has malformed id fields "
+                "in Garmin's type table."
+            ),
+            error_code="SERVER_ERROR",
+        )
+    raise GarminCliError(
+        error=f"Unknown activity type key: '{type_key}'.",
+        error_code="INVALID_INPUT",
+    )
+
+
+def set_activity_name(activity_id: Any, name: str) -> Any:
+    """Rename an activity. The name must be non-empty."""
+    validated = _validate_numeric_id(activity_id, "activity_id")
+    if not name or not name.strip():
+        raise GarminCliError(
+            error="Activity name must be non-empty.",
+            error_code="INVALID_INPUT",
+        )
+    return _make_typed_write(garth.set_activity_name, validated, name)
+
+
+def set_activity_type(activity_id: Any, type_key: str) -> Any:
+    """Set an activity's sport type from a ``typeKey`` (e.g. ``running``).
+
+    Resolves the key to Garmin's ``typeId``/``parentTypeId`` via the live
+    type table before issuing the update.
+    """
+    validated = _validate_numeric_id(activity_id, "activity_id")
+    type_id, parent_type_id = _resolve_activity_type(type_key)
+    return _make_typed_write(
+        garth.set_activity_type,
+        validated,
+        type_id,
+        type_key.strip().lower(),
+        parent_type_id,
     )

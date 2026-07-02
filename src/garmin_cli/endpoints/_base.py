@@ -204,6 +204,24 @@ def _make_typed_request(typed_method: Callable[..., Any], *args: Any, **kwargs: 
     )
 
 
+def _make_typed_write(typed_method: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Execute a typed backend-adapter write method with retry on 429/5xx.
+
+    Same as :func:`_make_typed_request` but with the write-verb immediate-fail
+    map (400/409 -> INVALID_INPUT), matching :func:`_make_write_request`, so a
+    Garmin payload rejection or conflict surfaces as a classified
+    ``GarminCliError`` instead of escaping the retry loop raw.
+    """
+    return _retry_loop(
+        lambda: typed_method(*args, **kwargs),
+        immediate_errors={
+            **_AUTH_NOT_FOUND_ERRORS,
+            400: ("Invalid input.", "INVALID_INPUT"),
+            409: ("Invalid input.", "INVALID_INPUT"),
+        },
+    )
+
+
 def _collect_daily_range(
     getter: Callable[[date], Any],
     start: date,

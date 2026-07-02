@@ -25,6 +25,8 @@ from garmin_cli.endpoints.activities import (
     get_multisport_children,
     is_multisport_parent,
     list_activities,
+    set_activity_name,
+    set_activity_type,
     upload_activity,
 )
 from garmin_cli.metrics.sport_profile import SportProfile
@@ -41,6 +43,8 @@ from garmin_cli.serializers import (
     COLUMNS_ACTIVITY_DETAIL,
     COLUMNS_ACTIVITY_DOWNLOAD,
     COLUMNS_ACTIVITY_HR_ZONES,
+    COLUMNS_ACTIVITY_RENAME,
+    COLUMNS_ACTIVITY_SET_TYPE,
     COLUMNS_ACTIVITY_SUMMARY,
     COLUMNS_ACTIVITY_UPLOAD,
     COLUMNS_ACTIVITY_WEATHER,
@@ -54,6 +58,8 @@ from garmin_cli.serializers import (
     serialize_activity_download,
     serialize_activity_hr_zones,
     serialize_activity_laps,
+    serialize_activity_rename,
+    serialize_activity_set_type,
     serialize_activity_summary,
     serialize_activity_upload,
     serialize_activity_weather,
@@ -346,3 +352,31 @@ def delete_cmd(ctx: click.Context, activity_id: str, confirm: bool) -> None:
     delete_activity(activity_id)
     rows = serialize_activity_delete(activity_id)
     render_output(ctx.obj["config"].output_format, "activity delete", rows, COLUMNS_ACTIVITY_DELETE)
+
+
+@activity.command("rename")
+@click.argument("activity_id")
+@click.argument("new_name")
+@click.pass_context
+def rename_cmd(ctx: click.Context, activity_id: str, new_name: str) -> None:
+    """Rename an activity. NEW_NAME must be non-empty."""
+    ensure_authenticated(ctx.obj["config"])
+    set_activity_name(activity_id, new_name)
+    rows = serialize_activity_rename(activity_id, new_name)
+    render_output(ctx.obj["config"].output_format, "activity rename", rows, COLUMNS_ACTIVITY_RENAME)
+
+
+@activity.command("set-type")
+@click.argument("activity_id")
+@click.argument("type_key")
+@click.pass_context
+def set_type_cmd(ctx: click.Context, activity_id: str, type_key: str) -> None:
+    """Set an activity's sport type from a Garmin typeKey (e.g. running, cycling).
+
+    TYPE_KEY is resolved against Garmin's live sport-type table; an unknown key
+    is rejected.
+    """
+    ensure_authenticated(ctx.obj["config"])
+    set_activity_type(activity_id, type_key)
+    rows = serialize_activity_set_type(activity_id, type_key)
+    render_output(ctx.obj["config"].output_format, "activity set-type", rows, COLUMNS_ACTIVITY_SET_TYPE)

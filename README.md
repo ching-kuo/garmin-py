@@ -144,11 +144,13 @@ garmin-cli activity metrics-describe ACTIVITY_ID  # metric descriptors: key, uni
 garmin-cli activity download         ACTIVITY_ID [--fmt original|tcx|gpx|kml|csv] [--output PATH] [--force]
 garmin-cli activity upload           FILE         # .fit / .gpx / .tcx
 garmin-cli activity delete           ACTIVITY_ID [--confirm]
+garmin-cli activity rename           ACTIVITY_ID NEW_NAME
+garmin-cli activity set-type         ACTIVITY_ID TYPE_KEY  # e.g. running, cycling
 ```
 
 `--limit` defaults to 20, max 100. `--type` filters by activity type key (e.g., `running`, `cycling`).
 
-`activity download` writes the activity file to disk (it never prints binary to stdout). `--fmt` defaults to `original` (the FIT file inside a ZIP archive); the default output name is `activity_<id><ext>` in the current directory, and an existing file is not overwritten unless `--force` is given. `activity delete` prompts for confirmation unless `--confirm` is passed.
+`activity download` writes the activity file to disk (it never prints binary to stdout). `--fmt` defaults to `original` (the FIT file inside a ZIP archive); the default output name is `activity_<id><ext>` in the current directory, and an existing file is not overwritten unless `--force` is given. `activity delete` prompts for confirmation unless `--confirm` is passed. `activity set-type` accepts any `typeKey` from Garmin's live sport-type table (an unknown key is rejected before any write).
 
 #### Detailed sport-specific metrics
 
@@ -196,6 +198,7 @@ garmin-cli workout create   --stdin                # read JSON from stdin
 garmin-cli workout update   WORKOUT_ID FILE        # partial update (only fields provided change)
 garmin-cli workout delete   WORKOUT_ID [--confirm] # --confirm skips interactive prompt
 garmin-cli workout schedule WORKOUT_ID DATE        # DATE = YYYY-MM-DD
+garmin-cli workout unschedule SCHEDULE_ID [--confirm] # removes a calendar entry; SCHEDULE_ID is the workoutScheduleId returned by schedule
 ```
 
 `--ahead N` shows the next N days of planned workouts (future-facing). `--days N` shows past N days.
@@ -296,7 +299,7 @@ garmin-cli --json activity list --limit 5
 
 ## MCP Server (Optional)
 
-Expose garmin-cli as an MCP tool server for local or remote MCP clients. Includes read tools for health, activities, workouts, performance, and devices, plus four workout write tools (`workout_create`, `workout_schedule`, `workout_update`, `workout_delete`) with dry-run preview on create and update. The `report_snapshot` tool assembles a full morning/evening/weekly report in a single call, fanning out the underlying reads server-side — designed for recurring agent-driven daily summaries. See [SKILL.md](SKILL.md#report_snapshot-section-composition) for its section composition.
+Expose garmin-cli as an MCP tool server for local or remote MCP clients. Includes read tools for health, activities, workouts, performance, and devices, plus write tools for workouts (`workout_create`, `workout_schedule`, `workout_update`, `workout_delete`, `workout_unschedule`, with dry-run preview on create and update) and activities (`activity_download`, `activity_upload`, `activity_delete`, `activity_rename`, `activity_set_type`). The `report_snapshot` tool assembles a full morning/evening/weekly report in a single call, fanning out the underlying reads server-side — designed for recurring agent-driven daily summaries. See [SKILL.md](SKILL.md#report_snapshot-section-composition) for its section composition.
 
 ### Why garmin-cli is not on PyPI
 
