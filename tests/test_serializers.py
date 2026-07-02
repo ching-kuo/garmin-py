@@ -677,6 +677,14 @@ def test_additional_health_serializers(
     assert columns == required_columns
 
 
+def test_serialize_resting_hr_falls_back_to_legacy_key() -> None:
+    # restingHeartRateValue was the bare-path dailyHeartRate key; kept as a
+    # fallback in case an older cached payload shape is ever seen.
+    assert serialize_resting_hr(
+        {"calendarDate": "2026-03-11", "restingHeartRateValue": 52}
+    ) == [{"date": "2026-03-11", "resting_hr": 52}]
+
+
 # ---------------------------------------------------------------------------
 # serialize_activity_detail
 # ---------------------------------------------------------------------------

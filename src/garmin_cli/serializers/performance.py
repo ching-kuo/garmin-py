@@ -92,8 +92,31 @@ _THRESHOLDS_TABLE = FieldTable(
 )
 
 
+# The displayName-scoped race-predictions endpoint returns one flat dict
+# with a fixed field per race distance (time5K, time10K, ...) rather than a
+# list of per-race objects. Each entry maps that field to the row shape the
+# table below already knows how to project (raceType/predictedTimeInSeconds/
+# distanceMeters), so the reshape stays entirely upstream of the table.
+_RACE_PREDICTION_FLAT_FIELDS: tuple[tuple[str, str, float], ...] = (
+    ("time5K", "5K", 5000.0),
+    ("time10K", "10K", 10000.0),
+    ("timeHalfMarathon", "Half Marathon", 21097.5),
+    ("timeMarathon", "Marathon", 42195.0),
+)
+
+
 def serialize_race_predictions(raw: Any) -> list[dict[str, Any]]:
-    if isinstance(raw, dict):
+    if isinstance(raw, dict) and any(key in raw for key, _, _ in _RACE_PREDICTION_FLAT_FIELDS):
+        items: list[dict[str, Any]] = [
+            {
+                "raceType": race_type,
+                "predictedTimeInSeconds": raw[key],
+                "distanceMeters": distance_meters,
+            }
+            for key, race_type, distance_meters in _RACE_PREDICTION_FLAT_FIELDS
+            if raw.get(key) is not None
+        ]
+    elif isinstance(raw, dict):
         items = _listify(
             raw.get("racePredictions") or raw.get("predictions") or raw
         )

@@ -11,6 +11,8 @@
 ### Fixed
 - `activity zones` / `activity_hr_zones` rows carried a `seconds_in_zone` key that was missing from `COLUMNS_ACTIVITY_HR_ZONES`, so table and CSV output silently dropped it (JSON was unaffected). `seconds_in_zone` is now in the column tuple, ordered before `minutes_in_zone` to match the JSON row order.
 - `activity get --detail --laps` on a multisport parent fetched the child-activity list twice -- once to build the `children` envelope, again inside the laps fan-out -- doubling the Garmin API round-trips for that leg of the request. The laps fetch now reuses the already-fetched children.
+- `resting-hr` / `health_resting_hr` started failing with `AUTH_FAILED` (and, in `report_snapshot weekly`, failing the whole snapshot) because Garmin now 403s the bare `/wellness-service/wellness/dailyHeartRate/{day}` path. The endpoint now calls the displayName-scoped typed `Garmin.get_heart_rates` method; the response's resting-HR field also changed from `restingHeartRateValue` to `restingHeartRate` (the old key is kept as a fallback).
+- `performance_race_predictions` started 404ing because Garmin now requires the displayName-scoped race-predictions path. The endpoint now calls the typed `Garmin.get_race_predictions` method. The response shape also changed from a list of per-race objects to one flat dict keyed by distance (`time5K`, `time10K`, `timeHalfMarathon`, `timeMarathon`); the serializer now reshapes that into the existing `race_type` / `predicted_time_seconds` / `distance_meters` rows.
 
 ## [2.3.0] - 2026-06-16
 

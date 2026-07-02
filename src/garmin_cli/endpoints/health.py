@@ -5,7 +5,11 @@ from datetime import date
 from typing import Any
 
 from garmin_cli import backend as garth
-from garmin_cli.endpoints._base import _collect_daily_range, _make_request
+from garmin_cli.endpoints._base import (
+    _collect_daily_range,
+    _make_request,
+    _make_typed_request,
+)
 
 
 def _request(url: str, *, params: dict[str, Any] | None = None) -> Any:
@@ -88,7 +92,7 @@ def get_spo2_range(start: date, end: date) -> list[Any]:
 
 
 def get_resting_hr(day: date) -> Any:
-    return _request(f"/wellness-service/wellness/dailyHeartRate/{day.isoformat()}")
+    return _make_typed_request(garth.get_heart_rates, day.isoformat())
 
 
 def get_resting_hr_range(start: date, end: date) -> list[Any]:

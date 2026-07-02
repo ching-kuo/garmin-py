@@ -112,7 +112,10 @@ _RESTING_HR_TABLE = FieldTable(
     columns=COLUMNS_RESTING_HR,
     entries=(
         FieldEntry("date", (("calendarDate",),)),
-        FieldEntry("resting_hr", (("restingHeartRateValue",),)),
+        # restingHeartRate is the displayName-scoped dailyHeartRate response
+        # (current); restingHeartRateValue is the legacy bare-path key kept
+        # as a fallback.
+        FieldEntry("resting_hr", (("restingHeartRate",), ("restingHeartRateValue",))),
     ),
 )
 

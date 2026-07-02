@@ -6,6 +6,7 @@ import json
 import threading
 from datetime import date
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -20,6 +21,7 @@ from garmin_cli.endpoints import health as health_endpoints  # noqa: E402
 from garmin_cli.endpoints import metrics as metrics_endpoints  # noqa: E402
 from garmin_cli.exceptions import GarminCliError  # noqa: E402
 from garmin_cli.mcp_server import create_mcp_server  # noqa: E402
+from tests.helpers import make_http_error as _http_error  # noqa: E402
 
 
 def _config(**overrides: Any) -> CliConfig:
@@ -240,6 +242,42 @@ class TestHealthEndpoints:
         with pytest.raises(GarminCliError, match="Not found"):
             health_endpoints.get_steps_range(date(2026, 1, 1), date(2026, 1, 7))
 
+    def test_get_resting_hr_uses_displayname_scoped_typed_method(self, mocker: Any) -> None:
+        # The bare /wellness-service/wellness/dailyHeartRate/{day} path 403s;
+        # the typed get_heart_rates method scopes the same endpoint under the
+        # account displayName.
+        mock_garth = MagicMock()
+        mock_garth.get_heart_rates.return_value = {
+            "calendarDate": "2026-01-01",
+            "restingHeartRate": 45,
+        }
+        mocker.patch("garmin_cli.endpoints.health.garth", mock_garth)
+
+        result = health_endpoints.get_resting_hr(date(2026, 1, 1))
+        assert result["restingHeartRate"] == 45
+        mock_garth.get_heart_rates.assert_called_once_with("2026-01-01")
+        mock_garth.connectapi.assert_not_called()
+
+    def test_get_resting_hr_not_found(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.get_heart_rates.side_effect = _http_error(404)
+        mocker.patch("garmin_cli.endpoints.health.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            health_endpoints.get_resting_hr(date(2026, 1, 1))
+        assert exc_info.value.error_code == "NOT_FOUND"
+
+    def test_get_resting_hr_forbidden_maps_to_auth_failed(self, mocker: Any) -> None:
+        # Mirrors the live drift symptom that motivated the typed-method fix:
+        # the retired bare path returned 403 ForbiddenException.
+        mock_garth = MagicMock()
+        mock_garth.get_heart_rates.side_effect = _http_error(403)
+        mocker.patch("garmin_cli.endpoints.health.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            health_endpoints.get_resting_hr(date(2026, 1, 1))
+        assert exc_info.value.error_code == "AUTH_FAILED"
+
 
 # ---------------------------------------------------------------------------
 # Endpoint layer -- metrics
@@ -250,16 +288,27 @@ class TestMetricsEndpoints:
 
 
     def test_get_race_predictions(self, mocker: Any) -> None:
-        mock_request = mocker.patch(
-            "garmin_cli.endpoints.metrics._request",
-            return_value=[{"raceType": "5K", "predictedTimeInSeconds": 1500}],
-        )
+        # The bare /metrics-service/metrics/racepredictions path 404s; the
+        # typed get_race_predictions method scopes the same endpoint under
+        # the account displayName and returns one flat dict (time5K, ...)
+        # rather than a list of per-race objects.
+        mock_garth = MagicMock()
+        mock_garth.get_race_predictions.return_value = {
+            "calendarDate": "2026-01-01",
+            "time5K": 1500,
+        }
+        mocker.patch("garmin_cli.endpoints.metrics.garth", mock_garth)
+
         result = metrics_endpoints.get_race_predictions()
-        assert result[0]["raceType"] == "5K"
-        mock_request.assert_called_once_with("/metrics-service/metrics/racepredictions")
+        assert result["time5K"] == 1500
+        mock_garth.get_race_predictions.assert_called_once_with()
+        mock_garth.connectapi.assert_not_called()
 
     def test_get_race_predictions_coalesces_none(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.endpoints.metrics._request", return_value=None)
+        mock_garth = MagicMock()
+        mock_garth.get_race_predictions.return_value = None
+        mocker.patch("garmin_cli.endpoints.metrics.garth", mock_garth)
+
         result = metrics_endpoints.get_race_predictions()
         assert result == []
 
@@ -330,12 +379,13 @@ class TestMetricsEndpoints:
         )
 
     def test_get_race_predictions_not_found(self, mocker: Any) -> None:
-        mocker.patch(
-            "garmin_cli.endpoints.metrics._request",
-            side_effect=GarminCliError(error="Not found", error_code="NOT_FOUND"),
-        )
-        with pytest.raises(GarminCliError, match="Not found"):
+        mock_garth = MagicMock()
+        mock_garth.get_race_predictions.side_effect = _http_error(404)
+        mocker.patch("garmin_cli.endpoints.metrics.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc_info:
             metrics_endpoints.get_race_predictions()
+        assert exc_info.value.error_code == "NOT_FOUND"
 
 
 # ---------------------------------------------------------------------------
@@ -456,6 +506,34 @@ class TestNewSerializers:
                 "predicted_time_seconds": 12600,
                 "distance_meters": 42195,
             }
+        ]
+
+    def test_serialize_race_predictions_reshapes_displayname_scoped_flat_dict(self) -> None:
+        # The displayName-scoped endpoint returns one flat dict keyed by
+        # race distance rather than a list of per-race objects.
+        result = garmin_serializers.serialize_race_predictions(
+            {
+                "userId": 1,
+                "calendarDate": "2026-01-01",
+                "time5K": 1293,
+                "time10K": 2737,
+                "timeHalfMarathon": 6212,
+                "timeMarathon": 13981,
+            }
+        )
+        assert result == [
+            {"race_type": "5K", "predicted_time_seconds": 1293, "distance_meters": 5000.0},
+            {"race_type": "10K", "predicted_time_seconds": 2737, "distance_meters": 10000.0},
+            {
+                "race_type": "Half Marathon",
+                "predicted_time_seconds": 6212,
+                "distance_meters": 21097.5,
+            },
+            {
+                "race_type": "Marathon",
+                "predicted_time_seconds": 13981,
+                "distance_meters": 42195.0,
+            },
         ]
 
     def test_serialize_endurance_score(self) -> None:
@@ -1703,14 +1781,23 @@ class TestPerformanceTools:
     def test_performance_race_predictions(self, mocker: Any) -> None:
 
         mocker.patch("garmin_cli.mcp_server.ensure_authenticated")
+        # Live flat-dict shape, so the MCP tool path exercises the reshape gate.
         mocker.patch(
             "garmin_cli.mcp_server.get_race_predictions",
-            return_value=[{"raceType": "MARATHON", "predictedTimeInSeconds": 12600}],
+            return_value={
+                "calendarDate": "2026-07-01",
+                "time5K": 1293,
+                "time10K": 2701,
+                "timeHalfMarathon": 6004,
+                "timeMarathon": 12600,
+            },
         )
         server = create_mcp_server(_config())
         result = _call(server, "performance_race_predictions", {})
-        assert result["count"] == 1
-        assert result["rows"][0]["race_type"] == "MARATHON"
+        assert result["count"] == 4
+        rows = {row["race_type"]: row for row in result["rows"]}
+        assert rows["Marathon"]["predicted_time_seconds"] == 12600
+        assert rows["5K"]["distance_meters"] == 5000
 
     def test_performance_endurance_score(self, mocker: Any) -> None:
 

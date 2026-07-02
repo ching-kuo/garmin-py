@@ -5,17 +5,22 @@ from datetime import date
 from typing import Any
 
 from garmin_cli import backend as garth
-from garmin_cli.endpoints._base import _collect_daily_range, _make_request
+from garmin_cli.endpoints._base import (
+    _collect_daily_range,
+    _make_request,
+    _make_typed_request,
+)
 
 
 def _request(url: str, *, params: dict[str, Any] | None = None) -> Any:
     return _make_request(garth.connectapi, url, params=params)
 
 
-def get_race_predictions() -> list[Any]:
-    result = _request("/metrics-service/metrics/racepredictions")
-    if isinstance(result, dict):
-        return [result]
+def get_race_predictions() -> Any:
+    # Upstream returns one flat dict keyed by race distance (time5K,
+    # time10K, ...) rather than a list of per-race objects; the reshape into
+    # rows happens in serialize_race_predictions.
+    result = _make_typed_request(garth.get_race_predictions)
     return result if result is not None else []
 
 

@@ -298,3 +298,23 @@ def delete_activity(activity_id: int | str) -> Any:
     """Use the typed upstream activity-delete helper."""
     client = _require_backend()
     return client.delete_activity(str(activity_id))
+
+
+def get_heart_rates(cdate: str) -> dict[str, Any]:
+    """Use the typed upstream daily-heart-rate helper (displayName-scoped).
+
+    The bare ``/wellness-service/wellness/dailyHeartRate/{day}`` path now
+    403s; upstream scopes the same endpoint under the account displayName.
+    """
+    client = _require_backend()
+    return client.get_heart_rates(cdate)
+
+
+def get_race_predictions() -> dict[str, Any]:
+    """Use the typed upstream race-predictions helper (displayName-scoped, latest).
+
+    The bare ``/metrics-service/metrics/racepredictions`` path now 404s;
+    upstream scopes the same endpoint under the account displayName.
+    """
+    client = _require_backend()
+    return client.get_race_predictions()

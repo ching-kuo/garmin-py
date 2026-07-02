@@ -167,8 +167,11 @@ def sample_spo2_raw() -> dict:
 
 @pytest.fixture()
 def sample_resting_hr_raw() -> dict:
+    # restingHeartRate is the current displayName-scoped dailyHeartRate
+    # response key; restingHeartRateValue (legacy bare-path key) is covered
+    # separately as a fallback in test_serializers.py.
     return {
-        "restingHeartRateValue": 52,
+        "restingHeartRate": 52,
         "calendarDate": "2026-03-11",
     }
 
