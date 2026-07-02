@@ -128,7 +128,7 @@ class TestPerformanceRacePredictionsCommand:
 class TestPerformanceEnduranceScoreCommand:
 
     def test_endurance_score_calls_auth(self, mocker: Any) -> None:
-        mock_auth = mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
+        mock_auth = mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.performance.get_endurance_score_range", return_value=[])
         mocker.patch("garmin_cli.commands.performance.serialize_endurance_score", return_value=[])
         runner = CliRunner(mix_stderr=False)
@@ -136,7 +136,7 @@ class TestPerformanceEnduranceScoreCommand:
         mock_auth.assert_called_once()
 
     def test_endurance_score_exit_code_0(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.performance.get_endurance_score_range", return_value=[])
         mocker.patch(
             "garmin_cli.commands.performance.serialize_endurance_score",
@@ -151,7 +151,7 @@ class TestPerformanceEnduranceScoreCommand:
         assert result.exit_code == 0
 
     def test_endurance_score_json_ok_true(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.performance.get_endurance_score_range", return_value=[])
         mocker.patch(
             "garmin_cli.commands.performance.serialize_endurance_score",
@@ -163,7 +163,7 @@ class TestPerformanceEnduranceScoreCommand:
         assert parsed["ok"] is True
 
     def test_endurance_score_date_range_in_envelope(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.performance.get_endurance_score_range", return_value=[])
         mocker.patch("garmin_cli.commands.performance.serialize_endurance_score", return_value=[])
         runner = CliRunner(mix_stderr=False)
@@ -176,7 +176,7 @@ class TestPerformanceEnduranceScoreCommand:
         assert parsed["date_range"]["to"] == "2026-03-07"
 
     def test_endurance_score_conflict_fails(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["performance", "endurance-score", "--date", "2026-03-11", "--days", "7"])
         assert result.exit_code != 0
@@ -185,7 +185,7 @@ class TestPerformanceEnduranceScoreCommand:
         from garmin_cli.exceptions import GarminCliError
 
         mocker.patch(
-            "garmin_cli.commands.performance.ensure_authenticated",
+            "garmin_cli.commands._options.ensure_authenticated",
             side_effect=GarminCliError(error="No creds", error_code="AUTH_MISSING"),
         )
         runner = CliRunner(mix_stderr=False)
@@ -196,7 +196,7 @@ class TestPerformanceEnduranceScoreCommand:
         assert parsed["error_code"] == "AUTH_MISSING"
 
     def test_endurance_score_empty_data_exit_0(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.performance.get_endurance_score_range", return_value=[])
         mocker.patch("garmin_cli.commands.performance.serialize_endurance_score", return_value=[])
         runner = CliRunner(mix_stderr=False)
@@ -213,7 +213,7 @@ class TestPerformanceEnduranceScoreCommand:
 class TestPerformanceHillScoreCommand:
 
     def test_hill_score_calls_auth(self, mocker: Any) -> None:
-        mock_auth = mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
+        mock_auth = mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.performance.get_hill_score_range", return_value=[])
         mocker.patch("garmin_cli.commands.performance.serialize_hill_score", return_value=[])
         runner = CliRunner(mix_stderr=False)
@@ -221,7 +221,7 @@ class TestPerformanceHillScoreCommand:
         mock_auth.assert_called_once()
 
     def test_hill_score_exit_code_0(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.performance.get_hill_score_range", return_value=[])
         mocker.patch(
             "garmin_cli.commands.performance.serialize_hill_score",
@@ -237,7 +237,7 @@ class TestPerformanceHillScoreCommand:
         assert result.exit_code == 0
 
     def test_hill_score_json_ok_true(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.performance.get_hill_score_range", return_value=[])
         mocker.patch(
             "garmin_cli.commands.performance.serialize_hill_score",
@@ -249,7 +249,7 @@ class TestPerformanceHillScoreCommand:
         assert parsed["ok"] is True
 
     def test_hill_score_date_range_in_envelope(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.performance.get_hill_score_range", return_value=[])
         mocker.patch("garmin_cli.commands.performance.serialize_hill_score", return_value=[])
         runner = CliRunner(mix_stderr=False)
@@ -262,7 +262,7 @@ class TestPerformanceHillScoreCommand:
         assert parsed["date_range"]["to"] == "2026-03-07"
 
     def test_hill_score_conflict_fails(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["performance", "hill-score", "--date", "2026-03-11", "--days", "7"])
         assert result.exit_code != 0
@@ -271,7 +271,7 @@ class TestPerformanceHillScoreCommand:
         from garmin_cli.exceptions import GarminCliError
 
         mocker.patch(
-            "garmin_cli.commands.performance.ensure_authenticated",
+            "garmin_cli.commands._options.ensure_authenticated",
             side_effect=GarminCliError(error="No creds", error_code="AUTH_MISSING"),
         )
         runner = CliRunner(mix_stderr=False)
@@ -282,7 +282,7 @@ class TestPerformanceHillScoreCommand:
         assert parsed["error_code"] == "AUTH_MISSING"
 
     def test_hill_score_empty_data_exit_0(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.performance.get_hill_score_range", return_value=[])
         mocker.patch("garmin_cli.commands.performance.serialize_hill_score", return_value=[])
         runner = CliRunner(mix_stderr=False)

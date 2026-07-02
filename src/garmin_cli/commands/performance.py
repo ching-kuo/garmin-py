@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Callable
 
 import click
 
 from garmin_cli.auth import ensure_authenticated
-from garmin_cli.commands._options import date_range_options
-from garmin_cli.date_utils import CLICK_DATE_TYPE, resolve_click_dates
+from garmin_cli.commands._options import date_range_options, render_date_range
+from garmin_cli.date_utils import CLICK_DATE_TYPE
 from garmin_cli.endpoints.metrics import (
     get_endurance_score_range,
     get_hill_score_range,
@@ -36,29 +35,7 @@ from garmin_cli.serializers import (
     serialize_vo2max,
     serialize_zones,
 )
-
-
-def _render_performance_range(
-    ctx: click.Context,
-    command_name: str,
-    getter: Callable[[Any, Any], Any],
-    serializer: Callable[[Any], list[dict[str, Any]]],
-    columns: tuple[str, ...],
-    value_date: datetime | None,
-    days: int | None,
-    date_from: datetime | None,
-    date_to: datetime | None,
-) -> None:
-    start, end = resolve_click_dates(value_date, days, None, date_from, date_to)
-    ensure_authenticated(ctx.obj["config"])
-    data = serializer(getter(start, end))
-    render_output(
-        ctx.obj["config"].output_format,
-        command_name,
-        data,
-        columns,
-        date_range=(start, end),
-    )
+from garmin_cli.services.performance import fetch_vo2max
 
 
 @click.group()
@@ -82,10 +59,13 @@ def thresholds_cmd(ctx: click.Context) -> None:
 def vo2max_cmd(ctx: click.Context, value_date: datetime | None) -> None:
     """Get VO2 max for a day."""
     ensure_authenticated(ctx.obj["config"])
-    raw = get_vo2max(value_date.date()) if value_date else get_latest_vo2max()  # type: ignore[attr-defined]
-    data = serialize_vo2max(raw)
-    if value_date is None:
-        data = select_latest_dated_rows(data)
+    data = fetch_vo2max(
+        value_date.date() if value_date else None,
+        get_vo2max=get_vo2max,
+        get_latest_vo2max=get_latest_vo2max,
+        serialize_vo2max=serialize_vo2max,
+        select_latest_dated_rows=select_latest_dated_rows,
+    )
     render_output(ctx.obj["config"].output_format, "performance vo2max", data, COLUMNS_VO2MAX)
 
 
@@ -123,7 +103,7 @@ def endurance_score_cmd(
 
     Note: large date ranges may be slow — one API call is made per day.
     """
-    _render_performance_range(
+    render_date_range(
         ctx,
         "performance endurance-score",
         get_endurance_score_range,
@@ -150,7 +130,7 @@ def hill_score_cmd(
 
     Note: large date ranges may be slow — one API call is made per day.
     """
-    _render_performance_range(
+    render_date_range(
         ctx,
         "performance hill-score",
         get_hill_score_range,

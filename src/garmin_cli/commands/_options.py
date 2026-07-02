@@ -1,13 +1,16 @@
-"""Shared Click option decorators for garmin-cli commands."""
+"""Shared Click option decorators and helpers for garmin-cli commands."""
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any, TypeVar
 
 import click
 
-from garmin_cli.date_utils import CLICK_DATE_TYPE
+from garmin_cli.auth import ensure_authenticated
+from garmin_cli.date_utils import CLICK_DATE_TYPE, resolve_click_dates
 from garmin_cli.exceptions import GarminCliError
+from garmin_cli.output import render_output
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -38,6 +41,37 @@ def date_range_options(*, include_ahead: bool = False) -> Callable[[F], F]:
         return fn  # type: ignore[return-value]
 
     return decorator  # type: ignore[return-value]
+
+
+def render_date_range(
+    ctx: click.Context,
+    command_name: str,
+    getter: Callable[[Any, Any], Any],
+    serializer: Callable[[Any], list[dict[str, Any]]],
+    columns: tuple[str, ...],
+    value_date: datetime | None,
+    days: int | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
+    *,
+    ahead: int | None = None,
+) -> None:
+    """Resolve a date range, authenticate, fetch, serialize, and render output.
+
+    Shared by the health and performance range commands. ``ahead`` is only
+    meaningful for commands that stack the ``--ahead`` option (health sleep);
+    performance commands leave it ``None`` and behave identically to before.
+    """
+    start, end = resolve_click_dates(value_date, days, ahead, date_from, date_to)
+    ensure_authenticated(ctx.obj["config"])
+    data = serializer(getter(start, end))
+    render_output(
+        ctx.obj["config"].output_format,
+        command_name,
+        data,
+        columns,
+        date_range=(start, end),
+    )
 
 
 def validate_limit(limit: int) -> None:

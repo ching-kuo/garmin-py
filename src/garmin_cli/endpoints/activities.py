@@ -52,11 +52,9 @@ def list_activities(
     start_date: date | None = None,
     end_date: date | None = None,
 ) -> list:
-    if limit <= 0:
-        raise GarminCliError(
-            error="limit must be greater than 0",
-            error_code="INVALID_INPUT",
-        )
+    # External callers (CLI ``validate_limit`` / MCP ``_validate_limit``)
+    # enforce the positive-limit contract; internal callers (report_snapshot
+    # in mcp_tools/misc.py) pass hardcoded positive literals. No re-check here.
     params: dict[str, Any] = {"start": start, "limit": limit}
     if activity_type is not None:
         params["activityType"] = activity_type

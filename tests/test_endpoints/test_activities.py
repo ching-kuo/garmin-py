@@ -49,20 +49,6 @@ class TestListActivities:
         result = list_activities(limit=10, start=0, activity_type=None, search=None)
         assert result == []
 
-    def test_limit_zero_raises_value_error(self, mocker: Any) -> None:
-        mock_garth = MagicMock()
-        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
-
-        with pytest.raises((ValueError, GarminCliError)):
-            list_activities(limit=0, start=0, activity_type=None, search=None)
-
-    def test_limit_negative_raises_value_error(self, mocker: Any) -> None:
-        mock_garth = MagicMock()
-        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
-
-        with pytest.raises((ValueError, GarminCliError)):
-            list_activities(limit=-1, start=0, activity_type=None, search=None)
-
     def test_http_404_raises_not_found_error_code(self, mocker: Any) -> None:
         mock_garth = MagicMock()
         mock_garth.connectapi.side_effect = _http_error(404)

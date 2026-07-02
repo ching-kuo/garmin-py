@@ -16,7 +16,7 @@ from garmin_cli.cli import cli
 class TestHealthStepsCommand:
 
     def test_steps_calls_auth(self, mocker: Any) -> None:
-        mock_auth = mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mock_auth = mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_steps_range", return_value=[])
         mocker.patch("garmin_cli.commands.health.serialize_steps", return_value=[])
         runner = CliRunner(mix_stderr=False)
@@ -24,7 +24,7 @@ class TestHealthStepsCommand:
         mock_auth.assert_called_once()
 
     def test_steps_exit_code_0(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_steps_range", return_value=[])
         mocker.patch(
             "garmin_cli.commands.health.serialize_steps",
@@ -35,7 +35,7 @@ class TestHealthStepsCommand:
         assert result.exit_code == 0
 
     def test_steps_json_envelope_ok_true(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_steps_range", return_value=[])
         mocker.patch(
             "garmin_cli.commands.health.serialize_steps",
@@ -47,7 +47,7 @@ class TestHealthStepsCommand:
         assert parsed["ok"] is True
 
     def test_steps_count_matches_data(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_steps_range", return_value=[])
         mocker.patch(
             "garmin_cli.commands.health.serialize_steps",
@@ -63,7 +63,7 @@ class TestHealthStepsCommand:
         assert len(parsed["data"]) == 2
 
     def test_steps_date_range_in_envelope(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_steps_range", return_value=[])
         mocker.patch("garmin_cli.commands.health.serialize_steps", return_value=[])
         runner = CliRunner(mix_stderr=False)
@@ -74,7 +74,7 @@ class TestHealthStepsCommand:
         assert parsed["date_range"]["to"] == "2026-03-07"
 
     def test_steps_conflict_date_and_days_fails(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["health", "steps", "--date", "2026-03-11", "--days", "7"])
         assert result.exit_code != 0
@@ -83,7 +83,7 @@ class TestHealthStepsCommand:
         from garmin_cli.exceptions import GarminCliError
 
         mocker.patch(
-            "garmin_cli.commands.health.ensure_authenticated",
+            "garmin_cli.commands._options.ensure_authenticated",
             side_effect=GarminCliError(error="No creds", error_code="AUTH_MISSING"),
         )
         runner = CliRunner(mix_stderr=False)
@@ -94,7 +94,7 @@ class TestHealthStepsCommand:
         assert parsed["error_code"] == "AUTH_MISSING"
 
     def test_steps_empty_data_exit_0(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_steps_range", return_value=[])
         mocker.patch("garmin_cli.commands.health.serialize_steps", return_value=[])
         runner = CliRunner(mix_stderr=False)
@@ -111,7 +111,7 @@ class TestHealthStepsCommand:
 class TestHealthDailySummaryCommand:
 
     def test_daily_summary_calls_auth(self, mocker: Any) -> None:
-        mock_auth = mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mock_auth = mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_daily_summary_range", return_value=[])
         mocker.patch("garmin_cli.commands.health.serialize_daily_summary", return_value=[])
         runner = CliRunner(mix_stderr=False)
@@ -119,7 +119,7 @@ class TestHealthDailySummaryCommand:
         mock_auth.assert_called_once()
 
     def test_daily_summary_exit_code_0(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_daily_summary_range", return_value=[])
         mocker.patch(
             "garmin_cli.commands.health.serialize_daily_summary",
@@ -140,7 +140,7 @@ class TestHealthDailySummaryCommand:
         assert result.exit_code == 0
 
     def test_daily_summary_json_ok_true(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_daily_summary_range", return_value=[])
         mocker.patch(
             "garmin_cli.commands.health.serialize_daily_summary",
@@ -152,7 +152,7 @@ class TestHealthDailySummaryCommand:
         assert parsed["ok"] is True
 
     def test_daily_summary_count_matches_data(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_daily_summary_range", return_value=[])
         mocker.patch(
             "garmin_cli.commands.health.serialize_daily_summary",
@@ -167,7 +167,7 @@ class TestHealthDailySummaryCommand:
         assert parsed["count"] == 2
 
     def test_daily_summary_date_range_in_envelope(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_daily_summary_range", return_value=[])
         mocker.patch("garmin_cli.commands.health.serialize_daily_summary", return_value=[])
         runner = CliRunner(mix_stderr=False)
@@ -176,7 +176,7 @@ class TestHealthDailySummaryCommand:
         assert parsed["date_range"] is not None
 
     def test_daily_summary_conflict_fails(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["health", "daily-summary", "--date", "2026-03-11", "--days", "7"])
         assert result.exit_code != 0
@@ -185,7 +185,7 @@ class TestHealthDailySummaryCommand:
         from garmin_cli.exceptions import GarminCliError
 
         mocker.patch(
-            "garmin_cli.commands.health.ensure_authenticated",
+            "garmin_cli.commands._options.ensure_authenticated",
             side_effect=GarminCliError(error="No creds", error_code="AUTH_MISSING"),
         )
         runner = CliRunner(mix_stderr=False)
@@ -196,7 +196,7 @@ class TestHealthDailySummaryCommand:
         assert parsed["error_code"] == "AUTH_MISSING"
 
     def test_daily_summary_empty_data_exit_0(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_daily_summary_range", return_value=[])
         mocker.patch("garmin_cli.commands.health.serialize_daily_summary", return_value=[])
         runner = CliRunner(mix_stderr=False)
@@ -213,7 +213,7 @@ class TestHealthDailySummaryCommand:
 class TestHealthIntensityMinutesCommand:
 
     def test_intensity_minutes_calls_auth(self, mocker: Any) -> None:
-        mock_auth = mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mock_auth = mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_intensity_minutes_range", return_value=[])
         mocker.patch("garmin_cli.commands.health.serialize_intensity_minutes", return_value=[])
         runner = CliRunner(mix_stderr=False)
@@ -221,7 +221,7 @@ class TestHealthIntensityMinutesCommand:
         mock_auth.assert_called_once()
 
     def test_intensity_minutes_exit_code_0(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_intensity_minutes_range", return_value=[])
         mocker.patch(
             "garmin_cli.commands.health.serialize_intensity_minutes",
@@ -237,7 +237,7 @@ class TestHealthIntensityMinutesCommand:
         assert result.exit_code == 0
 
     def test_intensity_minutes_json_ok_true(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_intensity_minutes_range", return_value=[])
         mocker.patch(
             "garmin_cli.commands.health.serialize_intensity_minutes",
@@ -249,7 +249,7 @@ class TestHealthIntensityMinutesCommand:
         assert parsed["ok"] is True
 
     def test_intensity_minutes_date_range_in_envelope(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_intensity_minutes_range", return_value=[])
         mocker.patch("garmin_cli.commands.health.serialize_intensity_minutes", return_value=[])
         runner = CliRunner(mix_stderr=False)
@@ -262,7 +262,7 @@ class TestHealthIntensityMinutesCommand:
         assert parsed["date_range"]["to"] == "2026-03-07"
 
     def test_intensity_minutes_conflict_fails(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["health", "intensity-minutes", "--date", "2026-03-11", "--days", "7"])
         assert result.exit_code != 0
@@ -271,7 +271,7 @@ class TestHealthIntensityMinutesCommand:
         from garmin_cli.exceptions import GarminCliError
 
         mocker.patch(
-            "garmin_cli.commands.health.ensure_authenticated",
+            "garmin_cli.commands._options.ensure_authenticated",
             side_effect=GarminCliError(error="No creds", error_code="AUTH_MISSING"),
         )
         runner = CliRunner(mix_stderr=False)

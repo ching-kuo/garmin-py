@@ -8,6 +8,9 @@
 - Token refresh is now serialized behind a process-wide lock (with a refresh-generation guard), preventing concurrent fan-out workers from corrupting the tokenstore or burning a rotated refresh token near expiry.
 - The auth probe cache now also skips the per-call tokenstore permission check on cache hits.
 
+### Changed
+- Internal: the 917-line `mcp_server.py` god-module is now a thin composition root over a new `garmin_cli.mcp_tools` package (per-domain `register_*_tools` registrars for health, activities, workouts, performance, and misc; shared validation/envelope/auth plumbing in `mcp_tools/_shared.py`). The public entry point `create_mcp_server` and all 34 tool signatures, docstrings, and destructive-hint annotations are unchanged. CLI date-range commands now render through a shared `commands/_options.render_date_range` helper, and vo2max fetching is shared between CLI and MCP via `services/performance.py`.
+
 ### Fixed
 - `activity zones` / `activity_hr_zones` rows carried a `seconds_in_zone` key that was missing from `COLUMNS_ACTIVITY_HR_ZONES`, so table and CSV output silently dropped it (JSON was unaffected). `seconds_in_zone` is now in the column tuple, ordered before `minutes_in_zone` to match the JSON row order.
 - `activity get --detail --laps` on a multisport parent fetched the child-activity list twice -- once to build the `children` envelope, again inside the laps fan-out -- doubling the Garmin API round-trips for that leg of the request. The laps fetch now reuses the already-fetched children.

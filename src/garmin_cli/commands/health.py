@@ -2,12 +2,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Callable
 
 import click
 
 from garmin_cli.auth import ensure_authenticated
-from garmin_cli.commands._options import date_range_options
+from garmin_cli.commands._options import date_range_options, render_date_range
 from garmin_cli.date_utils import CLICK_DATE_TYPE, resolve_click_dates
 from garmin_cli.endpoints.health import (
     get_body_battery_range,
@@ -54,31 +53,6 @@ from garmin_cli.serializers import (
 _DATE_TYPE = CLICK_DATE_TYPE
 
 
-def _render_health_range(
-    ctx: click.Context,
-    command_name: str,
-    getter: Callable[[Any, Any], Any],
-    serializer: Callable[[Any], list[dict[str, Any]]],
-    columns: tuple[str, ...],
-    value_date: datetime | None,
-    days: int | None,
-    date_from: datetime | None,
-    date_to: datetime | None,
-    *,
-    ahead: int | None = None,
-) -> None:
-    start, end = resolve_click_dates(value_date, days, ahead, date_from, date_to)
-    ensure_authenticated(ctx.obj["config"])
-    data = serializer(getter(start, end))
-    render_output(
-        ctx.obj["config"].output_format,
-        command_name,
-        data,
-        columns,
-        date_range=(start, end),
-    )
-
-
 @click.group()
 def health() -> None:
     """Health data commands."""
@@ -96,7 +70,7 @@ def sleep(
     date_to: datetime | None,
 ) -> None:
     """Get sleep data."""
-    _render_health_range(
+    render_date_range(
         ctx,
         "health sleep",
         get_sleep,
@@ -121,7 +95,7 @@ def hrv(
     date_to: datetime | None,
 ) -> None:
     """Get HRV data."""
-    _render_health_range(
+    render_date_range(
         ctx,
         "health hrv",
         get_hrv,
@@ -145,7 +119,7 @@ def weight(
     date_to: datetime | None,
 ) -> None:
     """Get weight data."""
-    _render_health_range(
+    render_date_range(
         ctx,
         "health weight",
         get_weight,
@@ -169,7 +143,7 @@ def body_battery(
     date_to: datetime | None,
 ) -> None:
     """Get body battery data."""
-    _render_health_range(
+    render_date_range(
         ctx,
         "health body-battery",
         get_body_battery_range,
@@ -193,7 +167,7 @@ def stress(
     date_to: datetime | None,
 ) -> None:
     """Get stress data."""
-    _render_health_range(
+    render_date_range(
         ctx,
         "health stress",
         get_stress_range,
@@ -217,7 +191,7 @@ def spo2(
     date_to: datetime | None,
 ) -> None:
     """Get pulse oximetry data."""
-    _render_health_range(
+    render_date_range(
         ctx,
         "health spo2",
         get_spo2_range,
@@ -241,7 +215,7 @@ def resting_hr(
     date_to: datetime | None,
 ) -> None:
     """Get resting heart rate data."""
-    _render_health_range(
+    render_date_range(
         ctx,
         "health resting-hr",
         get_resting_hr_range,
@@ -265,7 +239,7 @@ def readiness(
     date_to: datetime | None,
 ) -> None:
     """Get training readiness data."""
-    _render_health_range(
+    render_date_range(
         ctx,
         "health readiness",
         get_training_readiness_range,
@@ -309,7 +283,7 @@ def steps(
     date_to: datetime | None,
 ) -> None:
     """Get steps data."""
-    _render_health_range(
+    render_date_range(
         ctx,
         "health steps",
         get_steps_range,
@@ -336,7 +310,7 @@ def daily_summary(
 
     Note: large date ranges may be slow — one API call is made per day.
     """
-    _render_health_range(
+    render_date_range(
         ctx,
         "health daily-summary",
         get_daily_summary_range,
@@ -360,7 +334,7 @@ def intensity_minutes(
     date_to: datetime | None,
 ) -> None:
     """Get intensity minutes data."""
-    _render_health_range(
+    render_date_range(
         ctx,
         "health intensity-minutes",
         get_intensity_minutes_range,

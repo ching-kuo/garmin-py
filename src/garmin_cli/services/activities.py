@@ -2,7 +2,7 @@
 
 These functions own the two pieces of activity logic that were previously
 copy-pasted between :mod:`garmin_cli.commands.activities` and
-:mod:`garmin_cli.mcp_server`:
+:mod:`garmin_cli.mcp_tools.activities`:
 
 * the multisport laps fan-out (fetch laps for an activity, fanning out to
   child legs for multisport parents and stamping a 0-based ``leg_index``), and

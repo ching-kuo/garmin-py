@@ -17,7 +17,7 @@ from garmin_cli.cli import cli
 class TestSleepCommand:
 
     def test_sleep_days_exit_code_0(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch(
             "garmin_cli.commands.health.get_sleep",
             return_value={"dailySleepDTO": {}},
@@ -31,7 +31,7 @@ class TestSleepCommand:
         assert result.exit_code == 0
 
     def test_sleep_json_flag_outputs_json_envelope(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch(
             "garmin_cli.commands.health.get_sleep",
             return_value={"dailySleepDTO": {}},
@@ -50,7 +50,7 @@ class TestSleepCommand:
         assert parsed["count"] == len(parsed["data"])
 
     def test_sleep_json_envelope_has_command(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch(
             "garmin_cli.commands.health.get_sleep",
             return_value={"dailySleepDTO": {}},
@@ -65,7 +65,7 @@ class TestSleepCommand:
         assert "command" in parsed
 
     def test_sleep_date_flag_single_day(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch(
             "garmin_cli.commands.health.get_sleep",
             return_value={"dailySleepDTO": {}},
@@ -79,7 +79,7 @@ class TestSleepCommand:
         assert result.exit_code == 0
 
     def test_sleep_conflict_date_and_days(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
             cli, ["health", "sleep", "--date", "2026-03-11", "--days", "7"]
@@ -87,13 +87,13 @@ class TestSleepCommand:
         assert result.exit_code != 0
 
     def test_sleep_conflict_days_and_ahead(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["health", "sleep", "--days", "7", "--ahead", "3"])
         assert result.exit_code != 0
 
     def test_sleep_from_without_to_fails(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["health", "sleep", "--from", "2026-03-01"])
         assert result.exit_code != 0
@@ -102,7 +102,7 @@ class TestSleepCommand:
         from garmin_cli.exceptions import GarminCliError
 
         mocker.patch(
-            "garmin_cli.commands.health.ensure_authenticated",
+            "garmin_cli.commands._options.ensure_authenticated",
             side_effect=GarminCliError(error="No creds", error_code="AUTH_MISSING"),
         )
         runner = CliRunner(mix_stderr=False)
@@ -115,7 +115,7 @@ class TestSleepCommand:
         from garmin_cli.exceptions import GarminCliError
 
         mocker.patch(
-            "garmin_cli.commands.health.ensure_authenticated",
+            "garmin_cli.commands._options.ensure_authenticated",
             side_effect=GarminCliError(error="No creds", error_code="AUTH_MISSING"),
         )
         runner = CliRunner(mix_stderr=False)
@@ -128,7 +128,7 @@ class TestSleepCommand:
         assert parsed["error_code"] == "AUTH_MISSING"
 
     def test_sleep_empty_data_exit_0(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_sleep", return_value={})
         mocker.patch("garmin_cli.commands.health.serialize_sleep", return_value=[])
         runner = CliRunner(mix_stderr=False)
@@ -146,7 +146,7 @@ class TestSleepCommand:
 class TestHrvCommand:
 
     def test_hrv_json_exit_0(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch(
             "garmin_cli.commands.health.get_hrv",
             return_value={"hrvSummary": {}},
@@ -160,7 +160,7 @@ class TestHrvCommand:
         assert result.exit_code == 0
 
     def test_hrv_json_envelope_ok_true(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch(
             "garmin_cli.commands.health.get_hrv",
             return_value={"hrvSummary": {}},
@@ -175,7 +175,7 @@ class TestHrvCommand:
         assert parsed["ok"] is True
 
     def test_hrv_count_matches_data_length(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_hrv", return_value={})
         mocker.patch(
             "garmin_cli.commands.health.serialize_hrv",
@@ -187,7 +187,7 @@ class TestHrvCommand:
         assert parsed["count"] == 2
 
     def test_hrv_empty_payload_reports_zero_results(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_hrv", return_value={})
         mocker.patch("garmin_cli.commands.health.serialize_hrv", return_value=[])
         runner = CliRunner(mix_stderr=False)
@@ -205,7 +205,7 @@ class TestHrvCommand:
 class TestWeightCommand:
 
     def test_weight_json_exit_0(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_weight", return_value={})
         mocker.patch(
             "garmin_cli.commands.health.serialize_weight",
@@ -260,7 +260,7 @@ def test_new_health_range_commands(
     payload: list[dict[str, Any]],
     expected: dict[str, Any],
 ) -> None:
-    mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+    mocker.patch("garmin_cli.commands._options.ensure_authenticated")
     mocker.patch(f"garmin_cli.commands.health.{patch_name}", return_value=payload)
     runner = CliRunner(mix_stderr=False)
 
@@ -303,7 +303,7 @@ def test_health_status_single_day_command(mocker: Any) -> None:
 class TestHealthCsvOutput:
 
     def test_sleep_csv_no_ansi(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_sleep", return_value={})
         mocker.patch(
             "garmin_cli.commands.health.serialize_sleep",
@@ -317,7 +317,7 @@ class TestHealthCsvOutput:
         assert "\x1b[" not in result.output
 
     def test_json_flag_overrides_format_flag(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_sleep", return_value={})
         mocker.patch(
             "garmin_cli.commands.health.serialize_sleep",
@@ -337,7 +337,7 @@ class TestHealthCsvOutput:
         from garmin_cli.exceptions import GarminCliError
 
         mocker.patch(
-            "garmin_cli.commands.health.ensure_authenticated",
+            "garmin_cli.commands._options.ensure_authenticated",
             side_effect=GarminCliError(error="No creds", error_code="AUTH_MISSING"),
         )
         runner = CliRunner(mix_stderr=False)
@@ -357,7 +357,7 @@ class TestHealthCsvOutput:
 class TestUsageErrorInJsonMode:
 
     def test_usage_error_json_mode_outputs_error_envelope(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
             cli,
@@ -368,7 +368,7 @@ class TestUsageErrorInJsonMode:
         assert parsed["ok"] is False
 
     def test_usage_error_json_mode_error_code_is_invalid_input(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
             cli,
@@ -378,7 +378,7 @@ class TestUsageErrorInJsonMode:
         assert parsed["error_code"] == "INVALID_INPUT"
 
     def test_usage_error_exit_code_1_not_2(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
             cli,
@@ -388,7 +388,7 @@ class TestUsageErrorInJsonMode:
         assert result.exit_code == 1
 
     def test_format_json_usage_error_outputs_error_envelope(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
             cli,
@@ -400,7 +400,7 @@ class TestUsageErrorInJsonMode:
         assert parsed["error_code"] == "INVALID_INPUT"
 
     def test_json_error_command_ignores_global_option_values(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
             cli,
@@ -421,7 +421,7 @@ class TestUsageErrorInJsonMode:
         assert parsed["command"] == "health sleep"
 
     def test_invalid_sleep_date_reports_invalid_input(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
             cli, ["--json", "health", "sleep", "--date", "03/11/2026"]
@@ -441,7 +441,7 @@ class TestUnexpectedExceptionInJsonMode:
     def test_unexpected_exception_json_mode_outputs_internal_error_envelope(
         self, mocker: Any
     ) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch(
             "garmin_cli.commands.health.get_sleep",
             side_effect=RuntimeError("unexpected bug"),
@@ -458,7 +458,7 @@ class TestUnexpectedExceptionInJsonMode:
     def test_unexpected_exception_table_mode_stderr_not_stdout(
         self, mocker: Any
     ) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch(
             "garmin_cli.commands.health.get_sleep",
             side_effect=RuntimeError("unexpected bug"),
@@ -472,7 +472,7 @@ class TestUnexpectedExceptionInJsonMode:
     def test_format_json_unexpected_exception_outputs_internal_error_envelope(
         self, mocker: Any
     ) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch(
             "garmin_cli.commands.health.get_sleep",
             side_effect=RuntimeError("unexpected bug"),
@@ -494,7 +494,7 @@ class TestUnexpectedExceptionInJsonMode:
 class TestTableOutput:
 
     def test_sleep_table_output_is_not_json(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_sleep", return_value={})
         mocker.patch(
             "garmin_cli.commands.health.serialize_sleep",
@@ -512,7 +512,7 @@ class TestTableOutput:
         assert not is_json
 
     def test_sleep_table_output_contains_data(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.health.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch("garmin_cli.commands.health.get_sleep", return_value={})
         mocker.patch(
             "garmin_cli.commands.health.serialize_sleep",

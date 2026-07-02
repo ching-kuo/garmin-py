@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -114,8 +115,8 @@ def list_cmd(
 
 
 def _fetch_laps_for_activity(
-    raw: dict, activity_id: str, children: list[dict] | None = None
-) -> tuple[list[dict], SportProfile]:
+    raw: dict[str, Any], activity_id: str, children: list[dict[str, Any]] | None = None
+) -> tuple[list[dict[str, Any]], SportProfile]:
     """Fetch laps for an activity, handling multisport parents.
 
     For multisport parents, iterates child legs, fetches each child's laps,
@@ -165,22 +166,22 @@ def get_cmd(ctx: click.Context, activity_id: str, detail: bool, include_laps: bo
         csv_columns = COLUMNS_ACTIVITY_SUMMARY
         table_columns = COLUMNS_ACTIVITY_SUMMARY
 
-    children_raw: list[dict] = []
-    child_data: list[dict] = []
+    children_raw: list[dict[str, Any]] = []
+    child_data: list[dict[str, Any]] = []
     if is_multisport_parent(raw):
         fetched = get_multisport_children(raw)
         if fetched:
             children_raw = fetched
             child_data = serialize_multisport_children(fetched)
 
-    laps_rows: list[dict] = []
+    laps_rows: list[dict[str, Any]] = []
     laps_profile = None
     if include_laps:
         laps_rows, laps_profile = _fetch_laps_for_activity(raw, activity_id, children_raw)
 
     # Capability manifest: only when --detail is set. Multisport parent
     # envelopes union per-child manifests with leg_index attached.
-    manifest: list[dict] = []
+    manifest: list[dict[str, Any]] = []
     if detail:
         manifest = build_capability_manifest(
             raw,

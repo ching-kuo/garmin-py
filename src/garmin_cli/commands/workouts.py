@@ -8,7 +8,7 @@ import click
 
 from garmin_cli.auth import ensure_authenticated
 from garmin_cli.commands._options import validate_limit
-from garmin_cli.date_utils import CLICK_DATE_TYPE
+from garmin_cli.date_utils import CLICK_DATE_TYPE, resolve_date_range
 from garmin_cli.endpoints.workouts import (
     create_workout,
     delete_workout,
@@ -33,6 +33,9 @@ from garmin_cli.serializers import (
 )
 from garmin_cli.workout_builder import build_garmin_payload, merge_workout_payload
 from garmin_cli.workout_schema import validate_workout_input
+
+COLUMNS_WORKOUT_DELETE = ("id", "status")
+COLUMNS_WORKOUT_SCHEDULE = ("workoutScheduleId", "date", "status")
 
 
 @click.group()
@@ -77,8 +80,6 @@ def calendar_cmd(
     ahead: int | None,
 ) -> None:
     """Get workout calendar for a date range."""
-    from garmin_cli.date_utils import resolve_date_range
-
     if all(value is None for value in (date_from, date_to, days, ahead)):
         ahead = 7
 
@@ -167,24 +168,17 @@ def delete_cmd(ctx: click.Context, workout_id: str, confirm: bool) -> None:
         click.confirm(f"Delete workout {workout_id}?", abort=True)
     delete_workout(workout_id)
     data: list[dict[str, Any]] = [{"id": workout_id, "status": "deleted"}]
-    render_output(ctx.obj["config"].output_format, "workout delete", data, ("id", "status"))
+    render_output(ctx.obj["config"].output_format, "workout delete", data, COLUMNS_WORKOUT_DELETE)
 
 
 @workout.command("schedule")
 @click.argument("workout_id")
-@click.argument("date_str", metavar="DATE")
+@click.argument("schedule_date", metavar="DATE", type=CLICK_DATE_TYPE)
 @click.pass_context
-def schedule_cmd(ctx: click.Context, workout_id: str, date_str: str) -> None:
+def schedule_cmd(ctx: click.Context, workout_id: str, schedule_date: datetime) -> None:
     """Schedule a workout on a specific date (YYYY-MM-DD)."""
-    try:
-        schedule_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-    except ValueError:
-        raise GarminCliError(
-            error=f"Invalid date format: {date_str}. Use YYYY-MM-DD.",
-            error_code="INVALID_INPUT",
-        )
     ensure_authenticated(ctx.obj["config"])
-    raw = schedule_workout(workout_id, schedule_date)
+    raw = schedule_workout(workout_id, schedule_date.date())
     raw_dict = raw if isinstance(raw, dict) else {}
     data: list[dict[str, Any]] = [
         {
@@ -197,5 +191,5 @@ def schedule_cmd(ctx: click.Context, workout_id: str, date_str: str) -> None:
         ctx.obj["config"].output_format,
         "workout schedule",
         data,
-        ("workoutScheduleId", "date", "status"),
+        COLUMNS_WORKOUT_SCHEDULE,
     )
