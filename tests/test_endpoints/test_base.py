@@ -1,15 +1,19 @@
 """Tests for _make_write_request from garmin_cli.endpoints._base and extract_status_code from garmin_cli.exceptions."""
 from __future__ import annotations
 
+import threading
+from datetime import date
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
 from garmin_cli.endpoints._base import (
+    _collect_daily_range,
     _make_request,
     _make_typed_request,
     _resolve_daily_call_delay,
+    _resolve_fetch_concurrency,
     _resolve_retry_delays,
     _make_write_request,
 )
@@ -284,3 +288,99 @@ class TestResolveRetryDelays:
             _make_write_request(mock_fn, "POST", "/test", json={})
         assert exc_info.value.error_code == "RATE_LIMITED"
         mock_sleep.assert_called_once_with(0.1)
+
+
+# ---------------------------------------------------------------------------
+# _resolve_fetch_concurrency
+# ---------------------------------------------------------------------------
+
+class TestResolveFetchConcurrency:
+
+    def test_default_when_env_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("GARMIN_CLI_FETCH_CONCURRENCY", raising=False)
+        assert _resolve_fetch_concurrency() == 4
+
+    def test_env_var_overrides_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GARMIN_CLI_FETCH_CONCURRENCY", "2")
+        assert _resolve_fetch_concurrency() == 2
+
+    def test_fraction_truncates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GARMIN_CLI_FETCH_CONCURRENCY", "2.9")
+        assert _resolve_fetch_concurrency() == 2
+
+    @pytest.mark.parametrize("raw", ["0", "-1", "fast", "", "0.4", "inf", "-inf", "nan"])
+    def test_non_positive_or_invalid_falls_back_to_default(
+        self, monkeypatch: pytest.MonkeyPatch, raw: str
+    ) -> None:
+        monkeypatch.setenv("GARMIN_CLI_FETCH_CONCURRENCY", raw)
+        assert _resolve_fetch_concurrency() == 4
+
+
+# ---------------------------------------------------------------------------
+# _collect_daily_range
+# ---------------------------------------------------------------------------
+
+class TestCollectDailyRange:
+
+    def test_empty_range_returns_empty_list(self) -> None:
+        getter = MagicMock()
+        assert _collect_daily_range(getter, date(2026, 3, 12), date(2026, 3, 11)) == []
+        getter.assert_not_called()
+
+    def test_single_day_runs_inline_without_threads(self) -> None:
+        calling_threads: list[threading.Thread] = []
+
+        def getter(day: date) -> str:
+            calling_threads.append(threading.current_thread())
+            return day.isoformat()
+
+        result = _collect_daily_range(getter, date(2026, 3, 11), date(2026, 3, 11))
+        assert result == ["2026-03-11"]
+        assert calling_threads == [threading.current_thread()]
+
+    def test_results_ordered_by_date_despite_completion_order(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The first day is forced to finish last; results must still come
+        back in date-ascending order."""
+        monkeypatch.setenv("GARMIN_CLI_DAILY_CALL_DELAY", "0")
+        monkeypatch.setenv("GARMIN_CLI_FETCH_CONCURRENCY", "4")
+        gate = threading.Event()
+
+        def getter(day: date) -> str:
+            if day == date(2026, 3, 13):
+                gate.set()
+            elif day == date(2026, 3, 11):
+                assert gate.wait(timeout=10), "last day never started"
+            return day.isoformat()
+
+        result = _collect_daily_range(getter, date(2026, 3, 11), date(2026, 3, 13))
+        assert result == ["2026-03-11", "2026-03-12", "2026-03-13"]
+
+    def test_exception_from_any_day_propagates_unchanged(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GARMIN_CLI_DAILY_CALL_DELAY", "0")
+
+        def getter(day: date) -> dict:
+            if day == date(2026, 3, 12):
+                raise GarminCliError(error="boom", error_code="SERVER_ERROR")
+            return {}
+
+        with pytest.raises(GarminCliError) as exc_info:
+            _collect_daily_range(getter, date(2026, 3, 11), date(2026, 3, 14))
+        assert exc_info.value.error_code == "SERVER_ERROR"
+        assert exc_info.value.error == "boom"
+
+    def test_sleeps_between_submissions(self, mocker: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The rate-limit delay applies between task submissions: n days ->
+        n-1 sleeps of the configured delay, same ceiling as the old serial loop."""
+        monkeypatch.delenv("GARMIN_CLI_DAILY_CALL_DELAY", raising=False)
+        mock_sleep = mocker.patch("garmin_cli.endpoints._base.time.sleep")
+        getter = MagicMock(return_value={})
+
+        result = _collect_daily_range(getter, date(2026, 3, 11), date(2026, 3, 13))
+
+        assert result == [{}, {}, {}]
+        assert getter.call_count == 3
+        assert mock_sleep.call_args_list == [((0.5,),), ((0.5,),)]

@@ -34,6 +34,9 @@ class _FakeClient:
         self.run_request_kwargs.append({"method": method, "path": path, **kwargs})
         return _FakeResponse(200, {})
 
+    def _refresh_session(self) -> None:  # wrapped by backend._serialize_refresh
+        pass
+
     def dump(self, path: str) -> None:
         self.dump_calls.append(path)
         directory = Path(path)
@@ -346,3 +349,66 @@ class TestBackendLock:
 
         assert not errors
         assert all(r is fake for r in results)
+
+
+class TestSerializeRefresh:
+    """_serialize_refresh: only one token refresh runs under concurrent fan-out."""
+
+    class _RefreshInner:
+        def __init__(self) -> None:
+            self._generation = 0
+            self.generation_reads: list[str] = []
+            self.refresh_calls = 0
+            self.entered = threading.Event()
+            self.release = threading.Event()
+
+        @property
+        def _garmin_cli_refresh_generation(self) -> int:
+            self.generation_reads.append(threading.current_thread().name)
+            return self._generation
+
+        @_garmin_cli_refresh_generation.setter
+        def _garmin_cli_refresh_generation(self, value: int) -> None:
+            self._generation = value
+
+        def _refresh_session(self) -> None:
+            self.refresh_calls += 1
+            self.entered.set()
+            assert self.release.wait(timeout=10)
+
+    def test_waiting_thread_skips_refresh_after_one_completes(self) -> None:
+        inner = self._RefreshInner()
+        backend._serialize_refresh(SimpleNamespace(client=inner))
+
+        first = threading.Thread(target=inner._refresh_session, name="first")
+        first.start()
+        assert inner.entered.wait(timeout=10)  # first holds the lock, mid-refresh
+
+        second = threading.Thread(target=inner._refresh_session, name="second")
+        second.start()
+        # Wait until the second thread captured its generation snapshot, so it
+        # is deterministically queued behind the in-flight refresh.
+        for _ in range(1000):
+            if "second" in inner.generation_reads:
+                break
+            first.join(timeout=0.01)
+        assert "second" in inner.generation_reads
+
+        inner.release.set()
+        first.join(timeout=10)
+        second.join(timeout=10)
+        assert not first.is_alive() and not second.is_alive()
+
+        assert inner.refresh_calls == 1
+        assert inner._generation == 1
+
+    def test_sequential_refreshes_both_run(self) -> None:
+        inner = self._RefreshInner()
+        inner.release.set()
+        backend._serialize_refresh(SimpleNamespace(client=inner))
+
+        inner._refresh_session()
+        assert inner.refresh_calls == 1
+        inner._refresh_session()
+        assert inner.refresh_calls == 2
+        assert inner._generation == 2

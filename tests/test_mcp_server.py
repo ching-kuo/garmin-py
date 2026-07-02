@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from datetime import date
 from typing import Any
 
@@ -2054,8 +2055,59 @@ class TestReportSnapshot:
             "garmin_cli.mcp_server.get_sleep",
             side_effect=GarminCliError(error="rate limited", error_code="RATE_LIMITED"),
         )
+        # Sections fetch concurrently, so the other sections run even though
+        # the first one fails — they must be patched to keep the test offline.
+        mocker.patch("garmin_cli.mcp_server.get_hrv", return_value={"hrvSummaries": []})
+        mocker.patch("garmin_cli.mcp_server.get_training_readiness_range", return_value=[])
+        mocker.patch("garmin_cli.mcp_server.get_body_battery_range", return_value=[])
+        mocker.patch("garmin_cli.mcp_server.get_calendar_range", return_value=[])
         with pytest.raises(ToolError, match="rate limited"):
             _call(self._server(), "report_snapshot", {"kind": "morning", "date": "2026-06-12"})
+
+    def test_fatal_error_in_later_section_fails_whole_snapshot(self, mocker: Any) -> None:
+        """A non-recoverable error must fail the snapshot even when it comes
+        from the last section and every earlier section succeeded."""
+        mocker.patch("garmin_cli.mcp_server.ensure_authenticated")
+        mocker.patch("garmin_cli.mcp_server.get_sleep", return_value=[])
+        mocker.patch("garmin_cli.mcp_server.get_hrv", return_value={"hrvSummaries": []})
+        mocker.patch("garmin_cli.mcp_server.get_training_readiness_range", return_value=[])
+        mocker.patch("garmin_cli.mcp_server.get_body_battery_range", return_value=[])
+        mocker.patch(
+            "garmin_cli.mcp_server.get_calendar_range",
+            side_effect=GarminCliError(error="upstream broke", error_code="SERVER_ERROR"),
+        )
+        with pytest.raises(ToolError, match="upstream broke"):
+            _call(self._server(), "report_snapshot", {"kind": "morning", "date": "2026-06-12"})
+
+    def test_sections_keep_spec_order_despite_completion_order(
+        self, mocker: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Section ordering is the spec order, not completion order: the first
+        section is forced to finish last and must still be listed first."""
+        monkeypatch.setenv("GARMIN_CLI_FETCH_CONCURRENCY", "4")
+        gate = threading.Event()
+
+        def slow_sleep(*args: Any) -> list:
+            assert gate.wait(timeout=10), "gating section never ran"
+            return [{"dailySleepDTO": {"calendarDate": "2026-06-12", "sleepTimeSeconds": 28800}}]
+
+        def gate_opener(*args: Any) -> list:
+            gate.set()
+            return []
+
+        mocker.patch("garmin_cli.mcp_server.ensure_authenticated")
+        mocker.patch("garmin_cli.mcp_server.get_sleep", side_effect=slow_sleep)
+        mocker.patch("garmin_cli.mcp_server.get_hrv", return_value={"hrvSummaries": []})
+        mocker.patch("garmin_cli.mcp_server.get_training_readiness_range", return_value=[])
+        mocker.patch("garmin_cli.mcp_server.get_body_battery_range", side_effect=gate_opener)
+        mocker.patch("garmin_cli.mcp_server.get_calendar_range", return_value=[])
+
+        result = _call(self._server(), "report_snapshot", {"kind": "morning", "date": "2026-06-12"})
+
+        assert list(result["sections"]) == [
+            "sleep", "hrv", "readiness", "body_battery", "planned_today",
+        ]
+        assert len(result["sections"]["sleep"]) == 1
 
     def test_auth_missing_fails_with_hint(self, mocker: Any) -> None:
         mocker.patch(

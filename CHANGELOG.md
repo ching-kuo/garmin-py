@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Performance
+- `report_snapshot` sections, per-day range reads (`daily-summary`, `body-battery`, `stress`, `spo2`, `resting-hr`, `readiness`, `endurance-score`, `hill-score`), and multisport child fetches now run on bounded thread pools instead of strictly serially. A weekly snapshot drops from ~30 sequential calls (10-20s) to a few seconds. Worker cap is tunable via `GARMIN_CLI_FETCH_CONCURRENCY` (default 4); `GARMIN_CLI_DAILY_CALL_DELAY` still throttles per-day request submission. Result ordering, error semantics (first failure in spec/date order wins; only NOT_FOUND degrades a snapshot section), and the one-auth-probe-per-snapshot behavior are unchanged.
+- CLI startup no longer imports the network stack for `--version`/`--help`: command groups are lazy-loaded, cutting cold start from ~0.15s to ~0.06s.
+- Token refresh is now serialized behind a process-wide lock (with a refresh-generation guard), preventing concurrent fan-out workers from corrupting the tokenstore or burning a rotated refresh token near expiry.
+- The auth probe cache now also skips the per-call tokenstore permission check on cache hits.
+
 ### Fixed
 - `activity zones` / `activity_hr_zones` rows carried a `seconds_in_zone` key that was missing from `COLUMNS_ACTIVITY_HR_ZONES`, so table and CSV output silently dropped it (JSON was unaffected). `seconds_in_zone` is now in the column tuple, ordered before `minutes_in_zone` to match the JSON row order.
 - `activity get --detail --laps` on a multisport parent fetched the child-activity list twice -- once to build the `children` envelope, again inside the laps fan-out -- doubling the Garmin API round-trips for that leg of the request. The laps fetch now reuses the already-fetched children.

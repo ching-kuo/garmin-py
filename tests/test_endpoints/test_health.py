@@ -117,12 +117,15 @@ class TestHealthEndpointErrorHandling:
 class TestDailyHealthRangeHelpers:
 
     def test_body_battery_range_collects_each_day(self, mocker: Any) -> None:
+        # Keyed by day (not an ordered side_effect list): days are fetched
+        # concurrently, only the result order is guaranteed.
+        payloads = {
+            date(2026, 3, 11): {"bodyBatteryValuesArray": [["2026-03-11T08:00:00", 85, "CHARGED"]]},
+            date(2026, 3, 12): {"bodyBatteryValuesArray": [["2026-03-12T08:00:00", 75, "CHARGED"]]},
+        }
         mock_get = mocker.patch(
             "garmin_cli.endpoints.health.get_body_battery",
-            side_effect=[
-                {"bodyBatteryValuesArray": [["2026-03-11T08:00:00", 85, "CHARGED"]]},
-                {"bodyBatteryValuesArray": [["2026-03-12T08:00:00", 75, "CHARGED"]]},
-            ],
+            side_effect=lambda day: payloads[day],
         )
         mock_sleep = mocker.patch("garmin_cli.endpoints._base.time.sleep")
 
@@ -138,19 +141,19 @@ class TestDailyHealthRangeHelpers:
     def test_other_range_helpers_reuse_daily_iteration(self, mocker: Any) -> None:
         mocker.patch(
             "garmin_cli.endpoints.health.get_stress",
-            side_effect=[{"avgStressLevel": 35}, {"avgStressLevel": 40}],
+            return_value={"avgStressLevel": 35},
         )
         mocker.patch(
             "garmin_cli.endpoints.health.get_spo2",
-            side_effect=[{"averageSpO2": 97}, {"averageSpO2": 96}],
+            return_value={"averageSpO2": 97},
         )
         mocker.patch(
             "garmin_cli.endpoints.health.get_resting_hr",
-            side_effect=[{"restingHeartRateValue": 52}, {"restingHeartRateValue": 51}],
+            return_value={"restingHeartRateValue": 52},
         )
         mocker.patch(
             "garmin_cli.endpoints.health.get_training_readiness",
-            side_effect=[{"score": 68}, {"score": 70}],
+            return_value={"score": 68},
         )
         mocker.patch("garmin_cli.endpoints._base.time.sleep")
 

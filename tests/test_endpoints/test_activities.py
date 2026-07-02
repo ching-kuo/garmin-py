@@ -1,6 +1,7 @@
 """Tests for garmin_cli.endpoints.activities — list_activities, get_activity, get_activity_weather, multisport."""
 from __future__ import annotations
 
+import threading
 from datetime import date
 from typing import Any
 from unittest.mock import MagicMock
@@ -425,8 +426,11 @@ class TestGetMultisportChildren:
     def test_fetches_children_from_child_ids(
         self, mocker: Any, sample_multisport_parent_raw: Any, sample_multisport_children_raw: Any,
     ) -> None:
+        # Keyed by the requested URL (not an ordered side_effect list): children
+        # are fetched concurrently, only the result order is guaranteed.
+        by_id = {child["activityId"]: child for child in sample_multisport_children_raw}
         mock_garth = MagicMock()
-        mock_garth.connectapi.side_effect = sample_multisport_children_raw
+        mock_garth.connectapi.side_effect = lambda url, **kwargs: by_id[int(url.rsplit("/", 1)[-1])]
         mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
 
         children = get_multisport_children(sample_multisport_parent_raw)
@@ -438,15 +442,40 @@ class TestGetMultisportChildren:
         parent = {
             "metadataDTO": {"childIds": [111, 222]},
         }
+        by_id = {
+            111: {"activityId": 111, "activityName": "Swim"},
+            222: {"activityId": 222, "activityName": "Bike"},
+        }
         mock_garth = MagicMock()
-        mock_garth.connectapi.side_effect = [
-            {"activityId": 111, "activityName": "Swim"},
-            {"activityId": 222, "activityName": "Bike"},
-        ]
+        mock_garth.connectapi.side_effect = lambda url, **kwargs: by_id[int(url.rsplit("/", 1)[-1])]
         mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
 
         children = get_multisport_children(parent)
         assert len(children) == 2
+        assert [child["activityName"] for child in children] == ["Swim", "Bike"]
+
+    def test_children_keep_id_order_despite_completion_order(
+        self, mocker: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Child fetches run concurrently; the first child is forced to finish
+        last and must still be returned first."""
+        monkeypatch.setenv("GARMIN_CLI_FETCH_CONCURRENCY", "4")
+        gate = threading.Event()
+
+        def _child(url: str, **kwargs: Any) -> dict:
+            child_id = int(url.rsplit("/", 1)[-1])
+            if child_id == 333:
+                gate.set()
+            elif child_id == 111:
+                assert gate.wait(timeout=10), "last child never started"
+            return {"activityId": child_id}
+
+        mock_garth = MagicMock()
+        mock_garth.connectapi.side_effect = _child
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+
+        children = get_multisport_children({"childIds": [111, 222, 333]})
+        assert [child["activityId"] for child in children] == [111, 222, 333]
 
     def test_returns_empty_for_no_children(self) -> None:
         parent = {"activityType": {"typeKey": "running"}}
@@ -454,11 +483,14 @@ class TestGetMultisportChildren:
 
     def test_skips_failed_child_fetch(self, mocker: Any) -> None:
         parent = {"childIds": [111, 222]}
+
+        def _child_or_404(url: str, **kwargs: Any) -> dict:
+            if url.endswith("/111"):
+                return {"activityId": 111, "activityName": "Swim"}
+            raise _http_error(404)
+
         mock_garth = MagicMock()
-        mock_garth.connectapi.side_effect = [
-            {"activityId": 111, "activityName": "Swim"},
-            _http_error(404),
-        ]
+        mock_garth.connectapi.side_effect = _child_or_404
         mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
 
         children = get_multisport_children(parent)

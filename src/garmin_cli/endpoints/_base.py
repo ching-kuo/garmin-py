@@ -1,8 +1,12 @@
 """Shared HTTP request helper with retry/error handling for Garmin endpoints."""
 from __future__ import annotations
 
+import math
 import os
 import time
+from collections.abc import Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import date, timedelta
 from typing import Any, Callable
 
@@ -11,6 +15,7 @@ from garmin_cli.exceptions import GarminCliError, extract_status_code
 
 _RETRY_DELAYS: list[float] = [2, 4, 8]
 _DEFAULT_DAILY_CALL_DELAY: float = 0.5
+_DEFAULT_FETCH_CONCURRENCY: int = 4
 
 # Shared immediate-fail policy across read, typed, and write helpers: auth
 # rejections and not-found never retry. Per-helper maps extend this (writes add
@@ -30,6 +35,46 @@ def _resolve_daily_call_delay() -> float:
     env var to be ignored and the default (0.5 s) is used instead.
     """
     return _env_float("GARMIN_CLI_DAILY_CALL_DELAY", _DEFAULT_DAILY_CALL_DELAY)
+
+
+def _resolve_fetch_concurrency() -> int:
+    """Return the worker cap for concurrent fan-out fetches.
+
+    Reads ``GARMIN_CLI_FETCH_CONCURRENCY`` from the environment as a positive
+    number (fractions are truncated).  Any parse error or non-positive value
+    causes the whole env var to be ignored and the default (4) is used
+    instead.  Kept deliberately small: Garmin rate-limits aggressively.
+    """
+    raw = _env_float("GARMIN_CLI_FETCH_CONCURRENCY", _DEFAULT_FETCH_CONCURRENCY, allow_zero=False)
+    if not math.isfinite(raw):
+        return _DEFAULT_FETCH_CONCURRENCY
+    value = int(raw)
+    return value if value > 0 else _DEFAULT_FETCH_CONCURRENCY
+
+
+def _bounded_thread_pool(task_count: int) -> ThreadPoolExecutor:
+    """ThreadPoolExecutor sized to ``min(task_count, _resolve_fetch_concurrency())``.
+
+    Shared by the fan-out call sites (daily-range collection, multisport
+    children, report sections) so the worker-cap arithmetic lives in one
+    place.
+    """
+    return ThreadPoolExecutor(max_workers=min(task_count, _resolve_fetch_concurrency()))
+
+
+@contextmanager
+def _cancel_futures_on_error(futures: list[Future[Any]]) -> Iterator[None]:
+    """Cancel all *futures* if the wrapped block raises, then propagate.
+
+    Used by fan-out call sites so an error partway through draws down
+    outstanding work instead of leaving orphaned tasks on the pool.
+    """
+    try:
+        yield
+    except BaseException:
+        for future in futures:
+            future.cancel()
+        raise
 
 
 def _resolve_retry_delays() -> list[float]:
@@ -68,9 +113,10 @@ def _retry_loop(
 ) -> Any:
     """Execute *call* with retry on 429/5xx.
 
-    Garth's urllib3 transport retries GET/PUT/DELETE automatically, but not
-    POST.  This loop provides retry coverage for POST write operations and
-    acts as a safety net for the other methods.
+    The python-garminconnect backend sends each API call on a fresh plain
+    ``requests.Session`` with no urllib3 ``Retry`` mounted, so this loop is
+    the only retry layer for reads and writes alike (verified against
+    garminconnect 0.3.2 ``Client._run_request``).
 
     Args:
         call: Zero-arg callable that performs the API request.
@@ -163,12 +209,32 @@ def _collect_daily_range(
     start: date,
     end: date,
 ) -> list[Any]:
-    delay = _resolve_daily_call_delay()
-    items: list[Any] = []
+    """Fetch one payload per day in ``[start, end]``, ordered by date ascending.
+
+    Days are fetched on a bounded thread pool.  The per-call delay is applied
+    between task *submissions*, so the request-rate ceiling matches the old
+    serial implementation while requests overlap the waiting.  The first
+    failing day (in date order) propagates its exception unchanged; once a
+    failure is observed no further days are submitted, and in-flight work is
+    drained before raising.
+    """
+    days: list[date] = []
     current = start
     while current <= end:
-        items.append(getter(current))
+        days.append(current)
         current += timedelta(days=1)
-        if current <= end:
-            time.sleep(delay)
-    return items
+    if not days:
+        return []
+    if len(days) == 1:
+        return [getter(days[0])]
+
+    delay = _resolve_daily_call_delay()
+    futures: list[Future[Any]] = []
+    with _bounded_thread_pool(len(days)) as pool, _cancel_futures_on_error(futures):
+        for index, day in enumerate(days):
+            futures.append(pool.submit(getter, day))
+            if index < len(days) - 1:
+                if any(f.done() and f.exception() is not None for f in futures):
+                    break
+                time.sleep(delay)
+        return [future.result() for future in futures]

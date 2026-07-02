@@ -126,7 +126,8 @@ def ensure_authenticated(config: CliConfig) -> None:
     are available, performs a fresh login and saves the session.
 
     On a probe-TTL cache hit the function returns immediately without any
-    disk reads or network calls.
+    disk reads or network calls; the directory security check is deferred
+    to the next cache miss so hot MCP servers skip the per-call stat/chmod.
 
     Raises:
         GarminCliError: With error_code AUTH_MISSING if no session and no credentials.
@@ -134,12 +135,12 @@ def ensure_authenticated(config: CliConfig) -> None:
     """
     garth_home = os.path.expanduser(config.garth_home)
 
-    _secure_directory(garth_home)
-
     ttl = _get_probe_ttl()
     if _probe_cache_hit(garth_home, ttl):
         logger.debug("Auth probe cache hit for %s — skipping resume+probe", garth_home)
         return
+
+    _secure_directory(garth_home)
 
     try:
         garth.resume(garth_home)

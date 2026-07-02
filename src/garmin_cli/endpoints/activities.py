@@ -1,6 +1,7 @@
 """Activity endpoint helpers backed by Garmin Connect APIs."""
 from __future__ import annotations
 
+from concurrent.futures import Future
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,8 @@ from garminconnect import Garmin
 
 from garmin_cli import backend as garth
 from garmin_cli.endpoints._base import (
+    _bounded_thread_pool,
+    _cancel_futures_on_error,
     _make_request,
     _make_typed_request,
     _validate_numeric_id,
@@ -132,7 +135,8 @@ def get_multisport_children(parent: dict) -> list[dict]:
     """Fetch child activities for a multisport parent.
 
     Extracts child IDs from either ``childIds`` or
-    ``metadataDTO.childIds`` and fetches each child activity.
+    ``metadataDTO.childIds`` and fetches each child activity concurrently
+    on a bounded thread pool; the returned list preserves child-ID order.
     Returns an empty list if the activity is not a multisport parent.
     """
     child_ids: list[Any] = (
@@ -143,15 +147,19 @@ def get_multisport_children(parent: dict) -> list[dict]:
     if not child_ids:
         return []
     children: list[dict] = []
-    for cid in child_ids:
-        try:
-            child = get_activity(cid)
+    futures: list[Future[Any]] = []
+    with _bounded_thread_pool(len(child_ids)) as pool, _cancel_futures_on_error(futures):
+        for cid in child_ids:
+            futures.append(pool.submit(get_activity, cid))
+        for future in futures:
+            try:
+                child = future.result()
+            except GarminCliError as exc:
+                if exc.error_code == "NOT_FOUND":
+                    continue
+                raise
             if child:
                 children.append(child)
-        except GarminCliError as exc:
-            if exc.error_code == "NOT_FOUND":
-                continue
-            raise
     return children
 
 

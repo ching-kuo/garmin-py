@@ -55,6 +55,37 @@ def _apply_timeout(garmin: Garmin) -> None:
     inner_client._run_request = types.MethodType(_patched_run_request, inner_client)  # type: ignore[method-assign]
 
 
+# Process-wide: under parallel fan-out several worker threads can hit the
+# token-expiry window (or a 401) simultaneously. Upstream _refresh_session
+# mutates token state and rewrites the tokenstore non-atomically, so
+# concurrent refreshes can corrupt the store or burn a rotated (single-use)
+# refresh token.
+_refresh_lock: threading.Lock = threading.Lock()
+
+
+def _serialize_refresh(garmin: Garmin) -> None:
+    """Wrap *garmin.client._refresh_session* so only one refresh runs at a time.
+
+    A thread queued behind an in-flight refresh skips its own refresh when it
+    observes a refresh already completed while it waited for the lock.  A
+    generation counter (not token identity) detects this so the guard also
+    covers legacy jwt_web sessions, whose refresh never touches ``di_token``.
+    """
+    inner_client = garmin.client
+    original_refresh = inner_client._refresh_session.__func__  # type: ignore[attr-defined]
+    inner_client._garmin_cli_refresh_generation = 0
+
+    def _locked_refresh(self: Any) -> None:
+        seen = self._garmin_cli_refresh_generation
+        with _refresh_lock:
+            if self._garmin_cli_refresh_generation != seen:
+                return
+            original_refresh(self)
+            self._garmin_cli_refresh_generation = seen + 1
+
+    inner_client._refresh_session = types.MethodType(_locked_refresh, inner_client)  # type: ignore[method-assign]
+
+
 RAW_FALLBACKS: tuple[dict[str, str], ...] = (
     {
         "capability": "workout_update",
@@ -106,6 +137,7 @@ def login(
     normalized_home = _normalize_home(garth_home)
     client = Garmin(email, password, prompt_mfa=prompt_mfa)
     _apply_timeout(client)
+    _serialize_refresh(client)
     previous_env = os.environ.pop("GARMINTOKENS", None)
     try:
         client.login()
@@ -134,6 +166,7 @@ def resume(garth_home: str) -> None:
 
     client = Garmin()
     _apply_timeout(client)
+    _serialize_refresh(client)
     client.login(tokenstore=garth_home)
     _set_backend(client, garth_home)
     logger.debug("Garmin session resumed from %s", garth_home)

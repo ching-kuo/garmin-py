@@ -1,24 +1,37 @@
 """CLI entrypoint for garmin-cli."""
 from __future__ import annotations
 
+import importlib
 from collections.abc import Sequence
 from typing import Any
 
 import click
 
 from garmin_cli import __version__
-from garmin_cli.commands.activities import activity
-from garmin_cli.commands.devices import device
-from garmin_cli.commands.health import health
-from garmin_cli.commands.login import login
-from garmin_cli.commands.performance import performance
-from garmin_cli.commands.workouts import workout
 from garmin_cli.config import CliConfig, load_config
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.mcp_cli import mcp_server_cmd
 from garmin_cli.output import echo_json, make_error_envelope
 
 _GLOBAL_OPTIONS_WITH_VALUES = ("--format", "--garmin-home", "--garth-home")
+
+# Subcommand groups load on first use so `garmin --version` / `--help` never
+# pay for the Garmin backend import chain (garminconnect -> requests ->
+# curl_cffi). Each entry maps a command name to (module, attribute, help);
+# the help text must mirror the command's docstring — tests/test_cli_lazy.py
+# asserts they stay in sync.
+_LAZY_SUBCOMMANDS: dict[str, tuple[str, str, str]] = {
+    "activity": ("garmin_cli.commands.activities", "activity", "Activity commands."),
+    "device": ("garmin_cli.commands.devices", "device", "Device commands."),
+    "health": ("garmin_cli.commands.health", "health", "Health data commands."),
+    "login": (
+        "garmin_cli.commands.login",
+        "login",
+        "Login to Garmin Connect and save credentials to the Garmin home directory.",
+    ),
+    "performance": ("garmin_cli.commands.performance", "performance", "Performance commands."),
+    "workout": ("garmin_cli.commands.workouts", "workout", "Workout commands."),
+}
 
 
 def _command_name_from_args(args: Sequence[str] | None) -> str:
@@ -55,7 +68,36 @@ def _json_requested(args: Sequence[str] | None) -> bool:
 
 
 class SafeGroup(click.Group):
-    """Top-level group with centralized exception handling."""
+    """Top-level group with centralized exception handling and lazy subcommands."""
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        return sorted(set(super().list_commands(ctx)) | set(_LAZY_SUBCOMMANDS))
+
+    def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
+        command = super().get_command(ctx, cmd_name)
+        if command is None and cmd_name in _LAZY_SUBCOMMANDS:
+            module_name, attribute, _ = _LAZY_SUBCOMMANDS[cmd_name]
+            command = getattr(importlib.import_module(module_name), attribute)
+            self.add_command(command)
+        return command
+
+    def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        # Mirrors click.Group.format_commands, but takes not-yet-loaded
+        # commands' help from _LAZY_SUBCOMMANDS instead of importing them.
+        commands: list[tuple[str, click.Command]] = []
+        for name in self.list_commands(ctx):
+            command = self.commands.get(name)
+            if command is None and name in _LAZY_SUBCOMMANDS:
+                command = click.Command(name, help=_LAZY_SUBCOMMANDS[name][2])
+            if command is None or command.hidden:
+                continue
+            commands.append((name, command))
+        if not commands:
+            return
+        limit = formatter.width - 6 - max(len(name) for name, _ in commands)
+        rows = [(name, command.get_short_help_str(limit)) for name, command in commands]
+        with formatter.section("Commands"):
+            formatter.write_dl(rows)
 
     def main(  # type: ignore[override]
         self, args: Sequence[str] | None = None, prog_name: str | None = None, **extra: Any
@@ -136,12 +178,6 @@ def cli(ctx: click.Context, json_output: bool, output_format: str, garmin_home: 
     )
 
 
-cli.add_command(health)
-cli.add_command(activity)
-cli.add_command(performance)
-cli.add_command(workout)
-cli.add_command(device)
-cli.add_command(login)
 cli.add_command(mcp_server_cmd)
 
 

@@ -529,6 +529,27 @@ class TestProbeTtlCache:
         result = ensure_authenticated(config)
         assert result is None  # no exception raised
 
+    def test_cache_hit_skips_directory_security_check(
+        self, mocker: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The stat/chmod security check runs on cache misses only, so a hot
+        MCP server does no per-call disk I/O."""
+        monkeypatch.setenv("GARMIN_CLI_AUTH_PROBE_TTL", "600")
+        garth_dir = tmp_path / "garth"
+        garth_dir.mkdir(mode=0o700)
+
+        mock_garth = MagicMock()
+        mocker.patch("garmin_cli.auth.garth", mock_garth)
+        secure = mocker.patch("garmin_cli.auth.ensure_secure_directory")
+
+        config = _make_config(garth_home=str(garth_dir))
+
+        ensure_authenticated(config)  # cache miss — security check runs
+        assert secure.call_count == 1
+
+        ensure_authenticated(config)  # cache hit — security check skipped
+        assert secure.call_count == 1
+
 
 # ---------------------------------------------------------------------------
 # Concurrency safety tests

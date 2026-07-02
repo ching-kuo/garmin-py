@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable, Iterator
+from concurrent.futures import Future
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
@@ -30,6 +31,7 @@ from mcp.types import ToolAnnotations
 from garmin_cli import backend as garth
 from garmin_cli.auth import _probe_session, _secure_directory, ensure_authenticated
 from garmin_cli.config import CliConfig
+from garmin_cli.endpoints._base import _bounded_thread_pool, _cancel_futures_on_error
 from garmin_cli.endpoints.activities import (
     activity_type_key,
     get_activity,
@@ -339,31 +341,44 @@ _SNAPSHOT_RECOVERABLE_CODES: frozenset[str] = frozenset({"NOT_FOUND"})
 ReportSection = tuple[str, Callable[[], Any], Callable[[Any], list[dict[str, Any]]]]
 
 
+def _fetch_section_rows(
+    fetch: Callable[[], Any], serialize: Callable[[Any], list[dict[str, Any]]]
+) -> list[dict[str, Any]]:
+    return serialize(fetch())
+
+
 def _collect_report_sections(
     specs: list[ReportSection],
 ) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
     """Fan out a report's sections, isolating recoverable per-section gaps.
 
-    Returns ``(sections, unavailable)``. A section that raises a NOT_FOUND
+    Sections fetch concurrently on a bounded thread pool, but results are
+    consumed in spec order so ``sections`` iterates deterministically. Returns
+    ``(sections, unavailable)``. A section that raises a NOT_FOUND
     ``GarminCliError`` or returns no rows is recorded as an empty list and noted
     in ``unavailable`` with a ``reason`` (``not_found`` / ``no_data``). Any other
-    ``GarminCliError`` propagates so the caller's auth wrapper converts it to a
-    ``ToolError`` and the whole snapshot fails loudly.
+    ``GarminCliError`` propagates (first in spec order wins, after pending
+    sections are cancelled and in-flight ones drained) so the caller's auth
+    wrapper converts it to a ``ToolError`` and the whole snapshot fails loudly.
     """
     sections: dict[str, list[dict[str, Any]]] = {}
     unavailable: list[dict[str, str]] = []
-    for name, fetch, serialize in specs:
-        try:
-            rows = serialize(fetch())
-        except GarminCliError as exc:
-            if exc.error_code not in _SNAPSHOT_RECOVERABLE_CODES:
-                raise
-            sections[name] = []
-            unavailable.append({"section": name, "reason": exc.error_code.lower()})
-            continue
-        sections[name] = rows
-        if not rows:
-            unavailable.append({"section": name, "reason": "no_data"})
+    futures: list[Future[list[dict[str, Any]]]] = []
+    with _bounded_thread_pool(len(specs)) as pool, _cancel_futures_on_error(futures):
+        for _, fetch, serialize in specs:
+            futures.append(pool.submit(_fetch_section_rows, fetch, serialize))
+        for (name, _, _), future in zip(specs, futures, strict=True):
+                try:
+                    rows = future.result()
+                except GarminCliError as exc:
+                    if exc.error_code not in _SNAPSHOT_RECOVERABLE_CODES:
+                        raise
+                    sections[name] = []
+                    unavailable.append({"section": name, "reason": exc.error_code.lower()})
+                    continue
+                sections[name] = rows
+                if not rows:
+                    unavailable.append({"section": name, "reason": "no_data"})
     return sections, unavailable
 
 
