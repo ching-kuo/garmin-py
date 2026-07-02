@@ -147,7 +147,8 @@ garmin-cli --json activity laps 12345678901
 # HR time-in-zone breakdown -- fields: zone, zone_low_bpm, zone_high_bpm, seconds_in_zone, minutes_in_zone
 garmin-cli --json activity zones 12345678901
 
-# Weather for an activity -- fields: temperature, weatherIconCode, windSpeed, windDirectionDegrees, humidity, precipProbability
+# Weather for an activity -- fields: temperature, apparent_temp, dew_point, humidity, wind_speed, wind_gust, wind_direction, wind_direction_compass, condition
+# Temperature fields are in the Garmin account's display unit (often Fahrenheit). No precipitation-probability or icon-code field.
 garmin-cli --json activity weather 12345678901
 
 # Metric descriptors for an activity's detail stream -- fields: key, unit, metricsIndex

@@ -357,6 +357,7 @@ COLUMNS_ACTIVITY_HR_ZONES: tuple[str, ...] = (
     "zone",
     "zone_low_bpm",
     "zone_high_bpm",
+    "seconds_in_zone",
     "minutes_in_zone",
 )
 

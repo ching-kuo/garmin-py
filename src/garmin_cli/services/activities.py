@@ -68,6 +68,7 @@ def fetch_laps_for_activity(
     splits_fn: SplitsFn,
     typed_splits_fn: TypedSplitsFn,
     serialize_laps: SerializeLapsFn,
+    children: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], SportProfile]:
     """Fetch laps for an activity, handling multisport parents.
 
@@ -75,10 +76,13 @@ def fetch_laps_for_activity(
     stamps ``leg_index`` (0-based) onto every returned row. The returned profile
     is the parent's profile (for table column hints); per-row sport-specificity
     remains intact via the columns each row carries. Children whose
-    ``activityId`` is missing are skipped.
+    ``activityId`` is missing are skipped. If the caller already fetched the
+    child list (e.g. to render it elsewhere in the same command), pass it as
+    ``children`` to skip the redundant ``get_multisport_children`` call.
     """
     if is_multisport_parent(activity):
-        children = get_multisport_children(activity)
+        if children is None:
+            children = get_multisport_children(activity)
         if children:
             all_rows: list[dict[str, Any]] = []
             for idx, child in enumerate(children):

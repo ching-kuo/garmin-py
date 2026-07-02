@@ -951,6 +951,43 @@ class TestActivityLapsCommand:
         leg_indices = {row["leg_index"] for row in parsed["data"]}
         assert leg_indices == {0, 1, 2}
 
+    def test_get_detail_laps_multisport_fetches_children_once(self, mocker: Any) -> None:
+        """`activity get --detail --laps` reuses the children already fetched
+        for the child-activities envelope instead of re-fetching them for laps."""
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.commands.activities.get_activity",
+            return_value={
+                "activityId": 100,
+                "activityType": {"typeKey": "multi_sport"},
+                "isMultiSportParent": True,
+                "childIds": [101, 102],
+            },
+        )
+        children_mock = mocker.patch(
+            "garmin_cli.commands.activities.get_multisport_children",
+            return_value=[
+                {"activityId": 101, "activityType": {"typeKey": "open_water_swimming"}},
+                {"activityId": 102, "activityType": {"typeKey": "cycling"}},
+            ],
+        )
+        mocker.patch(
+            "garmin_cli.commands.activities.get_activity_splits",
+            side_effect=[
+                {"lapDTOs": [{"duration": 600, "distance": 1000, "averageHR": 140}]},
+                {"lapDTOs": [{"duration": 1200, "distance": 8000, "averagePower": 220}]},
+            ],
+        )
+        mocker.patch("garmin_cli.commands.activities.get_activity_typed_splits")
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["--json", "activity", "get", "100", "--detail", "--laps"])
+        assert result.exit_code == 0
+        children_mock.assert_called_once()
+        parsed = json.loads(result.output)
+        assert len(parsed["children"]) == 2
+        leg_indices = {row["leg_index"] for row in parsed["laps"]}
+        assert leg_indices == {0, 1}
+
     def test_get_without_laps_flag_omits_laps(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
         mocker.patch(

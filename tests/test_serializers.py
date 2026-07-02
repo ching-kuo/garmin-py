@@ -1194,6 +1194,19 @@ class TestSerializeActivityHrZones:
         assert rows[0]["zone_high_bpm"] is None
         assert rows[0]["minutes_in_zone"] == pytest.approx(1.0)
 
+    def test_columns_lockstep_with_row_keys(self) -> None:
+        """Guard against COLUMNS_ACTIVITY_HR_ZONES drifting from the row shape
+        (regression: seconds_in_zone was emitted but missing from the column
+        tuple, so table/CSV output silently dropped it)."""
+        from garmin_cli.serializers import (
+            COLUMNS_ACTIVITY_HR_ZONES,
+            serialize_activity_hr_zones,
+        )
+        rows = serialize_activity_hr_zones(
+            [{"zoneNumber": 1, "zoneLowBoundary": 90, "zoneHighBoundary": 109, "secsInZone": 600}]
+        )
+        assert tuple(rows[0].keys()) == COLUMNS_ACTIVITY_HR_ZONES
+
 
 # ---------------------------------------------------------------------------
 # Metrics descriptors (U12)

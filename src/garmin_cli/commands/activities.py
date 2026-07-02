@@ -113,13 +113,17 @@ def list_cmd(
     )
 
 
-def _fetch_laps_for_activity(raw: dict, activity_id: str) -> tuple[list[dict], SportProfile]:
+def _fetch_laps_for_activity(
+    raw: dict, activity_id: str, children: list[dict] | None = None
+) -> tuple[list[dict], SportProfile]:
     """Fetch laps for an activity, handling multisport parents.
 
     For multisport parents, iterates child legs, fetches each child's laps,
     and stamps ``leg_index`` (0-based) onto every returned row. The returned
     profile is the parent's profile (for table column hint); per-row
-    sport-specificity remains intact via the columns each row carries.
+    sport-specificity remains intact via the columns each row carries. Pass
+    an already-fetched ``children`` list to avoid a redundant
+    ``get_multisport_children`` round-trip when the caller fetched it already.
 
     Thin wrapper over :func:`garmin_cli.services.activities.fetch_laps_for_activity`
     that binds this module's endpoint/serializer references so test patches on
@@ -134,6 +138,7 @@ def _fetch_laps_for_activity(raw: dict, activity_id: str) -> tuple[list[dict], S
         splits_fn=get_activity_splits,
         typed_splits_fn=get_activity_typed_splits,
         serialize_laps=serialize_activity_laps,
+        children=children,
     )
 
 
@@ -171,7 +176,7 @@ def get_cmd(ctx: click.Context, activity_id: str, detail: bool, include_laps: bo
     laps_rows: list[dict] = []
     laps_profile = None
     if include_laps:
-        laps_rows, laps_profile = _fetch_laps_for_activity(raw, activity_id)
+        laps_rows, laps_profile = _fetch_laps_for_activity(raw, activity_id, children_raw)
 
     # Capability manifest: only when --detail is set. Multisport parent
     # envelopes union per-child manifests with leg_index attached.

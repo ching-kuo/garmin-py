@@ -183,6 +183,33 @@ class TestFetchLapsForActivity:
         assert rec.splits_calls == [400]
         assert all("leg_index" not in row for row in rows)
 
+    def test_preresolved_children_skip_get_multisport_children_call(self) -> None:
+        """Passing ``children`` (e.g. already fetched by the caller for another
+        purpose) must skip the redundant ``get_multisport_children`` round-trip."""
+        rec = _Recorder()
+        parent = {"activityType": {"typeKey": "multi_sport"}}
+        children = [
+            {"activityId": 501, "activityType": {"typeKey": "cycling"}},
+            {"activityId": 502, "activityType": {"typeKey": "running"}},
+        ]
+        fetch_calls: list[Any] = []
+
+        def _tracking_get_children(a: dict[str, Any]) -> list[dict[str, Any]]:
+            fetch_calls.append(a)
+            return children
+
+        rows, _profile = fetch_laps_for_activity(
+            parent,
+            500,
+            is_multisport_parent=lambda a: True,
+            get_multisport_children=_tracking_get_children,
+            children=children,
+            **_laps_kwargs(rec),
+        )
+        assert fetch_calls == []
+        assert rec.splits_calls == [501, 502]
+        assert {row["leg_index"] for row in rows} == {0, 1}
+
 
 # ---------------------------------------------------------------------------
 # build_capability_manifest
