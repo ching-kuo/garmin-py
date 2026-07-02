@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.4.0] - 2026-07-02
 
 ### Added
 - MCP activity write tools reaching parity with the CLI: `activity_download` (writes the file to disk and returns path/size/format -- never raw bytes; refuses to overwrite unless `overwrite=true`), `activity_upload` (reports `status: "rejected"` when Garmin declines an import, matching the CLI contract), and `activity_delete` (destructive-hint annotated). All three emit the same structured write-audit log line as the workout write tools, with file paths reduced to length-only integers.
