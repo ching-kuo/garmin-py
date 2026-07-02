@@ -152,29 +152,23 @@ def test_raw_fallback_registry_tracks_update_paths() -> None:
 
 
 class TestResolveHttpTimeout:
-    def test_default_is_30_when_env_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("GARMIN_CLI_HTTP_TIMEOUT", raising=False)
+    @pytest.mark.parametrize(
+        "env_value",
+        (None, "not-a-number", "0", "-5", ""),
+        ids=("unset", "non-numeric", "zero", "negative", "empty"),
+    )
+    def test_falls_back_to_default_when_env_unset_or_invalid(
+        self, monkeypatch: pytest.MonkeyPatch, env_value: str | None
+    ) -> None:
+        if env_value is None:
+            monkeypatch.delenv("GARMIN_CLI_HTTP_TIMEOUT", raising=False)
+        else:
+            monkeypatch.setenv("GARMIN_CLI_HTTP_TIMEOUT", env_value)
         assert backend._resolve_http_timeout() == 30.0
 
     def test_env_var_overrides_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("GARMIN_CLI_HTTP_TIMEOUT", "45.5")
         assert backend._resolve_http_timeout() == 45.5
-
-    def test_invalid_string_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("GARMIN_CLI_HTTP_TIMEOUT", "not-a-number")
-        assert backend._resolve_http_timeout() == 30.0
-
-    def test_zero_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("GARMIN_CLI_HTTP_TIMEOUT", "0")
-        assert backend._resolve_http_timeout() == 30.0
-
-    def test_negative_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("GARMIN_CLI_HTTP_TIMEOUT", "-5")
-        assert backend._resolve_http_timeout() == 30.0
-
-    def test_empty_env_var_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("GARMIN_CLI_HTTP_TIMEOUT", "")
-        assert backend._resolve_http_timeout() == 30.0
 
 
 class TestApplyTimeout:

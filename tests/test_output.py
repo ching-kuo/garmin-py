@@ -160,10 +160,10 @@ class TestEchoTable:
         out = capsys.readouterr().out
         assert "Morning Run" in out
 
-    def test_empty_data_outputs_something(self, capsys: Any) -> None:
+    def test_empty_data_outputs_no_data_placeholder(self, capsys: Any) -> None:
         echo_table([], ("name", "distance_km"))
         out = capsys.readouterr().out
-        assert isinstance(out, str)
+        assert out.strip() == "(no data)"
 
     def test_multiple_rows_all_present(self, capsys: Any) -> None:
         data = [

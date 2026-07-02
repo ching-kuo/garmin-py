@@ -9,6 +9,12 @@ from click.testing import CliRunner
 
 from garmin_cli.cli import cli
 
+# --json and --format json are equivalent JSON-mode triggers; several tests
+# below verify both spellings produce the same behavior.
+_json_flag_variants = pytest.mark.parametrize(
+    "json_flag_args", (["--json"], ["--format", "json"]), ids=("json-flag", "format-json")
+)
+
 
 # ---------------------------------------------------------------------------
 # sleep command
@@ -109,8 +115,9 @@ class TestSleepCommand:
         result = runner.invoke(cli, ["health", "sleep", "--days", "1"])
         assert result.exit_code == 1
 
+    @_json_flag_variants
     def test_sleep_auth_failure_json_mode_outputs_error_envelope(
-        self, mocker: Any
+        self, mocker: Any, json_flag_args: list[str]
     ) -> None:
         from garmin_cli.exceptions import GarminCliError
 
@@ -120,7 +127,7 @@ class TestSleepCommand:
         )
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
-            cli, ["--json", "health", "sleep", "--days", "1"]
+            cli, [*json_flag_args, "health", "sleep", "--days", "1"]
         )
         assert result.exit_code == 1
         parsed = json.loads(result.output)
@@ -333,22 +340,6 @@ class TestHealthCsvOutput:
         parsed = json.loads(result.output)
         assert parsed["ok"] is True
 
-    def test_format_json_auth_failure_outputs_error_envelope(self, mocker: Any) -> None:
-        from garmin_cli.exceptions import GarminCliError
-
-        mocker.patch(
-            "garmin_cli.commands._options.ensure_authenticated",
-            side_effect=GarminCliError(error="No creds", error_code="AUTH_MISSING"),
-        )
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(
-            cli, ["--format", "json", "health", "sleep", "--days", "1"]
-        )
-        assert result.exit_code == 1
-        parsed = json.loads(result.output)
-        assert parsed["ok"] is False
-        assert parsed["error_code"] == "AUTH_MISSING"
-
 
 # ---------------------------------------------------------------------------
 # Usage errors in JSON mode
@@ -356,25 +347,19 @@ class TestHealthCsvOutput:
 
 class TestUsageErrorInJsonMode:
 
-    def test_usage_error_json_mode_outputs_error_envelope(self, mocker: Any) -> None:
+    @_json_flag_variants
+    def test_usage_error_json_mode_outputs_error_envelope(
+        self, mocker: Any, json_flag_args: list[str]
+    ) -> None:
         mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
             cli,
-            ["--json", "health", "sleep", "--date", "2026-03-11", "--days", "7"],
+            [*json_flag_args, "health", "sleep", "--date", "2026-03-11", "--days", "7"],
         )
         assert result.exit_code == 1
         parsed = json.loads(result.output)
         assert parsed["ok"] is False
-
-    def test_usage_error_json_mode_error_code_is_invalid_input(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(
-            cli,
-            ["--json", "health", "sleep", "--date", "2026-03-11", "--days", "7"],
-        )
-        parsed = json.loads(result.output)
         assert parsed["error_code"] == "INVALID_INPUT"
 
     def test_usage_error_exit_code_1_not_2(self, mocker: Any) -> None:
@@ -386,18 +371,6 @@ class TestUsageErrorInJsonMode:
         )
         # Should be exit code 1, NOT 2 (click default for usage errors)
         assert result.exit_code == 1
-
-    def test_format_json_usage_error_outputs_error_envelope(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(
-            cli,
-            ["--format", "json", "health", "sleep", "--date", "2026-03-11", "--days", "7"],
-        )
-        assert result.exit_code == 1
-        parsed = json.loads(result.output)
-        assert parsed["ok"] is False
-        assert parsed["error_code"] == "INVALID_INPUT"
 
     def test_json_error_command_ignores_global_option_values(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands._options.ensure_authenticated")
@@ -438,8 +411,9 @@ class TestUsageErrorInJsonMode:
 
 class TestUnexpectedExceptionInJsonMode:
 
+    @_json_flag_variants
     def test_unexpected_exception_json_mode_outputs_internal_error_envelope(
-        self, mocker: Any
+        self, mocker: Any, json_flag_args: list[str]
     ) -> None:
         mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch(
@@ -448,7 +422,7 @@ class TestUnexpectedExceptionInJsonMode:
         )
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(
-            cli, ["--json", "health", "sleep", "--days", "1"]
+            cli, [*json_flag_args, "health", "sleep", "--days", "1"]
         )
         assert result.exit_code == 1
         parsed = json.loads(result.output)
@@ -468,23 +442,6 @@ class TestUnexpectedExceptionInJsonMode:
         assert result.exit_code == 1
         # stdout should NOT contain a JSON error envelope in table mode
         # (errors go to stderr in table mode)
-
-    def test_format_json_unexpected_exception_outputs_internal_error_envelope(
-        self, mocker: Any
-    ) -> None:
-        mocker.patch("garmin_cli.commands._options.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.health.get_sleep",
-            side_effect=RuntimeError("unexpected bug"),
-        )
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(
-            cli, ["--format", "json", "health", "sleep", "--days", "1"]
-        )
-        assert result.exit_code == 1
-        parsed = json.loads(result.output)
-        assert parsed["ok"] is False
-        assert parsed["error_code"] == "INTERNAL_ERROR"
 
 
 # ---------------------------------------------------------------------------

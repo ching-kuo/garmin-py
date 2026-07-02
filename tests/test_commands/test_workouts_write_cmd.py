@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from typing import Any
 
 from click.testing import CliRunner
@@ -121,26 +122,6 @@ class TestWorkoutCreateCommand:
         runner.invoke(cli, ["workout", "create", str(f)])
         mock_build.assert_called_once_with(_SAMPLE_WORKOUT_PAYLOAD)
         mock_create.assert_called_once_with(garmin_shaped)
-
-    def test_create_from_file(self, mocker: Any, tmp_path: Any) -> None:
-        mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.workouts.read_workout_input",
-            return_value=_SAMPLE_WORKOUT_PAYLOAD,
-        )
-        mocker.patch(
-            "garmin_cli.commands.workouts.validate_workout_input",
-            return_value=[],
-        )
-        mocker.patch(
-            "garmin_cli.commands.workouts.create_workout",
-            return_value=_SAMPLE_CREATED_WORKOUT,
-        )
-        runner = CliRunner(mix_stderr=False)
-        f = tmp_path / "workout.json"
-        f.write_text(json.dumps(_SAMPLE_WORKOUT_PAYLOAD))
-        result = runner.invoke(cli, ["--json", "workout", "create", str(f)])
-        assert result.exit_code == 0
 
     def test_create_from_stdin(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
@@ -452,11 +433,14 @@ class TestWorkoutDeleteCommand:
 
     def test_delete_confirmation_prompt_shown(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
-        mocker.patch("garmin_cli.commands.workouts.delete_workout", return_value=None)
+        mock_delete = mocker.patch(
+            "garmin_cli.commands.workouts.delete_workout", return_value=None
+        )
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["workout", "delete", "12345"], input="y\n")
-        # Prompt should appear somewhere in the combined output
-        assert result.exit_code == 0 or "confirm" in result.output.lower() or "delete" in result.output.lower()
+        assert "Delete workout 12345?" in result.output
+        assert result.exit_code == 0
+        mock_delete.assert_called_once()
 
     def test_delete_aborted_on_no_confirmation(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
@@ -465,15 +449,17 @@ class TestWorkoutDeleteCommand:
         )
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["workout", "delete", "12345"], input="n\n")
-        assert result.exit_code != 0 or mock_delete.call_count == 0
+        assert result.exit_code == 1
+        assert mock_delete.call_count == 0
 
-    def test_delete_json_output_skips_prompt(self, mocker: Any) -> None:
+    def test_delete_json_output_still_prompts(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
         mocker.patch("garmin_cli.commands.workouts.delete_workout", return_value=None)
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["--json", "workout", "delete", "12345"])
-        # With --json, either auto-confirms or still needs --confirm, but should not hang
-        assert result.exit_code in (0, 1)
+        # --json does not bypass the confirmation prompt; with no stdin input
+        # the prompt aborts rather than hanging.
+        assert result.exit_code == 1
 
     def test_delete_not_found_exit_1(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
@@ -490,14 +476,6 @@ class TestWorkoutDeleteCommand:
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["workout", "delete", "not-a-number", "--confirm"])
         assert result.exit_code == 1
-
-    def test_delete_response_contains_ok_true(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
-        mocker.patch("garmin_cli.commands.workouts.delete_workout", return_value=None)
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(cli, ["--json", "workout", "delete", "12345", "--confirm"])
-        parsed = json.loads(result.output)
-        assert parsed["ok"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -535,8 +513,7 @@ class TestWorkoutScheduleCommand:
         )
         runner = CliRunner(mix_stderr=False)
         runner.invoke(cli, ["workout", "schedule", "12345", "2026-04-01"])
-        call_str = str(mock_schedule.call_args)
-        assert "2026-04-01" in call_str or "2026" in call_str
+        mock_schedule.assert_called_once_with("12345", date(2026, 4, 1))
 
     def test_schedule_invalid_date_exit_1(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")

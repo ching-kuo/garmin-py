@@ -75,31 +75,17 @@ class TestSelectLatestDatedRows:
 
 class TestSerializeSleep:
 
-    def test_returns_list(self, sample_sleep_raw: Any) -> None:
+    def test_single_day_result(self, sample_sleep_raw: Any) -> None:
         result = serialize_sleep(sample_sleep_raw)
         assert isinstance(result, list)
-
-    def test_single_day_returns_one_item(self, sample_sleep_raw: Any) -> None:
-        result = serialize_sleep(sample_sleep_raw)
         assert len(result) == 1
-
-    def test_date_value_correct(self, sample_sleep_raw: Any) -> None:
-        result = serialize_sleep(sample_sleep_raw)
-        assert result[0]["date"] == "2026-03-11"
-
-    def test_duration_hours_correct(self, sample_sleep_raw: Any) -> None:
-        result = serialize_sleep(sample_sleep_raw)
+        row = result[0]
+        assert row["date"] == "2026-03-11"
         # 27000 seconds / 3600 = 7.5 hours
-        assert result[0]["duration_hours"] == pytest.approx(7.5, rel=0.01)
-
-    def test_deep_min_correct(self, sample_sleep_raw: Any) -> None:
-        result = serialize_sleep(sample_sleep_raw)
+        assert row["duration_hours"] == pytest.approx(7.5, rel=0.01)
         # 5400 seconds / 60 = 90 minutes
-        assert result[0]["deep_min"] == pytest.approx(90, rel=0.01)
-
-    def test_score_value(self, sample_sleep_raw: Any) -> None:
-        result = serialize_sleep(sample_sleep_raw)
-        assert result[0]["score"] == 82
+        assert row["deep_min"] == pytest.approx(90, rel=0.01)
+        assert row["score"] == 82
 
     def test_missing_score_returns_none(self) -> None:
         raw = {"dailySleepDTO": {"calendarDate": "2026-03-11", "sleepTimeSeconds": 3600}}
@@ -112,12 +98,9 @@ class TestSerializeSleep:
         assert len(result) == 1
         assert result[0]["date"] is None or result[0].get("date") is None
 
-    def test_multi_day_returns_multiple_items(self, sample_sleep_multi_raw: Any) -> None:
+    def test_multi_day_result(self, sample_sleep_multi_raw: Any) -> None:
         result = serialize_sleep(sample_sleep_multi_raw)
         assert len(result) == 2
-
-    def test_multi_day_each_item_has_required_keys(self, sample_sleep_multi_raw: Any) -> None:
-        result = serialize_sleep(sample_sleep_multi_raw)
         for item in result:
             for key in ("date", "duration_hours", "deep_min", "light_min", "rem_min", "awake_min", "score"):
                 assert key in item
@@ -128,88 +111,62 @@ class TestSerializeSleep:
 
 class TestSerializeHrv:
 
-    def test_contains_date(self, sample_hrv_raw: Any) -> None:
+    def test_single_summary_result(self, sample_hrv_raw: Any) -> None:
         result = serialize_hrv(sample_hrv_raw)
-        assert result[0]["date"] == "2026-03-11"
+        row = result[0]
+        assert row["date"] == "2026-03-11"
+        assert row["weekly_avg"] == 52
+        assert row["last_night"] == 48
+        assert row["status"] == "BALANCED"
 
-    def test_weekly_avg_present(self, sample_hrv_raw: Any) -> None:
-        result = serialize_hrv(sample_hrv_raw)
-        assert "weekly_avg" in result[0]
-        assert result[0]["weekly_avg"] == 52
+    @pytest.mark.parametrize("raw", ({}, {"foo": "bar"}), ids=("empty_dict", "no_hrv_summaries_key"))
+    def test_missing_hrv_data_returns_empty_list(self, raw: dict) -> None:
+        assert serialize_hrv(raw) == []
 
-    def test_last_night_present(self, sample_hrv_raw: Any) -> None:
-        result = serialize_hrv(sample_hrv_raw)
-        assert "last_night" in result[0]
-        assert result[0]["last_night"] == 48
-
-    def test_status_present(self, sample_hrv_raw: Any) -> None:
-        result = serialize_hrv(sample_hrv_raw)
-        assert "status" in result[0]
-        assert result[0]["status"] == "BALANCED"
-
-    def test_missing_keys_return_none(self) -> None:
-        result = serialize_hrv({})
-        assert result == []
-
-    def test_missing_hrv_summary_returns_empty_list(self) -> None:
-        result = serialize_hrv({"foo": "bar"})
-        assert result == []
-
-    def test_range_payload_returns_multiple_rows(self) -> None:
-        result = serialize_hrv(
-            {
-                "hrvSummaries": [
-                    {
-                        "calendarDate": "2026-03-10",
-                        "weeklyAvg": 50,
-                        "lastNight": 48,
-                        "status": "BALANCED",
-                    },
-                    {
-                        "calendarDate": "2026-03-11",
-                        "weeklyAvg": 51,
-                        "lastNight": 49,
-                        "status": "BALANCED",
-                    },
-                ]
-            }
-        )
-        assert result == [
-            {
-                "date": "2026-03-10",
-                "weekly_avg": 50,
-                "last_night": 48,
-                "status": "BALANCED",
-            },
-            {
-                "date": "2026-03-11",
-                "weekly_avg": 51,
-                "last_night": 49,
-                "status": "BALANCED",
-            },
-        ]
-
-    def test_range_payload_prefers_last_night_avg_when_available(self) -> None:
-        result = serialize_hrv(
-            {
-                "hrvSummaries": [
-                    {
-                        "calendarDate": "2026-03-10",
-                        "weeklyAvg": 50,
-                        "lastNightAvg": 47,
-                        "status": "BALANCED",
-                    }
-                ]
-            }
-        )
-        assert result == [
-            {
-                "date": "2026-03-10",
-                "weekly_avg": 50,
-                "last_night": 47,
-                "status": "BALANCED",
-            }
-        ]
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        (
+            (
+                {
+                    "hrvSummaries": [
+                        {
+                            "calendarDate": "2026-03-10",
+                            "weeklyAvg": 50,
+                            "lastNight": 48,
+                            "status": "BALANCED",
+                        },
+                        {
+                            "calendarDate": "2026-03-11",
+                            "weeklyAvg": 51,
+                            "lastNight": 49,
+                            "status": "BALANCED",
+                        },
+                    ]
+                },
+                [
+                    {"date": "2026-03-10", "weekly_avg": 50, "last_night": 48, "status": "BALANCED"},
+                    {"date": "2026-03-11", "weekly_avg": 51, "last_night": 49, "status": "BALANCED"},
+                ],
+            ),
+            (
+                # lastNightAvg is the modern key and takes precedence over lastNight.
+                {
+                    "hrvSummaries": [
+                        {
+                            "calendarDate": "2026-03-10",
+                            "weeklyAvg": 50,
+                            "lastNightAvg": 47,
+                            "status": "BALANCED",
+                        }
+                    ]
+                },
+                [{"date": "2026-03-10", "weekly_avg": 50, "last_night": 47, "status": "BALANCED"}],
+            ),
+        ),
+        ids=("multi_row", "last_night_avg_precedence"),
+    )
+    def test_range_payload(self, raw: dict, expected: list) -> None:
+        assert serialize_hrv(raw) == expected
 
 # ---------------------------------------------------------------------------
 # serialize_weight
@@ -217,24 +174,14 @@ class TestSerializeHrv:
 
 class TestSerializeWeight:
 
-    def test_contains_date(self, sample_weight_raw: Any) -> None:
+    def test_single_day_result(self, sample_weight_raw: Any) -> None:
         result = serialize_weight(sample_weight_raw)
-        assert result[0]["date"] == "2026-03-11"
-
-    def test_weight_kg_converted_from_grams(self, sample_weight_raw: Any) -> None:
-        result = serialize_weight(sample_weight_raw)
+        row = result[0]
+        assert row["date"] == "2026-03-11"
         # 75000g -> 75.0 kg
-        assert result[0]["weight_kg"] == pytest.approx(75.0, rel=0.01)
-
-    def test_bmi_present(self, sample_weight_raw: Any) -> None:
-        result = serialize_weight(sample_weight_raw)
-        assert "bmi" in result[0]
-        assert result[0]["bmi"] == pytest.approx(23.5, rel=0.01)
-
-    def test_body_fat_pct_present(self, sample_weight_raw: Any) -> None:
-        result = serialize_weight(sample_weight_raw)
-        assert "body_fat_pct" in result[0]
-        assert result[0]["body_fat_pct"] == pytest.approx(18.2, rel=0.01)
+        assert row["weight_kg"] == pytest.approx(75.0, rel=0.01)
+        assert row["bmi"] == pytest.approx(23.5, rel=0.01)
+        assert row["body_fat_pct"] == pytest.approx(18.2, rel=0.01)
 
     def test_missing_weight_list_returns_empty(self) -> None:
         result = serialize_weight({})
@@ -246,108 +193,102 @@ class TestSerializeWeight:
 
 class TestSerializeActivitySummary:
 
-    def test_singleton_wraps_in_list(self, sample_activity_raw: Any) -> None:
+    def test_single_activity_result(self, sample_activity_raw: Any) -> None:
         result = serialize_activity_summary(sample_activity_raw)
         assert len(result) == 1
+        row = result[0]
+        assert row["id"] == 12345678
+        assert "date" in row
+        assert row["name"] == "Morning Run"
+        assert row["type"] == "running"
+        # 10000m -> 10.0 km
+        assert row["distance_km"] == pytest.approx(10.0, rel=0.01)
+        # 3600s -> 60.0 min
+        assert row["duration_min"] == pytest.approx(60.0, rel=0.01)
+        assert row["avg_hr"] == 155
 
     def test_list_input_returns_multiple(self, sample_activities_list_raw: Any) -> None:
         result = serialize_activity_summary(sample_activities_list_raw)
         assert len(result) == 2
-
-    def test_id_present(self, sample_activity_raw: Any) -> None:
-        result = serialize_activity_summary(sample_activity_raw)
-        assert result[0]["id"] == 12345678
-
-    def test_date_present(self, sample_activity_raw: Any) -> None:
-        result = serialize_activity_summary(sample_activity_raw)
-        assert "date" in result[0]
-
-    def test_name_present(self, sample_activity_raw: Any) -> None:
-        result = serialize_activity_summary(sample_activity_raw)
-        assert result[0]["name"] == "Morning Run"
-
-    def test_type_present(self, sample_activity_raw: Any) -> None:
-        result = serialize_activity_summary(sample_activity_raw)
-        assert result[0]["type"] == "running"
-
-    def test_distance_km_converted(self, sample_activity_raw: Any) -> None:
-        result = serialize_activity_summary(sample_activity_raw)
-        # 10000m -> 10.0 km
-        assert result[0]["distance_km"] == pytest.approx(10.0, rel=0.01)
-
-    def test_duration_min_converted(self, sample_activity_raw: Any) -> None:
-        result = serialize_activity_summary(sample_activity_raw)
-        # 3600s -> 60.0 min
-        assert result[0]["duration_min"] == pytest.approx(60.0, rel=0.01)
-
-    def test_avg_hr_present(self, sample_activity_raw: Any) -> None:
-        result = serialize_activity_summary(sample_activity_raw)
-        assert result[0]["avg_hr"] == 155
 
     def test_missing_keys_return_none(self) -> None:
         result = serialize_activity_summary({})
         assert isinstance(result, list)
         assert result[0].get("id") is None
 
-    def test_summary_dto_fallback(self) -> None:
-        """Child activities fetched directly should use summaryDTO fallback."""
-        raw = {
-            "activityId": 18878956185,
-            "activityName": "Running",
-            "activityType": {"typeKey": "running"},
-            "summaryDTO": {
-                "startTimeLocal": "2026-04-06T14:30:00",
-                "distance": 35049.1,
-                "duration": 11888.1,
-                "averageHR": 160,
-            },
-        }
-        result = serialize_activity_summary(raw)
-        assert result[0]["id"] == 18878956185
-        assert result[0]["date"] == "2026-04-06T14:30:00"
-        assert result[0]["distance_km"] == pytest.approx(35.0491, rel=0.01)
-        assert result[0]["duration_min"] == pytest.approx(198.135, rel=0.01)
-        assert result[0]["avg_hr"] == 160
-
-    def test_top_level_fields_preferred_over_summary_dto(self) -> None:
-        """Top-level fields take precedence over summaryDTO."""
-        raw = {
-            "activityId": 1,
-            "startTimeLocal": "2026-04-06T06:00:00",
-            "distance": 10000.0,
-            "duration": 3600.0,
-            "averageHR": 150,
-            "summaryDTO": {
-                "startTimeLocal": "2026-04-06T06:00:01",
-                "distance": 9999.0,
-                "duration": 3599.0,
-                "averageHR": 149,
-            },
-        }
-        result = serialize_activity_summary(raw)
-        assert result[0]["date"] == "2026-04-06T06:00:00"
-        assert result[0]["distance_km"] == pytest.approx(10.0, rel=0.01)
-        assert result[0]["duration_min"] == pytest.approx(60.0, rel=0.01)
-        assert result[0]["avg_hr"] == 150
-
-    def test_hybrid_top_level_and_summary_dto(self) -> None:
-        """Per-field coalescing uses top-level when present, summaryDTO otherwise."""
-        raw = {
-            "activityId": 2,
-            "startTimeLocal": "2026-04-06T14:00:00",
-            "averageHR": 162,
-            "activityType": {"typeKey": "running"},
-            "summaryDTO": {
-                "distance": 35049.1,
-                "duration": 11888.1,
-                "averageHR": 999,
-            },
-        }
-        result = serialize_activity_summary(raw)
-        assert result[0]["date"] == "2026-04-06T14:00:00"
-        assert result[0]["distance_km"] == pytest.approx(35.0491, rel=0.01)
-        assert result[0]["duration_min"] == pytest.approx(198.135, rel=0.01)
-        assert result[0]["avg_hr"] == 162
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        (
+            (
+                # Child activities fetched directly should use summaryDTO fallback.
+                {
+                    "activityId": 18878956185,
+                    "activityName": "Running",
+                    "activityType": {"typeKey": "running"},
+                    "summaryDTO": {
+                        "startTimeLocal": "2026-04-06T14:30:00",
+                        "distance": 35049.1,
+                        "duration": 11888.1,
+                        "averageHR": 160,
+                    },
+                },
+                {
+                    "id": 18878956185,
+                    "date": "2026-04-06T14:30:00",
+                    "distance_km": pytest.approx(35.0491, rel=0.01),
+                    "duration_min": pytest.approx(198.135, rel=0.01),
+                    "avg_hr": 160,
+                },
+            ),
+            (
+                # Top-level fields take precedence over summaryDTO.
+                {
+                    "activityId": 1,
+                    "startTimeLocal": "2026-04-06T06:00:00",
+                    "distance": 10000.0,
+                    "duration": 3600.0,
+                    "averageHR": 150,
+                    "summaryDTO": {
+                        "startTimeLocal": "2026-04-06T06:00:01",
+                        "distance": 9999.0,
+                        "duration": 3599.0,
+                        "averageHR": 149,
+                    },
+                },
+                {
+                    "date": "2026-04-06T06:00:00",
+                    "distance_km": pytest.approx(10.0, rel=0.01),
+                    "duration_min": pytest.approx(60.0, rel=0.01),
+                    "avg_hr": 150,
+                },
+            ),
+            (
+                # Per-field coalescing uses top-level when present, summaryDTO otherwise.
+                {
+                    "activityId": 2,
+                    "startTimeLocal": "2026-04-06T14:00:00",
+                    "averageHR": 162,
+                    "activityType": {"typeKey": "running"},
+                    "summaryDTO": {
+                        "distance": 35049.1,
+                        "duration": 11888.1,
+                        "averageHR": 999,
+                    },
+                },
+                {
+                    "date": "2026-04-06T14:00:00",
+                    "distance_km": pytest.approx(35.0491, rel=0.01),
+                    "duration_min": pytest.approx(198.135, rel=0.01),
+                    "avg_hr": 162,
+                },
+            ),
+        ),
+        ids=("summary_dto_fallback", "top_level_preferred", "hybrid_coalescing"),
+    )
+    def test_summary_dto_and_top_level_coalescing(self, raw: dict, expected: dict) -> None:
+        row = serialize_activity_summary(raw)[0]
+        for key, value in expected.items():
+            assert row[key] == value
 
 
 # ---------------------------------------------------------------------------
@@ -359,37 +300,19 @@ class TestSerializeMultisportChildren:
     def test_returns_child_rows(self, sample_multisport_children_raw: Any) -> None:
         result = serialize_multisport_children(sample_multisport_children_raw)
         assert len(result) == 3
-
-    def test_sport_field_present(self, sample_multisport_children_raw: Any) -> None:
-        result = serialize_multisport_children(sample_multisport_children_raw)
         assert result[0]["sport"] == "open_water_swimming"
         assert result[1]["sport"] == "cycling"
         assert result[2]["sport"] == "running"
-
-    def test_distance_converted_to_km(self, sample_multisport_children_raw: Any) -> None:
-        result = serialize_multisport_children(sample_multisport_children_raw)
         assert result[0]["distance_km"] == pytest.approx(1.5, rel=0.01)
         assert result[1]["distance_km"] == pytest.approx(40.0, rel=0.01)
-
-    def test_duration_converted_to_minutes(self, sample_multisport_children_raw: Any) -> None:
-        result = serialize_multisport_children(sample_multisport_children_raw)
         assert result[0]["duration_min"] == pytest.approx(30.0, rel=0.01)
         assert result[1]["duration_min"] == pytest.approx(70.0, rel=0.01)
-
-    def test_avg_hr_present(self, sample_multisport_children_raw: Any) -> None:
-        result = serialize_multisport_children(sample_multisport_children_raw)
         assert result[0]["avg_hr"] == 145
-
-    def test_calories_present(self, sample_multisport_children_raw: Any) -> None:
-        result = serialize_multisport_children(sample_multisport_children_raw)
         assert result[0]["calories"] == 350
 
-    def test_empty_list(self) -> None:
-        assert serialize_multisport_children([]) == []
-
-    def test_skips_non_dict_items(self) -> None:
-        result = serialize_multisport_children([None, "bad", 123])
-        assert result == []
+    @pytest.mark.parametrize("children", ([], [None, "bad", 123]), ids=("empty_list", "non_dict_items"))
+    def test_empty_or_non_dict_items_returns_empty(self, children: list) -> None:
+        assert serialize_multisport_children(children) == []
 
     def test_summary_dto_fallback(self) -> None:
         children = [
@@ -419,39 +342,20 @@ class TestSerializeCalendarWorkout:
     def test_returns_multiple_items(self, sample_calendar_raw: Any) -> None:
         result = serialize_calendar_workout(sample_calendar_raw)
         assert len(result) == 2
-
-    def test_date_present(self, sample_calendar_raw: Any) -> None:
-        result = serialize_calendar_workout(sample_calendar_raw)
-        assert result[0]["date"] == "2026-03-12"
-
-    def test_id_present(self, sample_calendar_raw: Any) -> None:
-        result = serialize_calendar_workout(sample_calendar_raw)
-        assert result[0]["id"] == 987654
-
-    def test_name_present(self, sample_calendar_raw: Any) -> None:
-        result = serialize_calendar_workout(sample_calendar_raw)
-        assert result[0]["name"] == "Tempo Run"
-
-    def test_type_present(self, sample_calendar_raw: Any) -> None:
-        result = serialize_calendar_workout(sample_calendar_raw)
-        assert result[0]["type"] == "running"
-
-    def test_duration_min_converted(self, sample_calendar_raw: Any) -> None:
-        result = serialize_calendar_workout(sample_calendar_raw)
+        row = result[0]
+        assert row["date"] == "2026-03-12"
+        assert row["id"] == 987654
+        assert row["name"] == "Tempo Run"
+        assert row["type"] == "running"
         # 3600s -> 60 min
-        assert result[0]["duration_min"] == pytest.approx(60.0, rel=0.01)
+        assert row["duration_min"] == pytest.approx(60.0, rel=0.01)
+        assert row["description"] == "Hard effort"
 
-    def test_description_present(self, sample_calendar_raw: Any) -> None:
-        result = serialize_calendar_workout(sample_calendar_raw)
-        assert result[0]["description"] == "Hard effort"
-
-    def test_empty_calendar_items_returns_empty_list(self) -> None:
-        result = serialize_calendar_workout({"calendarItems": []})
-        assert result == []
-
-    def test_missing_raw_returns_empty_list(self) -> None:
-        result = serialize_calendar_workout({})
-        assert isinstance(result, list)
+    @pytest.mark.parametrize(
+        "raw", ({"calendarItems": []}, {}), ids=("empty_calendar_items", "missing_calendar_items_key")
+    )
+    def test_no_calendar_items_returns_empty_list(self, raw: dict) -> None:
+        assert serialize_calendar_workout(raw) == []
 
 # ---------------------------------------------------------------------------
 # serialize_thresholds
@@ -462,32 +366,14 @@ class TestSerializeThresholds:
     def test_returns_two_items(self, sample_all_thresholds_raw: Any) -> None:
         result = serialize_thresholds(sample_all_thresholds_raw)
         assert len(result) == 2
-
-    def test_sport_present(self, sample_all_thresholds_raw: Any) -> None:
-        result = serialize_thresholds(sample_all_thresholds_raw)
         assert result[0]["sport"] == "running"
-
-    def test_lt_hr_bpm_present(self, sample_all_thresholds_raw: Any) -> None:
-        result = serialize_thresholds(sample_all_thresholds_raw)
         assert result[0]["lt_hr_bpm"] == 168
-
-    def test_lt_pace_present(self, sample_all_thresholds_raw: Any) -> None:
-        result = serialize_thresholds(sample_all_thresholds_raw)
         assert result[0]["lt_pace"] == "5:12"
-
-    def test_ftp_watts_present_cycling(self, sample_all_thresholds_raw: Any) -> None:
-        result = serialize_thresholds(sample_all_thresholds_raw)
+        assert result[0]["weight_kg"] == 75.0
         cycling = next(r for r in result if r["sport"] == "cycling")
         assert cycling["ftp_watts"] == 280
-
-    def test_ftp_watts_none_for_running(self, sample_all_thresholds_raw: Any) -> None:
-        result = serialize_thresholds(sample_all_thresholds_raw)
         running = next(r for r in result if r["sport"] == "running")
         assert running["ftp_watts"] is None
-
-    def test_weight_kg_present(self, sample_all_thresholds_raw: Any) -> None:
-        result = serialize_thresholds(sample_all_thresholds_raw)
-        assert result[0]["weight_kg"] == 75.0
 
     def test_missing_keys_return_none(self) -> None:
         result = serialize_thresholds({"thresholds": [{}]})
