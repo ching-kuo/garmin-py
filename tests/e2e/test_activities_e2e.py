@@ -214,6 +214,46 @@ def test_activity_zones_subcommand(run_cli, activity_id):
 
 
 @pytest.mark.e2e
+def test_activity_detail_metrics_subcommand(run_cli, activity_id):
+    """activity detail-metrics pivots the raw sample stream into one row per
+    sample keyed by metric key; --metric restricts the columns to the subset."""
+    if activity_id is None:
+        pytest.skip("No activities found")
+
+    # Discover which metric keys this activity actually recorded.
+    describe_result, describe_parsed = run_cli(["activity", "metrics-describe", str(activity_id)])
+    assert_exit_ok(describe_result)
+    assert_envelope_ok(describe_parsed)
+    if not describe_parsed["data"]:
+        pytest.skip("Activity has no detail metric stream")
+    available = [row["key"] for row in describe_parsed["data"] if row.get("key")]
+    assert available, "metrics-describe returned no usable metric keys"
+
+    # Unfiltered: rows exist and expose the watch's directTimestamp-style keys.
+    result, parsed = run_cli(["activity", "detail-metrics", str(activity_id)])
+    assert_exit_ok(result)
+    assert_envelope_ok(parsed)
+    if not parsed["data"]:
+        pytest.skip("Activity has a descriptor schema but no recorded samples")
+    row_keys = set(parsed["data"][0].keys())
+    assert any(key.startswith("direct") for key in row_keys), (
+        "expected directTimestamp-style keys in unfiltered detail-metrics output"
+    )
+    assert row_keys == set(available), "unfiltered row keys must match the descriptor schema"
+
+    # Filtered: request a single key and confirm rows carry only that column.
+    wanted = available[0]
+    filtered_result, filtered_parsed = run_cli(
+        ["activity", "detail-metrics", str(activity_id), "--metric", wanted]
+    )
+    assert_exit_ok(filtered_result)
+    assert_envelope_ok(filtered_parsed)
+    assert filtered_parsed["data"], "filtered detail-metrics returned no rows"
+    for sample in filtered_parsed["data"]:
+        assert set(sample.keys()) == {wanted}, "filtered rows must contain only the requested metric"
+
+
+@pytest.mark.e2e
 def test_multisport_laps_fan_out(run_cli, rate_limiter, cli_runner, garth_session):
     """For multisport parents, activity laps fans out to each child leg and
     stamps a 0-based leg_index on every row."""

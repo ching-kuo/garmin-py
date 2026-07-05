@@ -78,7 +78,7 @@ def register_health_tools(mcp: MCPServer, config: CliConfig) -> None:
 
     @mcp.tool()
     def health_body_battery(start_date: str, end_date: str) -> dict[str, Any]:
-        """Get body battery for a date range (YYYY-MM-DD). Returns date, start_level, end_level. Note: large ranges may be slow (one API call per day)."""
+        """Get body battery for a date range (YYYY-MM-DD). Returns date, start_level, end_level, max_level (intraday peak). Fetched in a single ranged call."""
         start, end = _parse_date_range(start_date, end_date)
         return _run_tool(config, lambda: get_body_battery_range(start, end), serialize_body_battery)
 

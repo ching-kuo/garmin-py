@@ -232,7 +232,7 @@ class TestWeightCommand:
             "body-battery",
             "get_body_battery_range",
             [{"bodyBatteryValuesArray": [["2026-03-11T08:00:00", 85, "CHARGED"], ["2026-03-11T14:00:00", 60, "DRAINING"]]}],
-            {"date": "2026-03-11", "start_level": 85, "end_level": 60},
+            {"date": "2026-03-11", "start_level": 85, "end_level": 60, "max_level": 85},
         ),
         (
             "stress",

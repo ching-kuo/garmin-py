@@ -466,6 +466,54 @@ class TestActivityTools:
         assert result["count"] == 0
         assert result["rows"] == []
 
+    def test_activity_detail_metrics_pivots_samples(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.mcp_tools.activities.get_activity_details",
+            return_value={
+                "metricDescriptors": [
+                    {"key": "directTimestamp", "unit": None, "metricsIndex": 0},
+                    {"key": "directHeartRate", "unit": {"key": "bpm"}, "metricsIndex": 1},
+                ],
+                "activityDetailMetrics": [{"metrics": [1000, 120]}, {"metrics": [2000, 130]}],
+            },
+        )
+        server = create_mcp_server(_config())
+        result = _call(server, "activity_detail_metrics", {"activity_id": 1})
+        assert result["count"] == 2
+        assert result["rows"][0] == {"directTimestamp": 1000, "directHeartRate": 120}
+
+    def test_activity_detail_metrics_filter(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.mcp_tools.activities.get_activity_details",
+            return_value={
+                "metricDescriptors": [
+                    {"key": "directTimestamp", "unit": None, "metricsIndex": 0},
+                    {"key": "directHeartRate", "unit": {"key": "bpm"}, "metricsIndex": 1},
+                ],
+                "activityDetailMetrics": [{"metrics": [1000, 120]}],
+            },
+        )
+        server = create_mcp_server(_config())
+        result = _call(server, "activity_detail_metrics", {"activity_id": 1, "metrics": " directHeartRate ,"})
+        assert result["rows"] == [{"directHeartRate": 120}]
+
+    def test_activity_detail_metrics_unknown_key_raises_tool_error(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.mcp_tools.activities.get_activity_details",
+            return_value={"metricDescriptors": [], "activityDetailMetrics": []},
+        )
+        server = create_mcp_server(_config())
+        with pytest.raises(ToolError, match="Unknown metric"):
+            _call(server, "activity_detail_metrics", {"activity_id": 1, "metrics": "nope"})
+
+    def test_activity_detail_metrics_invalid_id(self) -> None:
+        server = create_mcp_server(_config())
+        with pytest.raises(ToolError, match="positive"):
+            _call(server, "activity_detail_metrics", {"activity_id": 0})
+
     def test_activity_metrics_describe_invalid_id(self) -> None:
         server = create_mcp_server(_config())
         with pytest.raises(ToolError, match="positive"):

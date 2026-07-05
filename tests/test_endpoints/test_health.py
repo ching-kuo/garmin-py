@@ -116,27 +116,35 @@ class TestHealthEndpointErrorHandling:
 
 class TestDailyHealthRangeHelpers:
 
-    def test_body_battery_range_collects_each_day(self, mocker: Any) -> None:
-        # Keyed by day (not an ordered side_effect list): days are fetched
-        # concurrently, only the result order is guaranteed.
-        payloads = {
-            date(2026, 3, 11): {"bodyBatteryValuesArray": [["2026-03-11T08:00:00", 85, "CHARGED"]]},
-            date(2026, 3, 12): {"bodyBatteryValuesArray": [["2026-03-12T08:00:00", 75, "CHARGED"]]},
-        }
-        mock_get = mocker.patch(
-            "garmin_cli.endpoints.health.get_body_battery",
-            side_effect=lambda day: payloads[day],
-        )
-        mock_sleep = mocker.patch("garmin_cli.endpoints._base.time.sleep")
+    def test_body_battery_range_single_ranged_call(self, mocker: Any) -> None:
+        # reports/daily accepts a start/end range natively: one call, one item
+        # per day (the old per-day bodyBattery/{date} endpoint was removed).
+        mock_garth = mocker.MagicMock()
+        mock_garth.connectapi.return_value = [
+            {"date": "2026-03-11", "bodyBatteryValuesArray": [[1000, 85]]},
+            {"date": "2026-03-12", "bodyBatteryValuesArray": [[2000, 75]]},
+        ]
+        mocker.patch("garmin_cli.endpoints.health.garth", mock_garth)
 
         result = get_body_battery_range(date(2026, 3, 11), date(2026, 3, 12))
 
         assert result == [
-            {"bodyBatteryValuesArray": [["2026-03-11T08:00:00", 85, "CHARGED"]]},
-            {"bodyBatteryValuesArray": [["2026-03-12T08:00:00", 75, "CHARGED"]]},
+            {"date": "2026-03-11", "bodyBatteryValuesArray": [[1000, 85]]},
+            {"date": "2026-03-12", "bodyBatteryValuesArray": [[2000, 75]]},
         ]
-        assert mock_get.call_count == 2
-        mock_sleep.assert_called_once_with(0.5)
+        mock_garth.connectapi.assert_called_once_with(
+            "/wellness-service/wellness/bodyBattery/reports/daily",
+            params={"startDate": "2026-03-11", "endDate": "2026-03-12"},
+        )
+
+    def test_body_battery_range_wraps_dict_and_none(self, mocker: Any) -> None:
+        mock_garth = mocker.MagicMock()
+        mock_garth.connectapi.return_value = {"date": "2026-03-11"}
+        mocker.patch("garmin_cli.endpoints.health.garth", mock_garth)
+        assert get_body_battery_range(date(2026, 3, 11), date(2026, 3, 11)) == [{"date": "2026-03-11"}]
+
+        mock_garth.connectapi.return_value = None
+        assert get_body_battery_range(date(2026, 3, 11), date(2026, 3, 11)) == []
 
     def test_other_range_helpers_reuse_daily_iteration(self, mocker: Any) -> None:
         mocker.patch(

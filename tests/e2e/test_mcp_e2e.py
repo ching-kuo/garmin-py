@@ -101,6 +101,22 @@ def test_health_intensity_minutes_mcp(mcp_server_live, rate_limiter, recent_rang
 
 
 @pytest.mark.e2e
+def test_health_body_battery_mcp(mcp_server_live, rate_limiter, recent_range):
+    """health_body_battery rows carry start/end/max levels; the intraday peak is
+    at least the start and end levels whenever all three are non-null."""
+    parsed = _call_tool_json(mcp_server_live, rate_limiter, "health_body_battery", recent_range)
+    assert_mcp_envelope_ok(parsed)
+    if not parsed["rows"]:
+        pytest.skip("No body battery data for the window")
+    for row in parsed["rows"]:
+        assert_row_has_keys(row, ["date", "start_level", "end_level", "max_level"])
+        if row["start_level"] is not None and row["end_level"] is not None and row["max_level"] is not None:
+            assert row["max_level"] >= max(row["start_level"], row["end_level"]), (
+                "intraday peak must be >= start and end levels"
+            )
+
+
+@pytest.mark.e2e
 def test_performance_race_predictions_mcp(mcp_server_live, rate_limiter):
     try:
         parsed = _call_tool_json(mcp_server_live, rate_limiter, "performance_race_predictions", {})
@@ -243,6 +259,39 @@ def test_activity_metrics_describe_mcp(mcp_server_live, rate_limiter, first_acti
         assert first["key"] is not None, (
             "metric descriptor key is None; serializer may be reading the wrong wire field"
         )
+
+
+@pytest.mark.e2e
+def test_activity_detail_metrics_mcp(mcp_server_live, rate_limiter, first_activity_id):
+    """activity_detail_metrics returns one row per sample keyed by metric key;
+    a metrics filter (derived from activity_metrics_describe) keeps the response
+    small and the row keys must match exactly that filter."""
+    if first_activity_id is None:
+        pytest.skip("No activities found")
+
+    describe = _call_tool_json(
+        mcp_server_live, rate_limiter,
+        "activity_metrics_describe",
+        {"activity_id": int(first_activity_id)},
+    )
+    assert_mcp_envelope_ok(describe)
+    keys = [row["key"] for row in describe["rows"] if row.get("key")]
+    if not keys:
+        pytest.skip("Activity has no detail metric stream")
+
+    # Pick a small subset so the pivoted response stays small.
+    wanted = keys[:2]
+    parsed = _call_tool_json(
+        mcp_server_live, rate_limiter,
+        "activity_detail_metrics",
+        {"activity_id": int(first_activity_id), "metrics": ",".join(wanted)},
+    )
+    assert_mcp_envelope_ok(parsed)
+    if not parsed["rows"]:
+        pytest.skip("Activity has a descriptor schema but no recorded samples")
+    assert parsed["count"] > 0
+    for sample in parsed["rows"]:
+        assert set(sample.keys()) == set(wanted), "row keys must match the requested metrics filter"
 
 
 @pytest.mark.e2e

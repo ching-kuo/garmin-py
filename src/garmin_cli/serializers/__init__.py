@@ -68,6 +68,7 @@ from garmin_cli.serializers.activities import (
     serialize_activity_upload,
     serialize_activity_weather,
     serialize_capability_manifest,
+    serialize_detail_metrics,
     serialize_metrics_descriptors,
     serialize_multisport_children,
 )
@@ -187,6 +188,7 @@ __all__ = (
     "serialize_activity_weather",
     "serialize_activity_hr_zones",
     "serialize_metrics_descriptors",
+    "serialize_detail_metrics",
     "serialize_capability_manifest",
     "serialize_multisport_children",
     "manifest_summary_counts",

@@ -22,6 +22,7 @@ from garmin_cli.metrics.sport_profile import (
     SportProfile,
     profile_for,
 )
+from garmin_cli.exceptions import GarminCliError
 from garmin_cli.serializers._common import (
     _coalesce,
     _get_nested,
@@ -420,6 +421,38 @@ def serialize_metrics_descriptors(details: Any) -> list[dict[str, Any]]:
                 "metricsIndex": _coalesce(item.get("metricsIndex"), item.get("index")),
             }
         )
+    return rows
+
+
+def serialize_detail_metrics(details: Any, metrics: Any = None) -> list[dict[str, Any]]:
+    """Pivot the raw sample stream into one row per sample, keyed by metric key.
+
+    *metrics* optionally restricts (and orders) the output columns; unknown
+    keys raise ``INVALID_INPUT`` listing what the activity actually recorded.
+    """
+    index_by_key: dict[str, int] = {}
+    for descriptor in serialize_metrics_descriptors(details):
+        key, idx = descriptor.get("key"), descriptor.get("metricsIndex")
+        if isinstance(key, str) and isinstance(idx, int) and not isinstance(idx, bool):
+            index_by_key[key] = idx
+    if metrics:
+        unknown = [m for m in metrics if m not in index_by_key]
+        if unknown:
+            raise GarminCliError(
+                error=(
+                    f"Unknown metric key(s): {', '.join(unknown)}. "
+                    f"Available: {', '.join(index_by_key) or 'none'}."
+                ),
+                error_code="INVALID_INPUT",
+            )
+        index_by_key = {key: index_by_key[key] for key in metrics}
+    samples = details.get("activityDetailMetrics") if isinstance(details, dict) else None
+    rows: list[dict[str, Any]] = []
+    for entry in samples if isinstance(samples, list) else []:
+        values = entry.get("metrics") if isinstance(entry, dict) else None
+        if not isinstance(values, list):
+            continue
+        rows.append({key: values[idx] if idx < len(values) else None for key, idx in index_by_key.items()})
     return rows
 
 

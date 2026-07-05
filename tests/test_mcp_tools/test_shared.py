@@ -37,6 +37,7 @@ class TestToolRegistration:
         "activity_laps",
         "activity_hr_zones",
         "activity_metrics_describe",
+        "activity_detail_metrics",
         "activity_download",
         "activity_upload",
         "activity_delete",

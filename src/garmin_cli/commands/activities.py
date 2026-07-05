@@ -64,6 +64,7 @@ from garmin_cli.serializers import (
     serialize_activity_upload,
     serialize_activity_weather,
     serialize_capability_manifest,
+    serialize_detail_metrics,
     serialize_metrics_descriptors,
     serialize_multisport_children,
 )
@@ -284,6 +285,29 @@ def metrics_describe_cmd(ctx: click.Context, activity_id: str) -> None:
     raw = get_activity_details(activity_id)
     rows = serialize_metrics_descriptors(raw)
     render_output(ctx.obj["config"].output_format, "activity metrics-describe", rows, COLUMNS_METRICS_DESCRIPTORS)
+
+
+@activity.command("detail-metrics")
+@click.argument("activity_id")
+@click.option(
+    "--metric",
+    "metrics",
+    multiple=True,
+    help="Restrict output to these metric keys (repeatable). See 'activity metrics-describe' for available keys.",
+)
+@click.pass_context
+def detail_metrics_cmd(ctx: click.Context, activity_id: str, metrics: tuple[str, ...]) -> None:
+    """Get the raw per-sample metric time series for an activity.
+
+    Returns one row per recorded sample (~2000 for a typical activity);
+    columns are the watch's metric keys (directTimestamp, directHeartRate,
+    directPower, ...). Use --metric to keep the output small.
+    """
+    ensure_authenticated(ctx.obj["config"])
+    raw = get_activity_details(activity_id)
+    rows = serialize_detail_metrics(raw, metrics or None)
+    columns = tuple(rows[0].keys()) if rows else ()
+    render_output(ctx.obj["config"].output_format, "activity detail-metrics", rows, columns)
 
 
 @activity.command("download")

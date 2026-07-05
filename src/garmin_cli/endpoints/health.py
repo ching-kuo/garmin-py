@@ -67,12 +67,20 @@ def get_intensity_minutes_range(start: date, end: date) -> list[Any]:
     return _get_stats_range("im", start, end)
 
 
-def get_body_battery(day: date) -> Any:
-    return _request(f"/wellness-service/wellness/bodyBattery/{day.isoformat()}")
-
-
 def get_body_battery_range(start: date, end: date) -> list[Any]:
-    return _collect_daily_range(get_body_battery, start, end)
+    """Fetch body battery for a date range in a single ranged call.
+
+    Garmin removed the per-day ``/wellness/bodyBattery/{date}`` endpoint
+    (404 as of 2026-07); ``reports/daily`` is the path garminconnect 0.3.2
+    itself uses and returns one item per day.
+    """
+    result = _request(
+        "/wellness-service/wellness/bodyBattery/reports/daily",
+        params={"startDate": start.isoformat(), "endDate": end.isoformat()},
+    )
+    if isinstance(result, dict):
+        return [result]
+    return result if result is not None else []
 
 
 def get_stress(day: date) -> Any:

@@ -505,9 +505,9 @@ class TestPerformanceSerializers:
         (
             serialize_body_battery,
             "sample_body_battery_raw",
-            {"date": "2026-03-11", "start_level": 85, "end_level": 60},
+            {"date": "2026-03-11", "start_level": 85, "end_level": 60, "max_level": 85},
             COLUMNS_BODY_BATTERY,
-            ("date", "start_level", "end_level"),
+            ("date", "start_level", "end_level", "max_level"),
         ),
         (
             serialize_stress,
@@ -1306,3 +1306,78 @@ class TestSerializeMetricsDescriptors:
         assert serialize_metrics_descriptors({}) == []
         assert serialize_metrics_descriptors({"metricDescriptors": []}) == []
         assert serialize_metrics_descriptors(None) == []
+
+
+class TestSerializeDetailMetrics:
+
+    DETAILS = {
+        "metricDescriptors": [
+            {"key": "directTimestamp", "unit": None, "metricsIndex": 0},
+            {"key": "directHeartRate", "unit": {"key": "bpm"}, "metricsIndex": 1},
+            {"key": "directPower", "unit": {"key": "watt"}, "metricsIndex": 2},
+        ],
+        "activityDetailMetrics": [
+            {"metrics": [1000, 120, 200]},
+            {"metrics": [2000, 130]},
+            "junk",
+            {"metrics": [3000, 140, 210]},
+        ],
+    }
+
+    def test_pivots_samples_to_rows(self) -> None:
+        from garmin_cli.serializers import serialize_detail_metrics
+        rows = serialize_detail_metrics(self.DETAILS)
+        assert len(rows) == 3
+        assert rows[0] == {"directTimestamp": 1000, "directHeartRate": 120, "directPower": 200}
+
+    def test_short_sample_pads_none(self) -> None:
+        from garmin_cli.serializers import serialize_detail_metrics
+        rows = serialize_detail_metrics(self.DETAILS)
+        assert rows[1] == {"directTimestamp": 2000, "directHeartRate": 130, "directPower": None}
+
+    def test_metric_filter_selects_and_orders(self) -> None:
+        from garmin_cli.serializers import serialize_detail_metrics
+        rows = serialize_detail_metrics(self.DETAILS, ("directPower", "directTimestamp"))
+        assert list(rows[0].keys()) == ["directPower", "directTimestamp"]
+        assert rows[0] == {"directPower": 200, "directTimestamp": 1000}
+
+    def test_unknown_metric_raises_invalid_input(self) -> None:
+        from garmin_cli.exceptions import GarminCliError
+        from garmin_cli.serializers import serialize_detail_metrics
+        with pytest.raises(GarminCliError) as excinfo:
+            serialize_detail_metrics(self.DETAILS, ("nope",))
+        assert excinfo.value.error_code == "INVALID_INPUT"
+        assert "nope" in str(excinfo.value)
+        assert "directHeartRate" in str(excinfo.value)
+
+    def test_empty_or_malformed_returns_empty(self) -> None:
+        from garmin_cli.serializers import serialize_detail_metrics
+        assert serialize_detail_metrics({}) == []
+        assert serialize_detail_metrics(None) == []
+        assert serialize_detail_metrics({"metricDescriptors": self.DETAILS["metricDescriptors"]}) == []
+        assert serialize_detail_metrics({**self.DETAILS, "activityDetailMetrics": "junk"}) == []
+
+
+class TestSerializeBodyBatteryReportsDaily:
+    """reports/daily shape: epoch-millis [timestamp, level] pairs + a "date" field."""
+
+    ITEM = {
+        "date": "2026-07-04",
+        "charged": 79,
+        "drained": 86,
+        "bodyBatteryValuesArray": [[1783000000000, 11], [1783010000000, 88], [1783020000000, 5]],
+    }
+
+    def test_reports_daily_row(self) -> None:
+        assert serialize_body_battery([self.ITEM]) == [
+            {"date": "2026-07-04", "start_level": 11, "end_level": 5, "max_level": 88}
+        ]
+
+    def test_null_levels_skipped(self) -> None:
+        item = {**self.ITEM, "bodyBatteryValuesArray": [[1, None], [2, 40], [3, 70], [4, None]]}
+        assert serialize_body_battery([item]) == [
+            {"date": "2026-07-04", "start_level": 40, "end_level": 70, "max_level": 70}
+        ]
+
+    def test_empty_values_array_skipped(self) -> None:
+        assert serialize_body_battery([{"date": "2026-07-04", "bodyBatteryValuesArray": []}]) == []

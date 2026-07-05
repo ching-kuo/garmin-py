@@ -76,3 +76,27 @@ def test_hrv_single_date(run_cli):
     result, parsed = run_cli(["health", "hrv", "--date", str(today)])
     assert_exit_ok(result)
     assert_envelope_ok(parsed)
+
+
+@pytest.mark.e2e
+def test_body_battery_range(run_cli):
+    """body-battery rows expose start/end/max levels; when all are non-null the
+    intraday peak must be at least the start and end levels."""
+    today = date.today()
+    week_ago = today - timedelta(days=7)
+    result, parsed = run_cli(
+        ["health", "body-battery", "--from", str(week_ago), "--to", str(today)]
+    )
+    assert_exit_ok(result)
+    assert_envelope_ok(parsed)
+    if not parsed["data"]:
+        pytest.skip("No body battery data for the window")
+    for row in parsed["data"]:
+        assert_row_has_keys(row, ["date", "start_level", "end_level", "max_level"])
+        assert_numeric_or_none(row["start_level"], "start_level")
+        assert_numeric_or_none(row["end_level"], "end_level")
+        assert_numeric_or_none(row["max_level"], "max_level")
+        if row["start_level"] is not None and row["end_level"] is not None and row["max_level"] is not None:
+            assert row["max_level"] >= max(row["start_level"], row["end_level"]), (
+                "intraday peak must be >= start and end levels"
+            )

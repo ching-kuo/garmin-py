@@ -35,7 +35,7 @@ COLUMNS_SLEEP = (
 )
 COLUMNS_HRV = ("date", "weekly_avg", "last_night", "status")
 COLUMNS_WEIGHT = ("date", "weight_kg", "bmi", "body_fat_pct")
-COLUMNS_BODY_BATTERY = ("date", "start_level", "end_level")
+COLUMNS_BODY_BATTERY = ("date", "start_level", "end_level", "max_level")
 COLUMNS_STRESS = ("date", "avg_stress", "max_stress")
 COLUMNS_SPO2 = ("date", "avg_spo2", "lowest_spo2")
 COLUMNS_RESTING_HR = ("date", "resting_hr")
@@ -217,14 +217,26 @@ def serialize_body_battery(raw: Any) -> list[dict[str, Any]]:
         values = item.get("bodyBatteryValuesArray")
         if not isinstance(values, list) or not values:
             continue
-        start = values[0] if isinstance(values[0], list) else []
-        end = values[-1] if isinstance(values[-1], list) else []
-        timestamp = start[0] if len(start) > 0 else None
+        # Entries are [timestamp, level] pairs; reports/daily uses epoch millis
+        # timestamps and carries the calendar date in the item's "date" field.
+        levels = [
+            entry[1]
+            for entry in values
+            if isinstance(entry, list) and len(entry) > 1 and isinstance(entry[1], (int, float))
+        ]
+        date_str = item.get("date") or item.get("calendarDate")
+        if not date_str:
+            # legacy per-day shape carried ISO timestamps; epoch millis (the
+            # reports/daily shape) can't yield a date here, so leave it None
+            first = values[0] if isinstance(values[0], list) else []
+            timestamp = first[0] if first else None
+            date_str = timestamp.split("T", 1)[0] if isinstance(timestamp, str) and "T" in timestamp else None
         rows.append(
             {
-                "date": str(timestamp).split("T", 1)[0] if timestamp else item.get("calendarDate"),
-                "start_level": start[1] if len(start) > 1 else None,
-                "end_level": end[1] if len(end) > 1 else None,
+                "date": date_str,
+                "start_level": levels[0] if levels else None,
+                "end_level": levels[-1] if levels else None,
+                "max_level": max(levels) if levels else None,
             }
         )
     return rows

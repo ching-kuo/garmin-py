@@ -86,7 +86,7 @@ garmin-cli --json health hrv --date 2026-03-11
 # Weight -- fields: date, weight_kg, bmi, body_fat_pct
 garmin-cli --json health weight --days 30
 
-# Body battery -- fields: date, start_level, end_level
+# Body battery -- fields: date, start_level, end_level, max_level (intraday peak); single ranged API call
 garmin-cli --json health body-battery --days 7
 
 # Stress -- fields: date, avg_stress, max_stress
@@ -154,6 +154,10 @@ garmin-cli --json activity weather 12345678901
 # Metric descriptors for an activity's detail stream -- fields: key, unit, metricsIndex
 # Use to discover what metrics a watch recorded before requesting samples
 garmin-cli --json activity metrics-describe 12345678901
+
+# Raw per-sample metric time series (one row per sample, ~2000 typical)
+# Columns are the watch's metric keys; use --metric (repeatable) to select
+garmin-cli --json activity detail-metrics 12345678901 --metric directTimestamp --metric directHeartRate --metric directPower
 
 # Download an activity file to disk -- fields: id, format, path, size_bytes
 # --fmt: original (FIT in a ZIP, default), tcx, gpx, kml, csv. Never prints
@@ -548,7 +552,7 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `health_daily_summary` | `start_date`, `end_date` | `{count, rows}` — steps, floors, intensity minutes, calories, resting HR (one API call per day) |
 | `health_steps` | `start_date`, `end_date` | `{count, rows}` — steps, distance, step goal (native range API) |
 | `health_intensity_minutes` | `start_date`, `end_date` | `{count, rows}` — moderate/vigorous minutes, weekly goal (native range API) |
-| `health_body_battery` | `start_date`, `end_date` | `{count, rows}` |
+| `health_body_battery` | `start_date`, `end_date` | `{count, rows}` — `date`, `start_level`, `end_level`, `max_level` (intraday peak); single ranged API call |
 | `health_stress` | `start_date`, `end_date` | `{count, rows}` |
 | `health_spo2` | `start_date`, `end_date` | `{count, rows}` |
 | `health_resting_hr` | `start_date`, `end_date` | `{count, rows}` |
@@ -560,6 +564,7 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `activity_laps` | `activity_id` | `{count, rows}` — per-lap rows (run/bike) or per-pool-length rows (lap_swimming) with sport-aware fields. Auto-routes pool swim to typed_splits backend method. Multisport parents fan out to each child leg's laps with a 0-based ``leg_index`` stamped on every row |
 | `activity_hr_zones` | `activity_id` | `{count, rows}` — one row per HR zone with `zone`, `zone_low_bpm`, `zone_high_bpm`, `seconds_in_zone`, `minutes_in_zone` |
 | `activity_metrics_describe` | `activity_id` | `{count, rows}` — descriptors for the metric stream: `key`, `unit`, `metricsIndex`. Use to discover what metrics a watch recorded for a specific activity |
+| `activity_detail_metrics` | `activity_id`, `metrics?` | `{count, rows}` — raw per-sample time series, one row per sample keyed by metric key (~2000 samples typical). Pass `metrics` as a comma-separated key list (from `activity_metrics_describe`) to keep the response small, e.g. `"directTimestamp,directHeartRate,directPower"`. Use for intra-activity analyses (aerobic decoupling, drift) |
 | `workout_list` | `limit?` | `{count, rows}` |
 | `workout_get` | `workout_id` | `{count, rows}` |
 | `workout_calendar` | `start_date`, `end_date` | `{count, rows}` |

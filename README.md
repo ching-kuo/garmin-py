@@ -141,6 +141,7 @@ garmin-cli activity laps             ACTIVITY_ID  # per-lap rows (run/bike: HR, 
 garmin-cli activity zones            ACTIVITY_ID  # HR time-in-zone breakdown
 garmin-cli activity weather          ACTIVITY_ID  # temperature, apparent temp, dew point, humidity, wind, condition
 garmin-cli activity metrics-describe ACTIVITY_ID  # metric descriptors: key, unit, metricsIndex
+garmin-cli activity detail-metrics   ACTIVITY_ID [--metric KEY]...  # raw per-sample time series (one row per sample)
 garmin-cli activity download         ACTIVITY_ID [--fmt original|tcx|gpx|kml|csv] [--output PATH] [--force]
 garmin-cli activity upload           FILE         # .fit / .gpx / .tcx
 garmin-cli activity delete           ACTIVITY_ID [--confirm]
@@ -149,6 +150,8 @@ garmin-cli activity set-type         ACTIVITY_ID TYPE_KEY  # e.g. running, cycli
 ```
 
 `--limit` defaults to 20, max 100. `--type` filters by activity type key (e.g., `running`, `cycling`).
+
+`activity detail-metrics` returns the raw recorded sample stream (~2000 rows for a typical activity; columns are the watch's metric keys such as `directTimestamp`, `directHeartRate`, `directPower`). Use repeatable `--metric` flags to select columns — `activity metrics-describe` lists what a given activity recorded. This is the data for intra-activity analyses such as first-half vs second-half aerobic decoupling.
 
 `activity download` writes the activity file to disk (it never prints binary to stdout). `--fmt` defaults to `original` (the FIT file inside a ZIP archive); the default output name is `activity_<id><ext>` in the current directory, and an existing file is not overwritten unless `--force` is given. `activity delete` prompts for confirmation unless `--confirm` is passed. `activity set-type` accepts any `typeKey` from Garmin's live sport-type table (an unknown key is rejected before any write).
 

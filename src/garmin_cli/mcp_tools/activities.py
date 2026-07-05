@@ -34,6 +34,7 @@ from garmin_cli.serializers import (
     serialize_activity_summary,
     serialize_activity_weather,
     serialize_capability_manifest,
+    serialize_detail_metrics,
     serialize_metrics_descriptors,
     serialize_multisport_children,
 )
@@ -149,3 +150,12 @@ def register_activity_tools(mcp: MCPServer, config: CliConfig) -> None:
         """Describe the dynamic metric schema of an activity's detail stream. Returns one row per metric descriptor: key, unit, metricsIndex. Use this to discover what metrics a watch recorded for a specific activity before requesting samples."""
         _validate_positive_id(activity_id, "activity_id")
         return _run_tool(config, lambda: get_activity_details(activity_id), serialize_metrics_descriptors)
+
+    @mcp.tool()
+    def activity_detail_metrics(activity_id: int, metrics: str = "") -> dict[str, Any]:
+        """Get the raw per-sample metric time series for an activity (Garmin's metricDescriptors/activityDetailMetrics stream). Returns one row per recorded sample keyed by metric key (e.g. directTimestamp, directHeartRate, directPower, directSpeed). A typical activity has ~2000 samples, so pass `metrics` as a comma-separated key list to keep the response small (e.g. "directTimestamp,directHeartRate,directPower"); use activity_metrics_describe to discover available keys. Useful for first-half vs second-half analyses such as aerobic decoupling."""
+        _validate_positive_id(activity_id, "activity_id")
+        wanted = tuple(m.strip() for m in metrics.split(",") if m.strip()) or None
+        # serialize inside the fetch lambda so an unknown-key INVALID_INPUT is
+        # translated by _authenticated like any other GarminCliError
+        return _run_tool(config, lambda: serialize_detail_metrics(get_activity_details(activity_id), wanted))
