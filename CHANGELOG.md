@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.5.0] - 2026-07-05
 
 ### Added
 - `activity detail-metrics ACTIVITY_ID [--metric KEY]...` (CLI) and `activity_detail_metrics` (MCP): the raw per-sample metric time series from Garmin's `metricDescriptors`/`activityDetailMetrics` detail stream, pivoted to one row per sample keyed by metric key (`directTimestamp`, `directHeartRate`, `directPower`, ...). Optional metric-key filtering keeps output small (~2000 samples per typical activity); unknown keys are rejected with `INVALID_INPUT` listing what the activity actually recorded. Enables intra-activity analyses (e.g. aerobic decoupling) that summary and lap data cannot support.
