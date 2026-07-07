@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.5.1] - 2026-07-07
+
+### Added
+- Sleep rows (`health sleep` CLI and `health_sleep` MCP) now include `bedtime` and `wake_time`: the actual sleep start/end as local wall-clock ISO timestamps, sourced from `sleepStartTimestampLocal`/`sleepEndTimestampLocal`. Closes #2.
+
 ## [2.5.0] - 2026-07-05
 
 ### Added
