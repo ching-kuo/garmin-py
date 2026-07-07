@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.6.0] - 2026-07-07
 
 ### Added
 - `performance personal-records` (CLI) and `performance_personal_records` (MCP): all-time PRs from Garmin's personalrecord service with a human-readable `label` per typeId (`fastest_1km_s` ... `fastest_marathon_s`, `longest_run_m`, `longest_ride_m`, `total_ascent_m`, `max_avg_power_20min_w`, `most_steps_day/week/month`, `longest_goal_streak_days`); unmapped typeIds (11, swim records 16-22) surface with `label: null` and the raw value.
