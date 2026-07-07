@@ -21,11 +21,14 @@ from garmin_cli.serializers._common import (
     _hours,
     _km,
     _listify,
+    _local_iso,
     _minutes,
 )
 
 COLUMNS_SLEEP = (
     "date",
+    "bedtime",
+    "wake_time",
     "duration_hours",
     "deep_min",
     "light_min",
@@ -65,6 +68,8 @@ _SLEEP_TABLE = FieldTable(
     columns=COLUMNS_SLEEP,
     entries=(
         FieldEntry("date", (("calendarDate",),)),
+        FieldEntry("bedtime", (("sleepStartTimestampLocal",),), _local_iso),
+        FieldEntry("wake_time", (("sleepEndTimestampLocal",),), _local_iso),
         FieldEntry("duration_hours", (("sleepTimeSeconds",),), _hours),
         FieldEntry("deep_min", (("deepSleepSeconds",),), _minutes),
         FieldEntry("light_min", (("lightSleepSeconds",),), _minutes),

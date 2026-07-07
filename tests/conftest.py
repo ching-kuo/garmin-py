@@ -70,6 +70,8 @@ def sample_sleep_raw() -> dict:
     return {
         "dailySleepDTO": {
             "calendarDate": "2026-03-11",
+            "sleepStartTimestampLocal": 1773183600000,
+            "sleepEndTimestampLocal": 1773210600000,
             "sleepTimeSeconds": 27000,
             "deepSleepSeconds": 5400,
             "lightSleepSeconds": 10800,

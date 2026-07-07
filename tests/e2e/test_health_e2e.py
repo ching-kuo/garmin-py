@@ -21,7 +21,7 @@ def test_sleep_today(run_cli):
     assert_envelope_ok(parsed)
     if parsed["data"]:
         row = parsed["data"][0]
-        assert_row_has_keys(row, ["date", "duration_hours", "score"])
+        assert_row_has_keys(row, ["date", "bedtime", "wake_time", "duration_hours", "score"])
         assert isinstance(row["date"], str)
         assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", row["date"])
         assert_numeric_or_none(row["duration_hours"], "duration_hours")

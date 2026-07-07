@@ -6,7 +6,7 @@ serializer and metric-registry layers share one canonical implementation.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from garmin_cli.units import to_hours, to_km, to_kmh, to_minutes
@@ -26,6 +26,21 @@ def _km(value: Any) -> float | None:
 
 def _kmh(value: Any) -> float | None:
     return to_kmh(value)
+
+
+def _local_iso(value: Any) -> str | None:
+    """Format a Garmin ``*TimestampLocal`` epoch-ms value as a naive ISO string.
+
+    Garmin pre-shifts these timestamps by the device's UTC offset, so reading
+    them as UTC yields the local wall-clock time.
+    """
+    if not isinstance(value, (int, float)):
+        return None
+    return (
+        datetime.fromtimestamp(value / 1000, tz=timezone.utc)
+        .replace(tzinfo=None)
+        .isoformat()
+    )
 
 
 def _get_nested(value: dict[str, Any], *keys: str) -> Any:

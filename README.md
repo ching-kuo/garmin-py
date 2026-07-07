@@ -93,7 +93,7 @@ garmin-cli --format csv health sleep --days 7 # CSV
   "date_range": {"from": "2026-03-05", "to": "2026-03-11"},
   "count": 7,
   "data": [
-    {"date": "2026-03-05", "duration_hours": 7.2, "score": 78, ...}
+    {"date": "2026-03-05", "bedtime": "2026-03-04T23:10:00", "wake_time": "2026-03-05T06:25:00", "duration_hours": 7.2, "score": 78, ...}
   ]
 }
 ```

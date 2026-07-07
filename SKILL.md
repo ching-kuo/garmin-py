@@ -77,7 +77,7 @@ Max range: 90 days. Conflicting options produce `INVALID_INPUT`.
 All health commands except `health status` accept the shared date range options. `health status` only accepts `--date` and defaults to today.
 
 ```bash
-# Sleep -- fields: date, duration_hours, deep_min, light_min, rem_min, awake_min, score
+# Sleep -- fields: date, bedtime, wake_time (local ISO), duration_hours, deep_min, light_min, rem_min, awake_min, score
 garmin-cli --json health sleep --days 7
 
 # HRV -- fields: date, weekly_avg, last_night, status

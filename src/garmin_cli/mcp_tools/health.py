@@ -42,7 +42,7 @@ def register_health_tools(mcp: MCPServer, config: CliConfig) -> None:
 
     @mcp.tool()
     def health_sleep(start_date: str, end_date: str) -> dict[str, Any]:
-        """Get sleep data for a date range (YYYY-MM-DD). Returns date, duration_hours, deep/light/rem/awake minutes, and sleep score."""
+        """Get sleep data for a date range (YYYY-MM-DD). Returns date, bedtime/wake_time (local ISO), duration_hours, deep/light/rem/awake minutes, and sleep score."""
         start, end = _parse_date_range(start_date, end_date)
         return _run_tool(config, lambda: get_sleep(start, end), serialize_sleep)
 

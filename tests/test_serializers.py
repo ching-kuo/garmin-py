@@ -86,11 +86,15 @@ class TestSerializeSleep:
         # 5400 seconds / 60 = 90 minutes
         assert row["deep_min"] == pytest.approx(90, rel=0.01)
         assert row["score"] == 82
+        assert row["bedtime"] == "2026-03-10T23:00:00"
+        assert row["wake_time"] == "2026-03-11T06:30:00"
 
     def test_missing_score_returns_none(self) -> None:
         raw = {"dailySleepDTO": {"calendarDate": "2026-03-11", "sleepTimeSeconds": 3600}}
         result = serialize_sleep(raw)
         assert result[0]["score"] is None
+        assert result[0]["bedtime"] is None
+        assert result[0]["wake_time"] is None
 
     def test_missing_keys_return_none_not_crash(self) -> None:
         result = serialize_sleep({})
@@ -102,7 +106,7 @@ class TestSerializeSleep:
         result = serialize_sleep(sample_sleep_multi_raw)
         assert len(result) == 2
         for item in result:
-            for key in ("date", "duration_hours", "deep_min", "light_min", "rem_min", "awake_min", "score"):
+            for key in ("date", "bedtime", "wake_time", "duration_hours", "deep_min", "light_min", "rem_min", "awake_min", "score"):
                 assert key in item
 
 # ---------------------------------------------------------------------------
