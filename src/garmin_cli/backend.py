@@ -347,3 +347,9 @@ def get_race_predictions() -> dict[str, Any]:
     """
     client = _require_backend()
     return client.get_race_predictions()
+
+
+def get_personal_records() -> Any:
+    """Use the typed upstream personal-records helper (displayName-scoped)."""
+    client = _require_backend()
+    return client.get_personal_record()

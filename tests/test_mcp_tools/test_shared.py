@@ -53,6 +53,7 @@ class TestToolRegistration:
         "workout_unschedule",
         "performance_thresholds",
         "performance_race_predictions",
+        "performance_personal_records",
         "performance_endurance_score",
         "performance_hill_score",
         "performance_vo2max",

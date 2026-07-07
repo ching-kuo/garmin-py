@@ -101,7 +101,10 @@ garmin-cli --json health resting-hr --days 7
 # Training readiness -- fields: date, score, level
 garmin-cli --json health readiness --days 7
 
-# Training status (single day only) -- fields: date, training_status, load_type
+# Training status (single day only) -- Garmin's full training-load picture:
+# fields: date, training_status, acute_load, chronic_load, acwr, acwr_status,
+# load_tunnel_min/max, monthly_load_aerobic_low/high, monthly_load_anaerobic,
+# aerobic_low/high_target_min/max, anaerobic_target_min/max, load_balance_status
 garmin-cli --json health status --date 2026-03-11
 
 # Steps -- fields: date, total_steps, total_distance, step_goal
@@ -118,7 +121,7 @@ garmin-cli --json health intensity-minutes --days 7
 ### Activities
 
 ```bash
-# List recent activities -- fields: id, date, name, type, distance_km, duration_min, avg_hr
+# List recent activities -- fields: id, date, name, type, distance_km, duration_min, avg_hr, training_load
 garmin-cli --json activity list --limit 10
 garmin-cli --json activity list --limit 10 --type running
 garmin-cli --json activity list --limit 10 --search "morning run"
@@ -190,8 +193,11 @@ garmin-cli --json activity delete 12345678901 --confirm
 | `total_strokes` | -- | Lap swimming | Total stroke count |
 | `avg_stroke_rate` | strokes/min | Lap swimming | Average stroke rate |
 | `distance_per_stroke` | m | Lap swimming | Average distance covered per stroke |
-| `aerobic_training_effect` | 0.0-5.0 | Run, Bike | Aerobic load impact score |
-| `anaerobic_training_effect` | 0.0-5.0 | Run, Bike | Anaerobic load impact score |
+| `aerobic_training_effect` | 0.0-5.0 | All sports | Aerobic load impact score |
+| `anaerobic_training_effect` | 0.0-5.0 | All sports | Anaerobic load impact score |
+| `training_effect_label` | -- | All sports | Garmin's primary-benefit label (e.g. `TEMPO`, `VO2MAX`, `RECOVERY`) |
+| `training_load` | -- | All sports | Per-activity training load (EPOC-based); feeds acute/chronic load |
+| `workout_id` | -- | All sports | Structured workout this activity executed (null if unplanned) — links plan to execution |
 | `vo2max` | mL/kg/min | Run, Bike | Sport-specific vO2max estimate |
 | `recovery_time_h` | h | Run, Bike | Recommended recovery hours after the activity |
 
@@ -215,7 +221,9 @@ garmin-cli --json workout list --limit 10
 # Get workout detail -- fields: id, name, sport, duration_min, description, steps_summary, steps[]
 garmin-cli --json workout get 12345678901
 
-# Workout calendar (planned workouts) -- fields: date, id, name, type, duration_min, description
+# Workout calendar (planned workouts + races/events) -- fields: date, id, name,
+# type, duration_min, description, item_type, is_race, primary_event, event_time, location
+# item_type distinguishes workouts from events; is_race/primary_event flag target races
 garmin-cli --json workout calendar --ahead 7
 garmin-cli --json workout calendar --from 2026-03-01 --to 2026-03-14
 garmin-cli --json workout calendar --days 7
@@ -428,6 +436,13 @@ garmin-cli --json performance endurance-score --days 7
 # Hill score -- fields: date, overall_score, endurance_score, strength_score
 # Note: one API call per day — large ranges may be slow
 garmin-cli --json performance hill-score --days 7
+
+# Personal records (all-time PRs) -- fields: type_id, label, value, activity_type,
+# date, activity_id, activity_name. Labels: fastest_1km_s...fastest_marathon_s,
+# longest_run_m, longest_ride_m, total_ascent_m, max_avg_power_20min_w,
+# most_steps_day/week/month, longest_goal_streak_days; unmapped typeIds (11, swim
+# records 16-22) have label null. Units per suffix: _s seconds, _m meters, _w watts
+garmin-cli --json performance personal-records
 ```
 
 ### Devices
@@ -557,7 +572,7 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `health_spo2` | `start_date`, `end_date` | `{count, rows}` |
 | `health_resting_hr` | `start_date`, `end_date` | `{count, rows}` |
 | `health_readiness` | `start_date`, `end_date` | `{count, rows}` |
-| `health_training_status` | `date` | `{count, rows}` |
+| `health_training_status` | `date` | `{count, rows}` — training status plus acute/chronic load, ACWR, load tunnel, monthly load-focus buckets and targets, load-balance status |
 | `activity_list` | `limit?`, `start?`, `activity_type?`, `search?`, `start_date?`, `end_date?` | `{count, rows}` — `start_date`/`end_date` (YYYY-MM-DD) must be provided together |
 | `activity_get` | `activity_id`, `detail?` | `{count, rows, children?, unavailable?}` — `detail=true` projects sport-aware metrics (running dynamics, cycling power, swim aggregates, training response) under a stable union schema and adds an `unavailable[]` capability manifest when non-empty |
 | `activity_weather` | `activity_id` | `{count, rows}` |
@@ -567,7 +582,7 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `activity_detail_metrics` | `activity_id`, `metrics?` | `{count, rows}` — raw per-sample time series, one row per sample keyed by metric key (~2000 samples typical). Pass `metrics` as a comma-separated key list (from `activity_metrics_describe`) to keep the response small, e.g. `"directTimestamp,directHeartRate,directPower"`. Use for intra-activity analyses (aerobic decoupling, drift) |
 | `workout_list` | `limit?` | `{count, rows}` |
 | `workout_get` | `workout_id` | `{count, rows}` |
-| `workout_calendar` | `start_date`, `end_date` | `{count, rows}` |
+| `workout_calendar` | `start_date`, `end_date` | `{count, rows}` — scheduled workouts plus races/events (`item_type`, `is_race`, `primary_event`, `event_time`, `location`) |
 | `workout_create` | `workout`, `dry_run?` | `{count, rows}` — `ok: true, action: "created", workout_id` on success; `ok: true, dry_run: true, wire_payload, validation_report` on dry-run; `ok: false, error_code: "INVALID_INPUT", errors` on validation failure. Dry-run skips all Garmin contact. |
 | `workout_schedule` | `workout_id`, `date` | `{count, rows}` — `ok: true, action: "scheduled", workout_id, workout_schedule_id, date`. **Destructive.** |
 | `workout_update` | `workout_id`, `workout`, `dry_run?` | `{count, rows}` — `ok: true, action: "updated", workout_id` on success; dry-run returns the merged wire payload (one Garmin read, no write). Merge semantics preserve `workoutId`/`ownerId`/`createdDate`/`atpPlanId`. **Destructive.** |
@@ -584,6 +599,7 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `performance_thresholds` | *(none)* | `{count, rows}` |
 | `performance_vo2max` | `date?` | `{count, rows}` |
 | `performance_zones` | *(none)* | `{count, rows}` |
+| `performance_personal_records` | *(none)* | `{count, rows}` — all-time PRs with human-readable `label` (null for unmapped typeIds) |
 | `device_list` | *(none)* | `{count, rows}` — registered devices with type and last sync |
 | `login_status` | *(none)* | `{authenticated, garmin_home}` |
 | `report_snapshot` | `kind` (`morning`\|`evening`\|`weekly`), `date?` | `{kind, date_range, sections, unavailable?}` — one composite call that fans out the day's (or week's) reads server-side. `sections` maps section name → rows (same shapes as the per-domain tools). Sections with no data are empty and listed in `unavailable` with a `reason` (`not_found`\|`no_data`). `date` (YYYY-MM-DD) defaults to today; `weekly` covers the anchor day and the six prior days. |

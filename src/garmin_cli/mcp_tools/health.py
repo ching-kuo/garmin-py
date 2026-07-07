@@ -108,6 +108,6 @@ def register_health_tools(mcp: MCPServer, config: CliConfig) -> None:
 
     @mcp.tool()
     def health_training_status(date: str) -> dict[str, Any]:
-        """Get training status for a single date (YYYY-MM-DD). Returns date, training_status, load_type."""
+        """Get training status and load for a single date (YYYY-MM-DD). Returns date, training_status, acute_load (7-day), chronic_load, acwr (acute:chronic workload ratio) + acwr_status, load_tunnel_min/max (productive chronic-load band), monthly load-focus buckets (aerobic_low/aerobic_high/anaerobic) with their target min/max ranges, and load_balance_status."""
         parsed = _parse_date(date, "date")
         return _run_tool(config, lambda: get_training_status(parsed), serialize_training_status)

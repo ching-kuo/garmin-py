@@ -18,6 +18,7 @@ from typing import Any
 
 from garmin_cli.metrics import FieldEntry, FieldTable, validate_table_coverage
 from garmin_cli.serializers._common import (
+    _get_nested,
     _hours,
     _km,
     _listify,
@@ -43,7 +44,26 @@ COLUMNS_STRESS = ("date", "avg_stress", "max_stress")
 COLUMNS_SPO2 = ("date", "avg_spo2", "lowest_spo2")
 COLUMNS_RESTING_HR = ("date", "resting_hr")
 COLUMNS_READINESS = ("date", "score", "level")
-COLUMNS_STATUS = ("date", "training_status", "load_type")
+COLUMNS_STATUS = (
+    "date",
+    "training_status",
+    "acute_load",
+    "chronic_load",
+    "acwr",
+    "acwr_status",
+    "load_tunnel_min",
+    "load_tunnel_max",
+    "monthly_load_aerobic_low",
+    "monthly_load_aerobic_high",
+    "monthly_load_anaerobic",
+    "aerobic_low_target_min",
+    "aerobic_low_target_max",
+    "aerobic_high_target_min",
+    "aerobic_high_target_max",
+    "anaerobic_target_min",
+    "anaerobic_target_max",
+    "load_balance_status",
+)
 COLUMNS_DAILY_SUMMARY = (
     "date",
     "total_steps",
@@ -134,13 +154,33 @@ _READINESS_TABLE = FieldTable(
     ),
 )
 
+# Projects the per-device dict merged by serialize_training_status: load-
+# balance entry keys, status entry keys, and the flattened acuteTrainingLoadDTO
+# all live side by side in one flat dict. Monthly load buckets and their
+# Target ranges are Garmin's 4-week load-focus numbers; the load tunnel is the
+# chronic-load band Garmin considers productive.
 _STATUS_TABLE = FieldTable(
     name="training_status",
     columns=COLUMNS_STATUS,
     entries=(
         FieldEntry("date", (("calendarDate",),)),
-        FieldEntry("training_status", (("trainingStatusType",),)),
-        FieldEntry("load_type", (("trainingLoadType",),)),
+        FieldEntry("training_status", (("trainingStatusFeedbackPhrase",),)),
+        FieldEntry("acute_load", (("dailyTrainingLoadAcute",),)),
+        FieldEntry("chronic_load", (("dailyTrainingLoadChronic",),)),
+        FieldEntry("acwr", (("dailyAcuteChronicWorkloadRatio",),)),
+        FieldEntry("acwr_status", (("acwrStatus",),)),
+        FieldEntry("load_tunnel_min", (("minTrainingLoadChronic",),)),
+        FieldEntry("load_tunnel_max", (("maxTrainingLoadChronic",),)),
+        FieldEntry("monthly_load_aerobic_low", (("monthlyLoadAerobicLow",),)),
+        FieldEntry("monthly_load_aerobic_high", (("monthlyLoadAerobicHigh",),)),
+        FieldEntry("monthly_load_anaerobic", (("monthlyLoadAnaerobic",),)),
+        FieldEntry("aerobic_low_target_min", (("monthlyLoadAerobicLowTargetMin",),)),
+        FieldEntry("aerobic_low_target_max", (("monthlyLoadAerobicLowTargetMax",),)),
+        FieldEntry("aerobic_high_target_min", (("monthlyLoadAerobicHighTargetMin",),)),
+        FieldEntry("aerobic_high_target_max", (("monthlyLoadAerobicHighTargetMax",),)),
+        FieldEntry("anaerobic_target_min", (("monthlyLoadAnaerobicTargetMin",),)),
+        FieldEntry("anaerobic_target_max", (("monthlyLoadAnaerobicTargetMax",),)),
+        FieldEntry("load_balance_status", (("trainingBalanceFeedbackPhrase",),)),
     ),
 )
 
@@ -279,8 +319,60 @@ def serialize_training_readiness(raw: Any) -> list[dict[str, Any]]:
     return _READINESS_TABLE.project_all(_listify(raw))
 
 
+def _primary_device_item(device_map: Any) -> tuple[str | None, dict[str, Any]]:
+    """Pick the primary-device (key, entry) pair from a deviceId-keyed dict.
+
+    The aggregated training-status payload nests its status and load-balance
+    data one level down in dicts keyed by deviceId string. Prefer the entry
+    flagged ``primaryTrainingDevice``; fall back to the first entry. The map
+    key is returned alongside because live entries may omit an inner
+    ``deviceId`` field.
+    """
+    if not isinstance(device_map, dict):
+        return None, {}
+    items = [
+        (key, value) for key, value in device_map.items() if isinstance(value, dict)
+    ]
+    for key, entry in items:
+        if entry.get("primaryTrainingDevice"):
+            return key, entry
+    return items[0] if items else (None, {})
+
+
 def serialize_training_status(raw: Any) -> list[dict[str, Any]]:
-    return _STATUS_TABLE.project_all(_listify(raw))
+    """Serialize the aggregated training-status payload into one flat row.
+
+    Merges the primary device's status entry (with its nested
+    ``acuteTrainingLoadDTO`` flattened in) and load-balance entry, then
+    projects the merged dict through the declarative table.
+    """
+    rows: list[dict[str, Any]] = []
+    for item in _listify(raw):
+        status_key, status = _primary_device_item(
+            _get_nested(item, "mostRecentTrainingStatus", "latestTrainingStatusData")
+        )
+        balance_map = _get_nested(
+            item, "mostRecentTrainingLoadBalance", "metricsTrainingLoadBalanceDTOMap"
+        )
+        # Keep both halves on the same device: match the balance entry by the
+        # status entry's deviceId (inner field, else its map key). Never merge
+        # a different device's balance data; missing match -> empty balance.
+        device_id = status.get("deviceId") or status_key
+        keyed = balance_map.get(str(device_id)) if isinstance(balance_map, dict) else None
+        if isinstance(keyed, dict):
+            balance = keyed
+        elif device_id is None:
+            _, balance = _primary_device_item(balance_map)
+        else:
+            balance = {}
+        acute = status.get("acuteTrainingLoadDTO")
+        merged = {
+            **balance,
+            **status,
+            **(acute if isinstance(acute, dict) else {}),
+        }
+        rows.append(_STATUS_TABLE.project(merged))
+    return rows
 
 
 def serialize_daily_summary(raw: Any) -> list[dict[str, Any]]:

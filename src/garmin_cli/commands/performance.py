@@ -17,12 +17,14 @@ from garmin_cli.endpoints.performance import (
     get_all_thresholds,
     get_latest_vo2max,
     get_lactate_threshold,
+    get_personal_records,
     get_vo2max,
 )
 from garmin_cli.output import render_output
 from garmin_cli.serializers import (
     COLUMNS_ENDURANCE_SCORE,
     COLUMNS_HILL_SCORE,
+    COLUMNS_PERSONAL_RECORDS,
     COLUMNS_RACE_PREDICTIONS,
     COLUMNS_THRESHOLDS,
     COLUMNS_VO2MAX,
@@ -30,6 +32,7 @@ from garmin_cli.serializers import (
     select_latest_dated_rows,
     serialize_endurance_score,
     serialize_hill_score,
+    serialize_personal_records,
     serialize_race_predictions,
     serialize_thresholds,
     serialize_vo2max,
@@ -87,6 +90,16 @@ def race_predictions_cmd(ctx: click.Context) -> None:
     raw = get_race_predictions()
     data = serialize_race_predictions(raw)
     render_output(ctx.obj["config"].output_format, "performance race-predictions", data, COLUMNS_RACE_PREDICTIONS)
+
+
+@performance.command("personal-records")
+@click.pass_context
+def personal_records_cmd(ctx: click.Context) -> None:
+    """Get all-time personal records."""
+    ensure_authenticated(ctx.obj["config"])
+    raw = get_personal_records()
+    data = serialize_personal_records(raw)
+    render_output(ctx.obj["config"].output_format, "performance personal-records", data, COLUMNS_PERSONAL_RECORDS)
 
 
 @performance.command("endurance-score")

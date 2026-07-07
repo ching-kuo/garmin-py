@@ -95,9 +95,18 @@ class TestProfileComposition:
             "avg_power_w",
             "norm_power_w",
             "avg_ground_contact_time",
-            "aerobic_training_effect",
+            "vo2max",
+            "recovery_time_h",
         ):
             assert key not in LAP_SWIM_PROFILE.standard_metrics
+
+    def test_training_effect_renders_for_every_profile(self) -> None:
+        # Garmin emits training effect for swims too (verified live
+        # 2026-07-07), so the keys are universal in the registry and must
+        # appear in every profile's table columns.
+        for profile in PROFILES + (DEFAULT_PROFILE,):
+            assert "aerobic_training_effect" in profile.standard_metrics
+            assert "anaerobic_training_effect" in profile.standard_metrics
 
     def test_detail_metrics_concatenates_summary_then_standard(self) -> None:
         for profile in PROFILES + (DEFAULT_PROFILE,):

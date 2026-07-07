@@ -15,6 +15,7 @@ from garmin_cli.endpoints.performance import (
     get_all_thresholds,
     get_lactate_threshold,
     get_latest_vo2max,
+    get_personal_records,
     get_vo2max,
 )
 from garmin_cli.mcp_tools._shared import (
@@ -28,6 +29,7 @@ from garmin_cli.serializers import (
     select_latest_dated_rows,
     serialize_endurance_score,
     serialize_hill_score,
+    serialize_personal_records,
     serialize_race_predictions,
     serialize_thresholds,
     serialize_vo2max,
@@ -43,6 +45,11 @@ def register_performance_tools(mcp: MCPServer, config: CliConfig) -> None:
     def performance_race_predictions() -> dict[str, Any]:
         """Get latest race predictions. Returns race_type, predicted_time_seconds, distance_meters."""
         return _run_tool(config, get_race_predictions, serialize_race_predictions)
+
+    @mcp.tool()
+    def performance_personal_records() -> dict[str, Any]:
+        """Get all-time personal records. Returns type_id, label, value, activity_type, date, activity_id, activity_name. Label suffix gives units (_s seconds, _m meters, _w watts); records with an unmapped Garmin type_id have label null with the raw value."""
+        return _run_tool(config, get_personal_records, serialize_personal_records)
 
     @mcp.tool()
     def performance_endurance_score(start_date: str, end_date: str) -> dict[str, Any]:

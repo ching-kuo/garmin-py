@@ -22,6 +22,15 @@ from garmin_cli.serializers._common import _coalesce, _listify
 from garmin_cli.units import format_pace_seconds, pace_from_speed, parse_flat_lactate
 
 COLUMNS_RACE_PREDICTIONS = ("race_type", "predicted_time_seconds", "distance_meters")
+COLUMNS_PERSONAL_RECORDS = (
+    "type_id",
+    "label",
+    "value",
+    "activity_type",
+    "date",
+    "activity_id",
+    "activity_name",
+)
 COLUMNS_ENDURANCE_SCORE = ("date", "overall_score", "endurance_classification")
 COLUMNS_HILL_SCORE = ("date", "overall_score", "endurance_score", "strength_score")
 COLUMNS_THRESHOLDS = ("sport", "lt_hr_bpm", "lt_pace", "ftp_watts", "weight_kg")
@@ -79,6 +88,62 @@ _HILL_SCORE_TABLE = FieldTable(
     ),
 )
 
+# Garmin identifies each personal record only by an undocumented integer
+# typeId. Labels for 1-8 were verified against live values (times/distances
+# match known PRs); 9-10 and 12-15 follow the community-documented mapping
+# used by the garmin-connect JS client and fit the observed values (e.g.
+# typeId 10 on a "Zwift FTP test" ride). Unmapped ids (11 and swim records
+# 16-22) surface with label None and the raw value; units per label suffix
+# (_s seconds, _m meters, _w watts).
+_PR_TYPE_LABELS: dict[int, str] = {
+    1: "fastest_1km_s",
+    2: "fastest_1mi_s",
+    3: "fastest_5km_s",
+    4: "fastest_10km_s",
+    5: "fastest_half_marathon_s",
+    6: "fastest_marathon_s",
+    7: "longest_run_m",
+    8: "longest_ride_m",
+    9: "total_ascent_m",
+    10: "max_avg_power_20min_w",
+    12: "most_steps_day",
+    13: "most_steps_week",
+    14: "most_steps_month",
+    15: "longest_goal_streak_days",
+}
+
+
+def _pr_label(type_id: Any) -> str | None:
+    return _PR_TYPE_LABELS.get(type_id) if isinstance(type_id, int) else None
+
+
+def _date_part(value: Any) -> Any:
+    return value.split("T", 1)[0] if isinstance(value, str) else value
+
+
+_PERSONAL_RECORDS_TABLE = FieldTable(
+    name="personal_records",
+    columns=COLUMNS_PERSONAL_RECORDS,
+    entries=(
+        FieldEntry("type_id", (("typeId",),)),
+        FieldEntry("label", (("typeId",),), _pr_label),
+        FieldEntry("value", (("value",),)),
+        FieldEntry("activity_type", (("activityType",),)),
+        FieldEntry(
+            "date",
+            (
+                ("activityStartDateTimeLocalFormatted",),
+                ("prStartTimeLocalFormatted",),
+                ("prStartTimeGmtFormatted",),
+            ),
+            _date_part,
+        ),
+        FieldEntry("activity_id", (("activityId",),)),
+        FieldEntry("activity_name", (("activityName",),)),
+    ),
+)
+
+
 _THRESHOLDS_TABLE = FieldTable(
     name="thresholds",
     columns=COLUMNS_THRESHOLDS,
@@ -123,6 +188,15 @@ def serialize_race_predictions(raw: Any) -> list[dict[str, Any]]:
     else:
         items = _listify(raw)
     return _RACE_PREDICTIONS_TABLE.project_all(items)
+
+
+def serialize_personal_records(raw: Any) -> list[dict[str, Any]]:
+    # The live endpoint returns a flat list; anything else (None, a wrapper
+    # dict, an error body) must yield zero rows, not one all-null row.
+    items = raw if isinstance(raw, list) else []
+    return _PERSONAL_RECORDS_TABLE.project_all(
+        [item for item in items if isinstance(item, dict)]
+    )
 
 
 def serialize_endurance_score(raw: Any) -> list[dict[str, Any]]:
@@ -214,6 +288,7 @@ validate_table_coverage(
     "performance",
     {
         "COLUMNS_RACE_PREDICTIONS": COLUMNS_RACE_PREDICTIONS,
+        "COLUMNS_PERSONAL_RECORDS": COLUMNS_PERSONAL_RECORDS,
         "COLUMNS_ENDURANCE_SCORE": COLUMNS_ENDURANCE_SCORE,
         "COLUMNS_HILL_SCORE": COLUMNS_HILL_SCORE,
         "COLUMNS_THRESHOLDS": COLUMNS_THRESHOLDS,
@@ -222,6 +297,7 @@ validate_table_coverage(
     },
     (
         _RACE_PREDICTIONS_TABLE,
+        _PERSONAL_RECORDS_TABLE,
         _ENDURANCE_SCORE_TABLE,
         _HILL_SCORE_TABLE,
         _THRESHOLDS_TABLE,

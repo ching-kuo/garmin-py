@@ -12,10 +12,43 @@ from garmin_cli.endpoints.performance import (
     get_ftp,
     get_latest_vo2max,
     get_lactate_threshold,
+    get_personal_records,
     get_vo2max,
 )
 from garmin_cli.exceptions import GarminCliError
 from tests.helpers import make_http_error as _http_error
+
+
+# ---------------------------------------------------------------------------
+# get_personal_records
+# ---------------------------------------------------------------------------
+
+class TestGetPersonalRecords:
+
+    def test_uses_typed_upstream_helper(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.get_personal_records.return_value = [{"typeId": 1, "value": 219.76}]
+        mocker.patch("garmin_cli.endpoints.performance.garth", mock_garth)
+
+        result = get_personal_records()
+        assert result == [{"typeId": 1, "value": 219.76}]
+        mock_garth.get_personal_records.assert_called_once_with()
+
+    def test_none_response_coalesces_to_empty_list(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.get_personal_records.return_value = None
+        mocker.patch("garmin_cli.endpoints.performance.garth", mock_garth)
+
+        assert get_personal_records() == []
+
+    def test_http_404_raises_not_found_code(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.get_personal_records.side_effect = _http_error(404)
+        mocker.patch("garmin_cli.endpoints.performance.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            get_personal_records()
+        assert exc_info.value.error_code == "NOT_FOUND"
 
 
 # ---------------------------------------------------------------------------

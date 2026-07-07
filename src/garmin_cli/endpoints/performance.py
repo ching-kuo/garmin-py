@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from garmin_cli import backend as garth
-from garmin_cli.endpoints._base import _make_request
+from garmin_cli.endpoints._base import _make_request, _make_typed_request
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.units import (
     format_pace_seconds,
@@ -20,6 +20,13 @@ def _request(url: str, *, params: dict[str, Any] | None = None) -> Any:
 
 def get_lactate_threshold() -> Any:
     result = _request("/biometric-service/biometric/latestLactateThreshold")
+    return result if result is not None else []
+
+
+def get_personal_records() -> Any:
+    # Upstream scopes /personalrecord-service/personalrecord/prs under the
+    # account displayName; the typed helper resolves that for us.
+    result = _make_typed_request(garth.get_personal_records)
     return result if result is not None else []
 
 

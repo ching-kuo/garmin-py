@@ -42,6 +42,7 @@ COLUMNS_ACTIVITY_SUMMARY = (
     "distance_km",
     "duration_min",
     "avg_hr",
+    "training_load",
 )
 COLUMNS_ACTIVITY_DETAIL = UNION_COLUMNS
 COLUMNS_MULTISPORT_CHILDREN = (
@@ -87,6 +88,10 @@ def _normalize_activity_base(activity: dict[str, Any], summary: dict[str, Any]) 
         "distance_km": _km(_coalesce(activity.get("distance"), summary.get("distance"))),
         "duration_min": _minutes(_coalesce(activity.get("duration"), summary.get("duration"))),
         "avg_hr": _coalesce(activity.get("averageHR"), summary.get("averageHR")),
+        # Per-activity training load: one list call gives the load "dose" of
+        # every activity in a range. Resolved via the registry entry so the
+        # wire-key precedence lives in exactly one place.
+        "training_load": _resolve_metric(REGISTRY["training_load"], activity, summary),
     }
 
 

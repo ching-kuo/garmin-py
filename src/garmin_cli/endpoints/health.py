@@ -118,6 +118,10 @@ def get_training_readiness_range(start: date, end: date) -> list[Any]:
 
 
 def get_training_status(day: date) -> Any:
+    # The old /training-info-service/.../training-status/{date} path 404s
+    # (verified live 2026-07-07); the aggregated metrics-service path is what
+    # garminconnect 0.3.2 itself uses and carries status + acute/chronic load
+    # + load balance + ACWR in one payload.
     return _request(
-        f"/training-info-service/training-info/training-status/{day.isoformat()}"
+        f"/metrics-service/metrics/trainingstatus/aggregated/{day.isoformat()}"
     )

@@ -11,6 +11,7 @@ from garmin_cli.serializers import (
     COLUMNS_CALENDAR_WORKOUT,
     COLUMNS_HRV,
     COLUMNS_MULTISPORT_CHILDREN,
+    COLUMNS_PERSONAL_RECORDS,
     COLUMNS_READINESS,
     COLUMNS_RESTING_HR,
     COLUMNS_SLEEP,
@@ -26,6 +27,7 @@ from garmin_cli.serializers import (
     serialize_calendar_workout,
     serialize_hrv,
     serialize_multisport_children,
+    serialize_personal_records,
     serialize_resting_hr,
     serialize_sleep,
     serialize_spo2,
@@ -220,6 +222,14 @@ class TestSerializeActivitySummary:
         assert isinstance(result, list)
         assert result[0].get("id") is None
 
+    def test_training_load_from_search_list_item(self) -> None:
+        # Search-list items carry activityTrainingLoad top-level.
+        row = serialize_activity_summary(
+            {"activityId": 1, "activityTrainingLoad": 174.67}
+        )[0]
+        assert row["training_load"] == pytest.approx(174.67)
+        assert "training_load" in COLUMNS_ACTIVITY_SUMMARY
+
     @pytest.mark.parametrize(
         ("raw", "expected"),
         (
@@ -360,6 +370,31 @@ class TestSerializeCalendarWorkout:
     )
     def test_no_calendar_items_returns_empty_list(self, raw: dict) -> None:
         assert serialize_calendar_workout(raw) == []
+
+    def test_race_event_fields(self) -> None:
+        # Calendar items include races/events, not just scheduled workouts.
+        rows = serialize_calendar_workout(
+            {
+                "calendarItems": [
+                    {
+                        "date": "2026-09-20",
+                        "itemType": "event",
+                        "title": "City Half Marathon",
+                        "isRace": True,
+                        "primaryEvent": True,
+                        "eventTimeLocal": "07:30",
+                        "location": "Taipei",
+                    }
+                ]
+            }
+        )
+        row = rows[0]
+        assert row["item_type"] == "event"
+        assert row["is_race"] is True
+        assert row["primary_event"] is True
+        assert row["event_time"] == "07:30"
+        assert row["location"] == "Taipei"
+        assert row["name"] == "City Half Marathon"
 
 # ---------------------------------------------------------------------------
 # serialize_thresholds
@@ -504,53 +539,62 @@ class TestPerformanceSerializers:
 
 
 @pytest.mark.parametrize(
-    ("serializer", "payload_fixture", "expected", "columns", "required_columns"),
+    ("serializer", "payload_fixture", "expected", "columns"),
     [
         (
             serialize_body_battery,
             "sample_body_battery_raw",
             {"date": "2026-03-11", "start_level": 85, "end_level": 60, "max_level": 85},
             COLUMNS_BODY_BATTERY,
-            ("date", "start_level", "end_level", "max_level"),
         ),
         (
             serialize_stress,
             "sample_stress_raw",
             {"date": "2026-03-11", "avg_stress": 35, "max_stress": 72},
             COLUMNS_STRESS,
-            ("date", "avg_stress", "max_stress"),
         ),
         (
             serialize_spo2,
             "sample_spo2_raw",
             {"date": "2026-03-11", "avg_spo2": 97, "lowest_spo2": 93},
             COLUMNS_SPO2,
-            ("date", "avg_spo2", "lowest_spo2"),
         ),
         (
             serialize_resting_hr,
             "sample_resting_hr_raw",
             {"date": "2026-03-11", "resting_hr": 52},
             COLUMNS_RESTING_HR,
-            ("date", "resting_hr"),
         ),
         (
             serialize_training_readiness,
             "sample_training_readiness_raw",
             {"date": "2026-03-11", "score": 68, "level": "MODERATE"},
             COLUMNS_READINESS,
-            ("date", "score", "level"),
         ),
         (
             serialize_training_status,
             "sample_training_status_raw",
             {
                 "date": "2026-03-11",
-                "training_status": "PRODUCTIVE",
-                "load_type": "OPTIMAL",
+                "training_status": "PRODUCTIVE_2",
+                "acute_load": 964,
+                "chronic_load": 772,
+                "acwr": 1.2,
+                "acwr_status": "OPTIMAL",
+                "load_tunnel_min": 617.6,
+                "load_tunnel_max": 1158.0,
+                "monthly_load_aerobic_low": 968.64,
+                "monthly_load_aerobic_high": 1659.36,
+                "monthly_load_anaerobic": 151.26,
+                "aerobic_low_target_min": 661,
+                "aerobic_low_target_max": 1499,
+                "aerobic_high_target_min": 873,
+                "aerobic_high_target_max": 1711,
+                "anaerobic_target_min": 279,
+                "anaerobic_target_max": 837,
+                "load_balance_status": "ANAEROBIC_SHORTAGE",
             },
             COLUMNS_STATUS,
-            ("date", "training_status", "load_type"),
         ),
     ],
 )
@@ -560,11 +604,172 @@ def test_additional_health_serializers(
     payload_fixture: str,
     expected: dict[str, Any],
     columns: tuple[str, ...],
-    required_columns: tuple[str, ...],
 ) -> None:
     payload = request.getfixturevalue(payload_fixture)
     assert serializer(payload) == [expected]
-    assert columns == required_columns
+    # expected enumerates the full row, so this also guards column order drift.
+    assert columns == tuple(expected)
+
+
+class TestSerializeTrainingStatusDeviceSelection:
+
+    def test_prefers_primary_training_device(self) -> None:
+        raw = {
+            "mostRecentTrainingStatus": {
+                "latestTrainingStatusData": {
+                    "111": {"calendarDate": "2026-03-10", "trainingStatusFeedbackPhrase": "OLD"},
+                    "222": {
+                        "calendarDate": "2026-03-11",
+                        "trainingStatusFeedbackPhrase": "PRODUCTIVE_2",
+                        "primaryTrainingDevice": True,
+                    },
+                }
+            }
+        }
+        row = serialize_training_status(raw)[0]
+        assert row["training_status"] == "PRODUCTIVE_2"
+        assert row["date"] == "2026-03-11"
+
+    def test_balance_entry_matched_by_status_device_id(self) -> None:
+        # Balance entries may lack the primaryTrainingDevice flag; the entry
+        # keyed by the status device's deviceId must win over dict order.
+        raw = {
+            "mostRecentTrainingStatus": {
+                "latestTrainingStatusData": {
+                    "222": {
+                        "calendarDate": "2026-03-11",
+                        "deviceId": 222,
+                        "trainingStatusFeedbackPhrase": "PRODUCTIVE_2",
+                        "primaryTrainingDevice": True,
+                    },
+                }
+            },
+            "mostRecentTrainingLoadBalance": {
+                "metricsTrainingLoadBalanceDTOMap": {
+                    "111": {"trainingBalanceFeedbackPhrase": "STALE_DEVICE"},
+                    "222": {"trainingBalanceFeedbackPhrase": "BALANCED"},
+                }
+            },
+        }
+        row = serialize_training_status(raw)[0]
+        assert row["load_balance_status"] == "BALANCED"
+
+    def test_balance_matched_by_map_key_when_inner_device_id_missing(self) -> None:
+        # Live status entries may omit the inner deviceId field; the map key
+        # the entry was selected under must still drive the balance lookup.
+        raw = {
+            "mostRecentTrainingStatus": {
+                "latestTrainingStatusData": {
+                    "222": {
+                        "calendarDate": "2026-03-11",
+                        "trainingStatusFeedbackPhrase": "PRODUCTIVE_2",
+                        "primaryTrainingDevice": True,
+                    },
+                }
+            },
+            "mostRecentTrainingLoadBalance": {
+                "metricsTrainingLoadBalanceDTOMap": {
+                    "111": {"trainingBalanceFeedbackPhrase": "STALE_DEVICE"},
+                    "222": {"trainingBalanceFeedbackPhrase": "BALANCED"},
+                }
+            },
+        }
+        row = serialize_training_status(raw)[0]
+        assert row["load_balance_status"] == "BALANCED"
+
+    def test_unmatched_balance_device_yields_no_balance_data(self) -> None:
+        # A balance map with no entry for the status device must not leak
+        # another device's balance row into the merge.
+        raw = {
+            "mostRecentTrainingStatus": {
+                "latestTrainingStatusData": {
+                    "222": {
+                        "calendarDate": "2026-03-11",
+                        "trainingStatusFeedbackPhrase": "PRODUCTIVE_2",
+                        "primaryTrainingDevice": True,
+                    },
+                }
+            },
+            "mostRecentTrainingLoadBalance": {
+                "metricsTrainingLoadBalanceDTOMap": {
+                    "111": {"trainingBalanceFeedbackPhrase": "OTHER_DEVICE"},
+                }
+            },
+        }
+        row = serialize_training_status(raw)[0]
+        assert row["training_status"] == "PRODUCTIVE_2"
+        assert row["load_balance_status"] is None
+
+    def test_falls_back_to_first_device_without_primary_flag(self) -> None:
+        raw = {
+            "mostRecentTrainingStatus": {
+                "latestTrainingStatusData": {
+                    "111": {"calendarDate": "2026-03-11", "trainingStatusFeedbackPhrase": "RECOVERY_1"},
+                }
+            }
+        }
+        row = serialize_training_status(raw)[0]
+        assert row["training_status"] == "RECOVERY_1"
+
+    def test_empty_payload_yields_all_none_row(self) -> None:
+        row = serialize_training_status({})[0]
+        assert all(value is None for value in row.values())
+        assert tuple(row) == COLUMNS_STATUS
+
+
+class TestSerializePersonalRecords:
+
+    def test_mapped_running_record(self) -> None:
+        rows = serialize_personal_records(
+            [
+                {
+                    "typeId": 3,
+                    "value": 1260.51,
+                    "activityType": "running",
+                    "activityId": 23229354391,
+                    "activityName": "Morning Run",
+                    "activityStartDateTimeLocalFormatted": "2026-05-01T06:30:00.0",
+                }
+            ]
+        )
+        assert rows == [
+            {
+                "type_id": 3,
+                "label": "fastest_5km_s",
+                "value": 1260.51,
+                "activity_type": "running",
+                "date": "2026-05-01",
+                "activity_id": 23229354391,
+                "activity_name": "Morning Run",
+            }
+        ]
+        assert tuple(rows[0]) == COLUMNS_PERSONAL_RECORDS
+
+    def test_unmapped_type_id_keeps_raw_value_with_null_label(self) -> None:
+        # Swim/steps record ids (16-22) are not confidently mapped yet.
+        row = serialize_personal_records([{"typeId": 18, "value": 36.19}])[0]
+        assert row["type_id"] == 18
+        assert row["label"] is None
+        assert row["value"] == 36.19
+
+    def test_aggregate_record_date_falls_back_to_pr_start(self) -> None:
+        # Steps/goal records carry no activity timestamps.
+        row = serialize_personal_records(
+            [{"typeId": 13, "value": 208522.0, "prStartTimeGmtFormatted": "2026-02-02T00:00:00.0"}]
+        )[0]
+        assert row["label"] == "most_steps_week"
+        assert row["date"] == "2026-02-02"
+        assert row["activity_id"] is None
+
+    def test_empty_input(self) -> None:
+        assert serialize_personal_records([]) == []
+        assert serialize_personal_records(None) == []
+
+    def test_non_list_payload_yields_no_rows(self) -> None:
+        # A wrapper/error dict must not project as one all-null record.
+        assert serialize_personal_records({}) == []
+        assert serialize_personal_records({"error": "not found"}) == []
+        assert serialize_personal_records(["not-a-dict", 42]) == []
 
 
 def test_serialize_resting_hr_falls_back_to_legacy_key() -> None:
@@ -580,6 +785,46 @@ def test_serialize_resting_hr_falls_back_to_legacy_key() -> None:
 # ---------------------------------------------------------------------------
 
 class TestSerializeActivityDetail:
+
+    def test_training_response_from_detail_payload_shape(self) -> None:
+        # The single-activity detail payload stores the aerobic value under
+        # summaryDTO.trainingEffect (not aerobicTrainingEffect) and the workout
+        # link under metadataDTO.associatedWorkoutId (verified live 2026-07-07).
+        from garmin_cli.serializers import serialize_activity_detail
+        raw = {
+            "activityId": 23507942205,
+            "activityType": {"typeKey": "lap_swimming"},
+            "metadataDTO": {"associatedWorkoutId": 1621266179},
+            "summaryDTO": {
+                "trainingEffect": 3.1,
+                "anaerobicTrainingEffect": 0.9,
+                "trainingEffectLabel": "AEROBIC_BASE",
+                "activityTrainingLoad": 102.45,
+            },
+        }
+        row = serialize_activity_detail(raw)[0]
+        assert row["aerobic_training_effect"] == 3.1
+        assert row["anaerobic_training_effect"] == 0.9
+        assert row["training_effect_label"] == "AEROBIC_BASE"
+        assert row["training_load"] == pytest.approx(102.45)
+        assert row["workout_id"] == 1621266179
+
+    def test_training_response_from_search_list_shape(self) -> None:
+        # Search-list items spell the aerobic value aerobicTrainingEffect at
+        # top level and carry no metadataDTO.
+        from garmin_cli.serializers import serialize_activity_detail
+        raw = {
+            "activityId": 23496797066,
+            "activityType": {"typeKey": "virtual_ride"},
+            "aerobicTrainingEffect": 2.8,
+            "trainingEffectLabel": "LACTATE_THRESHOLD",
+            "activityTrainingLoad": 174.67,
+        }
+        row = serialize_activity_detail(raw)[0]
+        assert row["aerobic_training_effect"] == 2.8
+        assert row["training_effect_label"] == "LACTATE_THRESHOLD"
+        assert row["training_load"] == pytest.approx(174.67)
+        assert row["workout_id"] is None
 
     def test_cycling_all_power_cadence_elevation(self) -> None:
         from garmin_cli.serializers import serialize_activity_detail

@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `performance personal-records` (CLI) and `performance_personal_records` (MCP): all-time PRs from Garmin's personalrecord service with a human-readable `label` per typeId (`fastest_1km_s` ... `fastest_marathon_s`, `longest_run_m`, `longest_ride_m`, `total_ascent_m`, `max_avg_power_20min_w`, `most_steps_day/week/month`, `longest_goal_streak_days`); unmapped typeIds (11, swim records 16-22) surface with `label: null` and the raw value.
+- `health status` / `health_training_status` now return Garmin's full training-load picture: `acute_load`, `chronic_load`, `acwr` + `acwr_status`, the chronic-load tunnel (`load_tunnel_min`/`max`), monthly load-focus buckets (`monthly_load_aerobic_low`/`aerobic_high`/`anaerobic`) with their target ranges, and `load_balance_status`. On multi-device accounts the primary training device's status and its same-device load-balance entry are merged (never cross-device).
+- Per-activity training response is now exposed for every sport: `aerobic_training_effect`/`anaerobic_training_effect` render for swims and unknown sports too (previously run/bike only), plus new universal fields `training_effect_label` (primary-benefit label such as `TEMPO`), `training_load` (EPOC-based load, also added to `activity list` rows), and `workout_id` (the structured workout an activity executed — links plan to execution).
+- `workout calendar` / `workout_calendar` rows now include `item_type`, `is_race`, `primary_event`, `event_time`, and `location`, so scheduled races/events on the Garmin calendar are distinguishable from planned workouts.
+
+### Fixed
+- The single-activity detail payload stores aerobic training effect under `summaryDTO.trainingEffect` (not `aerobicTrainingEffect`, which is the search-list spelling); the metric registry now reads both, so `activity get --detail` no longer shows a null aerobic TE.
+
+### Changed
+- **Breaking:** `health status` was rebuilt against `/metrics-service/metrics/trainingstatus/aggregated/{date}` because the old `trainingstatus/daily` path now 404s (the command returned empty rows). The `training_status` column's value space changed from the `trainingStatusType` enum to Garmin's `trainingStatusFeedbackPhrase` (e.g. `PRODUCTIVE_2`), and the `load_type` column was removed.
+
 ## [2.5.1] - 2026-07-07
 
 ### Added

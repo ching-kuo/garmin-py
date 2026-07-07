@@ -15,9 +15,28 @@ from garmin_cli.endpoints.health import (
     get_spo2_range,
     get_stress_range,
     get_training_readiness_range,
+    get_training_status,
 )
 from garmin_cli.exceptions import GarminCliError
 from tests.helpers import make_http_error as _http_error
+
+
+# ---------------------------------------------------------------------------
+# get_training_status — endpoint path
+# ---------------------------------------------------------------------------
+
+class TestGetTrainingStatus:
+
+    def test_uses_aggregated_metrics_service_endpoint(self, mocker: Any) -> None:
+        # The old /training-info-service/.../training-status/{date} path 404s
+        # live (2026-07-07); the aggregated path is the working replacement.
+        mock_garth = MagicMock()
+        mock_garth.connectapi.return_value = {}
+        mocker.patch("garmin_cli.endpoints.health.garth", mock_garth)
+
+        get_training_status(date(2026, 7, 7))
+        call_str = str(mock_garth.connectapi.call_args)
+        assert "/metrics-service/metrics/trainingstatus/aggregated/2026-07-07" in call_str
 
 
 # ---------------------------------------------------------------------------

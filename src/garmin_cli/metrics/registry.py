@@ -302,14 +302,19 @@ _ENTRIES: tuple[MetricEntry, ...] = (
         ),
         sports=CYCLING_TYPE_KEYS,
     ),
-    # --- Run/bike training response -----------------------------------------
+    # --- Training response (Garmin emits these for swims too) ----------------
     MetricEntry(
         key="aerobic_training_effect",
         source_paths=(
             ("aerobicTrainingEffect",),
             ("summaryDTO", "aerobicTrainingEffect"),
+            # The single-activity detail payload carries the aerobic value
+            # under summaryDTO.trainingEffect (verified live 2026-07-07); the
+            # aerobicTrainingEffect spelling only appears in the search-list
+            # shape.
+            ("summaryDTO", "trainingEffect"),
         ),
-        sports=RUNNING_TYPE_KEYS | CYCLING_TYPE_KEYS,
+        sports=None,
     ),
     MetricEntry(
         key="anaerobic_training_effect",
@@ -317,7 +322,32 @@ _ENTRIES: tuple[MetricEntry, ...] = (
             ("anaerobicTrainingEffect",),
             ("summaryDTO", "anaerobicTrainingEffect"),
         ),
-        sports=RUNNING_TYPE_KEYS | CYCLING_TYPE_KEYS,
+        sports=None,
+    ),
+    MetricEntry(
+        key="training_effect_label",
+        source_paths=(
+            ("trainingEffectLabel",),
+            ("summaryDTO", "trainingEffectLabel"),
+        ),
+        sports=None,
+    ),
+    MetricEntry(
+        # Garmin's per-activity training load (the "dose" feeding acute/
+        # chronic load and ACWR in the training-status surface).
+        key="training_load",
+        source_paths=(
+            ("activityTrainingLoad",),
+            ("summaryDTO", "activityTrainingLoad"),
+        ),
+        sports=None,
+    ),
+    MetricEntry(
+        # Links an executed activity back to the scheduled structured workout
+        # it was run from (calendar workoutId); null for free activities.
+        key="workout_id",
+        source_paths=(("metadataDTO", "associatedWorkoutId"),),
+        sports=None,
     ),
     MetricEntry(
         key="vo2max",

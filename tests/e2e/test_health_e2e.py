@@ -100,3 +100,35 @@ def test_body_battery_range(run_cli):
             assert row["max_level"] >= max(row["start_level"], row["end_level"]), (
                 "intraday peak must be >= start and end levels"
             )
+
+
+@pytest.mark.e2e
+def test_training_status_load_fields(run_cli):
+    """health status must surface acute/chronic load and ACWR from the
+    aggregated trainingstatus endpoint (the old path 404s live)."""
+    result, parsed = run_cli(["health", "status", "--date", str(date.today())])
+    assert_exit_ok(result)
+    assert_envelope_ok(parsed)
+    if not parsed["data"]:
+        pytest.skip("No training status for today")
+    row = parsed["data"][0]
+    assert_row_has_keys(
+        row,
+        [
+            "date",
+            "training_status",
+            "acute_load",
+            "chronic_load",
+            "acwr",
+            "acwr_status",
+            "load_tunnel_min",
+            "load_tunnel_max",
+            "monthly_load_aerobic_low",
+            "monthly_load_aerobic_high",
+            "monthly_load_anaerobic",
+            "load_balance_status",
+        ],
+    )
+    assert_numeric_or_none(row["acute_load"], "acute_load")
+    assert_numeric_or_none(row["chronic_load"], "chronic_load")
+    assert_numeric_or_none(row["acwr"], "acwr")

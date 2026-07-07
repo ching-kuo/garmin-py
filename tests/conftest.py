@@ -190,10 +190,45 @@ def sample_training_readiness_raw() -> dict:
 
 @pytest.fixture()
 def sample_training_status_raw() -> dict:
+    # Aggregated /metrics-service/metrics/trainingstatus/aggregated shape:
+    # status and load balance are nested one level down in deviceId-keyed maps.
     return {
-        "calendarDate": "2026-03-11",
-        "trainingStatusType": "PRODUCTIVE",
-        "trainingLoadType": "OPTIMAL",
+        "mostRecentTrainingStatus": {
+            "latestTrainingStatusData": {
+                "3617502513": {
+                    "calendarDate": "2026-03-11",
+                    "trainingStatusFeedbackPhrase": "PRODUCTIVE_2",
+                    "primaryTrainingDevice": True,
+                    "acuteTrainingLoadDTO": {
+                        "acwrPercent": 52,
+                        "acwrStatus": "OPTIMAL",
+                        "dailyTrainingLoadAcute": 964,
+                        "dailyTrainingLoadChronic": 772,
+                        "maxTrainingLoadChronic": 1158.0,
+                        "minTrainingLoadChronic": 617.6,
+                        "dailyAcuteChronicWorkloadRatio": 1.2,
+                    },
+                }
+            }
+        },
+        "mostRecentTrainingLoadBalance": {
+            "metricsTrainingLoadBalanceDTOMap": {
+                "3617502513": {
+                    "calendarDate": "2026-03-11",
+                    "monthlyLoadAerobicLow": 968.64,
+                    "monthlyLoadAerobicHigh": 1659.36,
+                    "monthlyLoadAnaerobic": 151.26,
+                    "monthlyLoadAerobicLowTargetMin": 661,
+                    "monthlyLoadAerobicLowTargetMax": 1499,
+                    "monthlyLoadAerobicHighTargetMin": 873,
+                    "monthlyLoadAerobicHighTargetMax": 1711,
+                    "monthlyLoadAnaerobicTargetMin": 279,
+                    "monthlyLoadAnaerobicTargetMax": 837,
+                    "trainingBalanceFeedbackPhrase": "ANAEROBIC_SHORTAGE",
+                    "primaryTrainingDevice": True,
+                }
+            }
+        },
     }
 
 

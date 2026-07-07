@@ -48,3 +48,22 @@ def test_thresholds(run_cli):
     result, parsed = run_cli(["performance", "thresholds"], extra_delay=10.0)
     assert_exit_ok(result)
     assert_envelope_ok(parsed)
+
+
+@pytest.mark.e2e
+def test_personal_records(run_cli):
+    result, parsed = run_cli(["performance", "personal-records"])
+    assert_exit_ok(result)
+    assert_envelope_ok(parsed)
+    # Sparse accounts can legitimately have zero records; only validate
+    # row shape when records exist.
+    for row in parsed["data"]:
+        assert_row_has_keys(
+            row,
+            ["type_id", "label", "value", "activity_type", "date", "activity_id", "activity_name"],
+        )
+        assert isinstance(row["type_id"], int)
+        assert row["value"] is None or isinstance(row["value"], (int, float))
+    if parsed["data"]:
+        labels = {row["label"] for row in parsed["data"] if row["label"]}
+        assert labels, "Expected at least one confidently mapped record label"

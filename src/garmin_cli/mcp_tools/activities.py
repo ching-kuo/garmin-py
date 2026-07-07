@@ -83,7 +83,7 @@ def register_activity_tools(mcp: MCPServer, config: CliConfig) -> None:
         start_date: str | None = None,
         end_date: str | None = None,
     ) -> dict[str, Any]:
-        """List recent activities, optionally filtered by date range (YYYY-MM-DD). Returns id, date, name, type, distance_km, duration_min, avg_hr."""
+        """List recent activities, optionally filtered by date range (YYYY-MM-DD). Returns id, date, name, type, distance_km, duration_min, avg_hr, training_load (per-activity Garmin training load)."""
         _validate_limit(limit)
         _validate_start_offset(start)
         parsed_start = None
@@ -100,7 +100,7 @@ def register_activity_tools(mcp: MCPServer, config: CliConfig) -> None:
 
     @mcp.tool()
     def activity_get(activity_id: int, detail: bool = False) -> dict[str, Any]:
-        """Get a single activity by ID. For multisport activities (triathlon etc.), includes child activities with per-sport details. Returns compact activity fields by default, or extended sport-aware metrics including elapsed_time_min (total wall-clock time incl. stops; duration_min is moving time), running dynamics (GCT, vertical oscillation/ratio, stride length), cycling power suite (avg/max/normalized power, TSS, IF) and cadence, swim aggregates (SWOLF, strokes), and training response (aerobic/anaerobic training effect, vO2max, recovery time) when detail=True. When detail=True, the response carries an additional ``unavailable`` array (when non-empty) annotating which registry-known metrics are not applicable to this sport (``not_applicable_to_sport``) or unexpectedly absent (``absent_in_response``)."""
+        """Get a single activity by ID. For multisport activities (triathlon etc.), includes child activities with per-sport details. Returns compact activity fields by default, or extended sport-aware metrics including elapsed_time_min (total wall-clock time incl. stops; duration_min is moving time), running dynamics (GCT, vertical oscillation/ratio, stride length), cycling power suite (avg/max/normalized power, TSS, IF) and cadence, swim aggregates (SWOLF, strokes), and training response (aerobic/anaerobic training effect, training_effect_label, training_load, vO2max, recovery time) when detail=True. detail=True also returns workout_id: the scheduled structured workout this activity was executed from (null for free activities), linking back to workout_calendar/workout_get for prescribed-vs-actual comparison. When detail=True, the response carries an additional ``unavailable`` array (when non-empty) annotating which registry-known metrics are not applicable to this sport (``not_applicable_to_sport``) or unexpectedly absent (``absent_in_response``)."""
         _validate_positive_id(activity_id, "activity_id")
 
         def produce() -> dict[str, Any]:

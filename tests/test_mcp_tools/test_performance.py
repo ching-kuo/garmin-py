@@ -123,6 +123,32 @@ class TestMetricsEndpoints:
 
 class TestPerformanceTools:
 
+    def test_performance_personal_records(self, mocker: Any) -> None:
+
+        mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.mcp_tools.performance.get_personal_records",
+            return_value=[
+                {
+                    "typeId": 8,
+                    "value": 189389.7,
+                    "activityType": "road_biking",
+                    "activityId": 222,
+                    "activityName": "Long Ride",
+                    "activityStartDateTimeLocalFormatted": "2026-05-10T07:00:00.0",
+                },
+                {"typeId": 17, "value": 1200.0, "activityType": "lap_swimming"},
+            ],
+        )
+        server = create_mcp_server(_config())
+        result = _call(server, "performance_personal_records", {})
+        assert result["count"] == 2
+        rows = {row["type_id"]: row for row in result["rows"]}
+        assert rows[8]["label"] == "longest_ride_m"
+        assert rows[8]["date"] == "2026-05-10"
+        assert rows[17]["label"] is None
+        assert rows[17]["value"] == 1200.0
+
     def test_performance_race_predictions(self, mocker: Any) -> None:
 
         mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")

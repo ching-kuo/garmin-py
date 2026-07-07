@@ -259,8 +259,22 @@ class TestHealthTools:
     def test_health_training_status(self, mocker: Any) -> None:
 
         mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
-        mocker.patch("garmin_cli.mcp_tools.health.get_training_status", return_value={"calendarDate": "2026-01-01", "trainingStatusType": "PRODUCTIVE", "trainingLoadType": "OPTIMAL"})
+        mocker.patch(
+            "garmin_cli.mcp_tools.health.get_training_status",
+            return_value={
+                "mostRecentTrainingStatus": {
+                    "latestTrainingStatusData": {
+                        "123": {
+                            "calendarDate": "2026-01-01",
+                            "trainingStatusFeedbackPhrase": "PRODUCTIVE_2",
+                            "acuteTrainingLoadDTO": {"dailyTrainingLoadAcute": 964},
+                        }
+                    }
+                },
+            },
+        )
         server = create_mcp_server(_config())
         result = _call(server, "health_training_status", {"date": "2026-01-01"})
         assert result["count"] == 1
-        assert result["rows"][0]["training_status"] == "PRODUCTIVE"
+        assert result["rows"][0]["training_status"] == "PRODUCTIVE_2"
+        assert result["rows"][0]["acute_load"] == 964

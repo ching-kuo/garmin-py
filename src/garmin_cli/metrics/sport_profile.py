@@ -53,14 +53,27 @@ _UNIVERSAL_STANDARD_KEYS: tuple[str, ...] = (
     "elevation_loss_m",
     "avg_speed_kmh",
     "max_speed_kmh",
+    "training_effect_label",
+    "training_load",
+    "workout_id",
 )
 
 
-_RUN_BIKE_TRAINING_RESPONSE: tuple[str, ...] = (
+# Garmin emits training effect for swims (and other sports) too, so these two
+# render for every profile; vo2max/recovery stay run/bike-only.
+_TRAINING_EFFECT_KEYS: tuple[str, ...] = (
     "aerobic_training_effect",
     "anaerobic_training_effect",
+)
+
+_RUN_BIKE_TRAINING_RESPONSE: tuple[str, ...] = _TRAINING_EFFECT_KEYS + (
     "vo2max",
     "recovery_time_h",
+)
+
+# Sports without a sport-specific metric block (OWS, multisport, unknown).
+_UNIVERSAL_WITH_TRAINING_EFFECT: tuple[str, ...] = (
+    _UNIVERSAL_STANDARD_KEYS + _TRAINING_EFFECT_KEYS
 )
 
 
@@ -99,7 +112,7 @@ LAP_SWIM_PROFILE = SportProfile(
         "total_strokes",
         "avg_stroke_rate",
         "distance_per_stroke",
-    ),
+    ) + _TRAINING_EFFECT_KEYS,
 )
 
 
@@ -107,21 +120,21 @@ OPEN_WATER_SWIM_PROFILE = SportProfile(
     type_keys=OW_SWIM_TYPE_KEYS,
     summary_metrics=_BASE_SUMMARY_KEYS,
     # OWS has no per-length stroke aggregates and no SWOLF.
-    standard_metrics=_UNIVERSAL_STANDARD_KEYS,
+    standard_metrics=_UNIVERSAL_WITH_TRAINING_EFFECT,
 )
 
 
 MULTI_SPORT_PROFILE = SportProfile(
     type_keys=frozenset({"multi_sport", "multisport"}),
     summary_metrics=_BASE_SUMMARY_KEYS,
-    standard_metrics=_UNIVERSAL_STANDARD_KEYS,
+    standard_metrics=_UNIVERSAL_WITH_TRAINING_EFFECT,
 )
 
 
 DEFAULT_PROFILE = SportProfile(
     type_keys=frozenset(),
     summary_metrics=_BASE_SUMMARY_KEYS,
-    standard_metrics=_UNIVERSAL_STANDARD_KEYS,
+    standard_metrics=_UNIVERSAL_WITH_TRAINING_EFFECT,
 )
 
 
@@ -188,6 +201,9 @@ _SWIM_APPENDED: tuple[str, ...] = (
 # keep their column indices (new columns only ever land at the end).
 _APPENDED_UNIVERSAL: tuple[str, ...] = (
     "elapsed_time_min",
+    "training_effect_label",
+    "training_load",
+    "workout_id",
 )
 
 
@@ -217,6 +233,15 @@ def _validate_registry_coverage() -> None:
             raise RuntimeError(
                 f"UNION_COLUMNS references unknown metric key: {key!r}"
             )
+    # Universal keys are hand-listed twice: in the sport tables
+    # (_UNIVERSAL_STANDARD_KEYS) and at the tail of the CSV union
+    # (_APPENDED_UNIVERSAL). Catch a key added to one but not the other.
+    appended_not_universal = set(_APPENDED_UNIVERSAL) - set(_UNIVERSAL_STANDARD_KEYS)
+    if appended_not_universal:
+        raise RuntimeError(
+            "_APPENDED_UNIVERSAL keys missing from _UNIVERSAL_STANDARD_KEYS: "
+            f"{sorted(appended_not_universal)!r}"
+        )
 
 
 _validate_registry_coverage()

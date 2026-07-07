@@ -10,6 +10,48 @@ from garmin_cli.cli import cli
 
 
 # ---------------------------------------------------------------------------
+# performance personal-records command
+# ---------------------------------------------------------------------------
+
+class TestPerformancePersonalRecordsCommand:
+
+    def test_personal_records_json_envelope(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.commands.performance.get_personal_records",
+            return_value=[
+                {
+                    "typeId": 1,
+                    "value": 219.76,
+                    "activityType": "running",
+                    "activityId": 111,
+                    "activityName": "Track Intervals",
+                    "activityStartDateTimeLocalFormatted": "2026-04-01T06:00:00.0",
+                }
+            ],
+        )
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["--json", "performance", "personal-records"])
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert parsed["ok"] is True
+        assert parsed["count"] == 1
+        assert parsed["data"][0]["label"] == "fastest_1km_s"
+        assert parsed["data"][0]["date"] == "2026-04-01"
+
+    def test_personal_records_empty_exit_0(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.commands.performance.get_personal_records",
+            return_value=[],
+        )
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["--json", "performance", "personal-records"])
+        assert result.exit_code == 0
+        assert json.loads(result.output)["count"] == 0
+
+
+# ---------------------------------------------------------------------------
 # performance thresholds command
 # ---------------------------------------------------------------------------
 

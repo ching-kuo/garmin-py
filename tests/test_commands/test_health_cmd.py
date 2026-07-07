@@ -283,9 +283,21 @@ def test_health_status_single_day_command(mocker: Any) -> None:
     mocker.patch(
         "garmin_cli.commands.health.get_training_status",
         return_value={
-            "calendarDate": "2026-03-11",
-            "trainingStatusType": "PRODUCTIVE",
-            "trainingLoadType": "OPTIMAL",
+            "mostRecentTrainingStatus": {
+                "latestTrainingStatusData": {
+                    "3617502513": {
+                        "calendarDate": "2026-03-11",
+                        "trainingStatusFeedbackPhrase": "PRODUCTIVE_2",
+                        "primaryTrainingDevice": True,
+                        "acuteTrainingLoadDTO": {
+                            "acwrStatus": "OPTIMAL",
+                            "dailyTrainingLoadAcute": 964,
+                            "dailyTrainingLoadChronic": 772,
+                            "dailyAcuteChronicWorkloadRatio": 1.2,
+                        },
+                    }
+                }
+            },
         },
     )
     runner = CliRunner(mix_stderr=False)
@@ -294,13 +306,15 @@ def test_health_status_single_day_command(mocker: Any) -> None:
 
     assert result.exit_code == 0
     parsed = json.loads(result.output)
-    assert parsed["data"] == [
-        {
-            "date": "2026-03-11",
-            "training_status": "PRODUCTIVE",
-            "load_type": "OPTIMAL",
-        }
-    ]
+    row = parsed["data"][0]
+    assert row["date"] == "2026-03-11"
+    assert row["training_status"] == "PRODUCTIVE_2"
+    assert row["acute_load"] == 964
+    assert row["chronic_load"] == 772
+    assert row["acwr"] == 1.2
+    assert row["acwr_status"] == "OPTIMAL"
+    # No load-balance block in this payload: balance columns stay None.
+    assert row["monthly_load_aerobic_low"] is None
 
 
 # ---------------------------------------------------------------------------

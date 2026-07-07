@@ -88,7 +88,7 @@ def register_workout_tools(mcp: MCPServer, config: CliConfig) -> None:
 
     @mcp.tool()
     def workout_calendar(start_date: str, end_date: str) -> dict[str, Any]:
-        """Get scheduled workouts for a date range (YYYY-MM-DD). Returns date, id, name, type, duration_min, description."""
+        """Get calendar items for a date range (YYYY-MM-DD): scheduled workouts plus races/events. Returns date, id (workoutId for scheduled workouts), name, type, duration_min, description, item_type, is_race, primary_event, event_time, location. Completed activities link back via their workout_id field (activity_get detail=true)."""
         start, end = _parse_date_range(start_date, end_date)
         return _run_tool(
             config, lambda: get_calendar_range(start, end),

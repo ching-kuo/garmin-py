@@ -132,6 +132,8 @@ garmin-cli health intensity-minutes [--date DATE | --from DATE --to DATE | --day
 
 `health daily-summary` makes one API call per day — large date ranges may be slow.
 
+`health status` returns Garmin's full training-load picture for the day: training status, acute/chronic load, acute:chronic workload ratio (ACWR), the chronic-load "tunnel", monthly load-focus buckets with their targets, and load-balance status.
+
 ### Activities
 
 ```bash
@@ -163,8 +165,10 @@ garmin-cli activity set-type         ACTIVITY_ID TYPE_KEY  # e.g. running, cycli
 |-------|-----------------------------------------------------------------------------------|
 | Cycling | avg/max/normalized power, cadence (rpm), TSS, intensity factor, training effect, vO2max, recovery time |
 | Running | cadence (spm), ground contact time, vertical oscillation/ratio, stride length, training effect, vO2max, recovery time |
-| Lap swimming | SWOLF, total strokes, average stroke rate, distance per stroke |
-| Open water swimming | universal extras only (no per-length stroke metrics) |
+| Lap swimming | SWOLF, total strokes, average stroke rate, distance per stroke, training effect |
+| Open water swimming | universal extras + training effect (no per-length stroke metrics) |
+
+Every sport also carries the universal training-response fields: `training_effect_label` (Garmin's primary-benefit label such as `TEMPO`), `training_load` (per-activity EPOC-based load), and `workout_id` (the structured workout the activity executed, linking plan to execution). `training_load` also appears in `activity list` rows.
 
 `duration_min` is moving time; `elapsed_time_min` is total wall-clock time, so `elapsed - moving` is the time stopped.
 
@@ -217,9 +221,12 @@ garmin-cli performance vo2max
 garmin-cli performance race-predictions
 garmin-cli performance endurance-score [--date DATE | --from DATE --to DATE | --days N]
 garmin-cli performance hill-score      [--date DATE | --from DATE --to DATE | --days N]
+garmin-cli performance personal-records
 ```
 
 `performance endurance-score` and `performance hill-score` make one API call per day — large date ranges may be slow.
+
+`performance personal-records` returns all-time PRs (fastest 1 km through marathon, longest run/ride, biggest climb, best 20-min power, step records) with a human-readable `label`; typeIds Garmin has not documented publicly carry `label: null` with the raw value.
 
 ### Devices
 
