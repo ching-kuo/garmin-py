@@ -4,7 +4,13 @@ A command-line tool for extracting health, activity, workout, and performance da
 
 ## Installation
 
-From a local checkout:
+From PyPI (the distribution is `garmin-py`; the installed command is `garmin-cli`):
+
+```bash
+pip install garmin-py
+```
+
+Or from a local checkout:
 
 ```bash
 pip install .
@@ -311,13 +317,15 @@ garmin-cli --json activity list --limit 5
 
 Expose garmin-cli as an MCP tool server for local or remote MCP clients. Includes read tools for health, activities, workouts, performance, and devices, plus write tools for workouts (`workout_create`, `workout_schedule`, `workout_update`, `workout_delete`, `workout_unschedule`, with dry-run preview on create and update) and activities (`activity_download`, `activity_upload`, `activity_delete`, `activity_rename`, `activity_set_type`). The `report_snapshot` tool assembles a full morning/evening/weekly report in a single call, fanning out the underlying reads server-side — designed for recurring agent-driven daily summaries. See [SKILL.md](SKILL.md#report_snapshot-section-composition) for its section composition.
 
-### Why garmin-cli is not on PyPI
-
-The `mcp` extra depends on a pinned pre-release commit of the MCP Python SDK v2, installed directly from GitHub. PyPI does not allow git-source dependencies in published packages. Until the MCP SDK publishes a stable v2 release on PyPI, garmin-cli must be installed from source.
-
 ### Installation
 
-The recommended install method is `uv tool install`, which places the binary in `~/.local/bin` — a stable, venv-independent location that desktop applications can access without macOS sandbox issues:
+The package is published on PyPI as `garmin-py` (the CLI command remains `garmin-cli`). The recommended install method is `uv tool install`, which places the binary in `~/.local/bin` — a stable, venv-independent location that desktop applications can access without macOS sandbox issues:
+
+```bash
+uv tool install "garmin-py[mcp]"
+```
+
+Or from a source checkout:
 
 ```bash
 uv tool install --editable "/path/to/garmin-py[mcp]"
@@ -326,7 +334,7 @@ uv tool install --editable "/path/to/garmin-py[mcp]"
 To uninstall:
 
 ```bash
-uv tool uninstall garmin-cli
+uv tool uninstall garmin-py
 ```
 
 **Avoid pointing MCP clients at a binary inside a project virtualenv** (e.g. `.venv/bin/garmin-cli`). On macOS, desktop applications run in a sandbox and cannot read `pyvenv.cfg` inside directories they have not been granted access to, which causes a fatal Python startup error:

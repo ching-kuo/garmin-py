@@ -525,7 +525,7 @@ For Claude Code/Desktop integration via MCP protocol instead of shell commands. 
 ### Install
 
 ```bash
-pip install "garmin-cli[mcp]"
+pip install "garmin-py[mcp]"
 ```
 
 ### Register with Claude Code (stdio)

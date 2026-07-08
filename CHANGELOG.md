@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.7.0] - 2026-07-08
+
+### Added
+- GitHub Actions publish workflow (`.github/workflows/publish.yml`): builds sdist/wheel and uploads to PyPI via trusted publishing whenever a GitHub release is published.
+
+### Changed
+- Distribution renamed from `garmin-cli` to `garmin-py` for PyPI publication (`garmin-cli` was already taken on PyPI). The import package `garmin_cli` and the `garmin-cli` console command are unchanged. The GitHub repository moved to `ching-kuo/garmin-py`.
+- The `mcp` extra now depends on `mcp[cli]>=2.0.0b1,<3` from PyPI instead of a pinned git commit, unblocking PyPI publication (PyPI rejects direct URL dependencies). Ported to the v2 SDK layout: `ToolAnnotations` moved from `mcp.types` to the `mcp_types` package.
+
 ## [2.6.0] - 2026-07-07
 
 ### Added

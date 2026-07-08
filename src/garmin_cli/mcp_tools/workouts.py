@@ -10,7 +10,7 @@ import logging
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
-from mcp.types import ToolAnnotations
+from mcp_types import ToolAnnotations
 
 from garmin_cli.auth import ensure_authenticated
 from garmin_cli.config import CliConfig
