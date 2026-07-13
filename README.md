@@ -1,8 +1,30 @@
-# garmin-cli
+# garmin-py
 
-A command-line tool for extracting health, activity, workout, and performance data from Garmin Connect. Designed for both human use (table output) and LLM agent consumption (JSON output).
+Garmin Connect for AI assistants and the command line. garmin-py exposes your health, activity, workout, and performance data as an **MCP server** (Claude Desktop, Claude Code, and any other MCP client) and as a **CLI** (`garmin-cli`) with table, JSON, and CSV output.
 
-## Installation
+Read tools cover sleep, HRV, stress, body battery, training status/load, activities (including raw per-sample streams), planned workouts, race predictions, and personal records; write tools create and schedule structured workouts and manage activities. The `report_snapshot` tool assembles a full morning/evening/weekly report in one call.
+
+## Quick Start: Claude Desktop (one-click)
+
+1. Download `garmin-py-<version>.mcpb` from the [latest release](https://github.com/ching-kuo/garmin-py/releases/latest).
+2. Open it with Claude Desktop (or drag it into Settings → Extensions).
+3. Enter your Garmin Connect email and password when prompted — they are stored in the operating system keychain, never in the conversation.
+
+On first launch the bundle creates a private virtual environment under `~/.garmin-py/mcpb/` and installs the matching `garmin-py` release from PyPI (internet required once). Requirements: Python 3.10+ on `PATH` (macOS ships 3.9 — install from [python.org](https://www.python.org/downloads/) or Homebrew).
+
+If your account uses multi-factor authentication, the first tool call reports `MFA_REQUIRED`; Claude asks for the one-time code and completes the login with the `submit_mfa_code` tool. The session is saved, so this normally happens once.
+
+## Quick Start: Claude Code
+
+```bash
+uv tool install "garmin-py[mcp]"
+garmin-cli login
+claude mcp add --transport stdio garmin -- garmin-cli mcp-server
+```
+
+See [MCP Server](#mcp-server) for other clients, HTTP transports, and the manual Claude Desktop config, and [SKILL.md](SKILL.md) for the full tool reference.
+
+## CLI Installation
 
 From PyPI (the distribution is `garmin-py`; the installed command is `garmin-cli`):
 
@@ -314,9 +336,9 @@ garmin-cli --json activity list --limit 5
 | `INVALID_INPUT` | Bad arguments or conflicting options |
 | `INTERNAL_ERROR` | Unexpected error |
 
-## MCP Server (Optional)
+## MCP Server
 
-Expose garmin-cli as an MCP tool server for local or remote MCP clients. Includes read tools for health, activities, workouts, performance, and devices, plus write tools for workouts (`workout_create`, `workout_schedule`, `workout_update`, `workout_delete`, `workout_unschedule`, with dry-run preview on create and update) and activities (`activity_download`, `activity_upload`, `activity_delete`, `activity_rename`, `activity_set_type`). The `report_snapshot` tool assembles a full morning/evening/weekly report in a single call, fanning out the underlying reads server-side — designed for recurring agent-driven daily summaries. See [SKILL.md](SKILL.md#report_snapshot-section-composition) for its section composition.
+The MCP server exposes read tools for health, activities, workouts, performance, and devices, plus write tools for workouts (`workout_create`, `workout_schedule`, `workout_update`, `workout_delete`, `workout_unschedule`, with dry-run preview on create and update) and activities (`activity_download`, `activity_upload`, `activity_delete`, `activity_rename`, `activity_set_type`). The `report_snapshot` tool assembles a full morning/evening/weekly report in a single call, fanning out the underlying reads server-side — designed for recurring agent-driven daily summaries. See [SKILL.md](SKILL.md#report_snapshot-section-composition) for its section composition.
 
 ### Installation
 
@@ -348,11 +370,7 @@ The `uv tool install` approach avoids this entirely. Alternatively, grant Claude
 
 ### Claude Desktop
 
-**One-click bundle (recommended for non-technical users):** download `garmin-py-<version>.mcpb` from the [latest GitHub release](https://github.com/ching-kuo/garmin-py/releases/latest) and open it with Claude Desktop (or drag it into Settings → Extensions). Claude Desktop asks for your Garmin Connect email and password during installation and stores them in the operating system keychain — they never appear in the conversation. On first launch the bundle creates a private virtual environment under `~/.garmin-py/mcpb/` and installs the matching `garmin-py` release from PyPI (internet required once). Requirements: Python 3.10+ on `PATH` (macOS ships 3.9 — install from [python.org](https://www.python.org/downloads/) or Homebrew).
-
-If the account uses multi-factor authentication, the first tool call reports `MFA_REQUIRED`; Claude then asks for the one-time code and completes the login with the `submit_mfa_code` tool. The session is saved, so this normally happens once.
-
-**Manual configuration (alternative):** add to your Claude Desktop config file:
+The one-click `.mcpb` bundle (see [Quick Start](#quick-start-claude-desktop-one-click)) is the recommended install. To configure manually instead, add to your Claude Desktop config file:
 
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
