@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.8.0] - 2026-07-14
 
 ### Added
 - Claude Desktop one-click bundle: `scripts/build_mcpb.py` packages a `.mcpb` extension (manifest with keychain-stored `GARMIN_EMAIL`/`GARMIN_PASSWORD` user config plus a stdlib-only bootstrap that installs the matching PyPI release into a private venv under `~/.garmin-py/mcpb/` on first launch). The install is wheels-only (`--only-binary=:all:`, so no sdist build hooks execute) with the Garmin credentials stripped from pip's environment, serialized by a cross-process lock on POSIX, and self-repairs if the cached venv's interpreter disappears. The publish workflow builds the bundle and attaches it to every GitHub release after the PyPI upload succeeds.
