@@ -10,6 +10,7 @@ from typing import Any
 
 from garmin_cli import backend as garth
 from garmin_cli._env import _env_float
+from garmin_cli.backend import PendingMFA
 from garmin_cli.config import CliConfig
 from garmin_cli.exceptions import GarminCliError, extract_status_code
 from garmin_cli.token_store import ensure_secure_directory
@@ -75,6 +76,111 @@ def _invalidate_probe_cache(garth_home: str | None = None) -> None:
         else:
             _last_probe_ok.clear()
             _cached_garth_home = None
+
+
+# ---------------------------------------------------------------------------
+# Pending-MFA state
+# ---------------------------------------------------------------------------
+
+# One pending login at a time: a new MFA challenge replaces any earlier one,
+# matching the single-account model of the rest of the backend.
+_pending_mfa_lock: threading.Lock = threading.Lock()
+_pending_mfa: PendingMFA | None = None
+
+# Serializes every authentication transition (credential login and MFA
+# completion) so concurrent tool calls cannot start competing logins — each
+# Garmin login on an MFA account sends the user a fresh one-time code and
+# invalidates the previous challenge.
+_login_lock: threading.Lock = threading.Lock()
+
+_MFA_REQUIRED_MESSAGE = (
+    "MFA_REQUIRED: Garmin requires a multi-factor authentication code to finish "
+    "logging in. Ask the user for the one-time code Garmin just sent them, then "
+    "submit it with the submit_mfa_code MCP tool (or run 'garmin-cli login' in a "
+    "terminal)."
+)
+
+
+def _stash_pending_mfa(pending: PendingMFA | None) -> None:
+    global _pending_mfa
+    with _pending_mfa_lock:
+        _pending_mfa = pending
+
+
+def _take_pending_mfa() -> PendingMFA | None:
+    global _pending_mfa
+    with _pending_mfa_lock:
+        pending, _pending_mfa = _pending_mfa, None
+        return pending
+
+
+def complete_mfa_login(config: CliConfig, mfa_code: str) -> None:
+    """Finish a login that :func:`ensure_authenticated` left pending on MFA.
+
+    Consumes the pending state either way: Garmin MFA challenges are
+    single-use, so a wrong code requires restarting the login (any
+    authenticated call re-triggers it and sends a fresh code).
+
+    Raises:
+        GarminCliError: INVALID_INPUT when no login is awaiting a code;
+            RATE_LIMITED on a Garmin 429; AUTH_FAILED when Garmin rejects
+            the code or the verified session cannot be persisted.
+    """
+    with _login_lock:
+        pending = _take_pending_mfa()
+        if pending is None:
+            raise GarminCliError(
+                error=(
+                    "No Garmin login is awaiting an MFA code. Retry the original "
+                    "request first; when it reports MFA_REQUIRED, submit the code."
+                ),
+                error_code="INVALID_INPUT",
+            )
+        garth_home = pending.garth_home or os.path.expanduser(config.garth_home)
+        try:
+            # Local precondition: a repairable path/permission problem must not
+            # burn the still-valid challenge.
+            _secure_directory(garth_home)
+        except GarminCliError:
+            _stash_pending_mfa(pending)
+            raise
+        try:
+            garth.resume_mfa_login(pending, mfa_code)
+        except Exception as exc:
+            if extract_status_code(exc) == 429:
+                # Throttled, not rejected — the challenge may still be valid.
+                _stash_pending_mfa(pending)
+            _raise_if_rate_limited(exc)
+            raise GarminCliError(
+                error=(
+                    "MFA verification failed. Retry the original request to "
+                    "receive a fresh code, then submit it again."
+                ),
+                error_code="AUTH_FAILED",
+            ) from exc
+        _persist_session(garth_home)
+        _record_probe_ok(garth_home)
+
+
+def _raise_if_rate_limited(exc: Exception) -> None:
+    """Map a Garmin 429 to RATE_LIMITED; return for the caller's own mapping otherwise."""
+    if extract_status_code(exc) == 429:
+        raise GarminCliError(
+            error="Garmin login is temporarily rate limited. Try again shortly.",
+            error_code="RATE_LIMITED",
+        ) from exc
+
+
+def _persist_session(garth_home: str) -> None:
+    """Save the active backend session, reporting persistence failures as such."""
+    try:
+        os.makedirs(garth_home, mode=0o700, exist_ok=True)
+        garth.save(garth_home)
+    except Exception as exc:
+        raise GarminCliError(
+            error=f"Authenticated, but saving the session to {garth_home} failed: {exc}",
+            error_code="AUTH_FAILED",
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +252,9 @@ def ensure_authenticated(config: CliConfig) -> None:
         garth.resume(garth_home)
         try:
             _probe_session()
+            # A working session makes any outstanding MFA challenge moot;
+            # drop it so the half-authenticated client is released.
+            _stash_pending_mfa(None)
             _record_probe_ok(garth_home)
             return
         except Exception as exc:
@@ -180,19 +289,29 @@ def ensure_authenticated(config: CliConfig) -> None:
             error_code="AUTH_MISSING",
         )
 
-    try:
+    with _login_lock:
+        # A challenge is already outstanding (possibly stashed by a concurrent
+        # call while we waited for the lock): re-raise instead of starting
+        # another login, which would send the user a fresh code and invalidate
+        # the one they are about to submit.
+        if _pending_mfa is not None:
+            raise GarminCliError(error=_MFA_REQUIRED_MESSAGE, error_code="MFA_REQUIRED")
+
         _invalidate_probe_cache()  # login replaces the session entirely
-        garth.login(config.email, config.password, garth_home=garth_home)
-        os.makedirs(garth_home, mode=0o700, exist_ok=True)
-        garth.save(garth_home)
-    except Exception as exc:
-        if extract_status_code(exc) == 429:
-            logger.debug("Garmin login hit rate limiting for %s", garth_home)
+        try:
+            pending = garth.login(
+                config.email,
+                config.password,
+                garth_home=garth_home,
+                return_on_mfa=True,
+            )
+        except Exception as exc:
+            _raise_if_rate_limited(exc)
             raise GarminCliError(
-                error="Garmin login is temporarily rate limited. Try again shortly.",
-                error_code="RATE_LIMITED",
+                error="Authentication failed. Check your credentials.",
+                error_code="AUTH_FAILED",
             ) from exc
-        raise GarminCliError(
-            error="Authentication failed. Check your credentials.",
-            error_code="AUTH_FAILED",
-        ) from exc
+        if isinstance(pending, PendingMFA):
+            _stash_pending_mfa(pending)
+            raise GarminCliError(error=_MFA_REQUIRED_MESSAGE, error_code="MFA_REQUIRED")
+        _persist_session(garth_home)

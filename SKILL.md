@@ -50,6 +50,7 @@ Always use `--json` for machine-readable output. The tool returns a JSON envelop
 |------|---------|--------|
 | `AUTH_MISSING` | No credentials or session found | No -- configure auth |
 | `AUTH_FAILED` | Credentials rejected | No -- fix credentials |
+| `MFA_REQUIRED` | Garmin sent a one-time MFA code | Ask the user for the code, then `submit_mfa_code` (MCP) or `garmin-cli login` (CLI) |
 | `NOT_FOUND` | Endpoint returned 404 | No |
 | `RATE_LIMITED` | 429 after 3 retries | Yes -- wait and retry |
 | `SERVER_ERROR` | 5xx after 3 retries | Yes -- wait and retry |
@@ -602,6 +603,7 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `performance_personal_records` | *(none)* | `{count, rows}` — all-time PRs with human-readable `label` (null for unmapped typeIds) |
 | `device_list` | *(none)* | `{count, rows}` — registered devices with type and last sync |
 | `login_status` | *(none)* | `{authenticated, garmin_home}` |
+| `submit_mfa_code` | `mfa_code` | `{authenticated, garmin_home}` — completes a login that failed with `MFA_REQUIRED`; ask the user for the one-time code Garmin sent them. Codes are single-use: on failure, retry the original tool call to trigger a fresh code |
 | `report_snapshot` | `kind` (`morning`\|`evening`\|`weekly`), `date?` | `{kind, date_range, sections, unavailable?}` — one composite call that fans out the day's (or week's) reads server-side. `sections` maps section name → rows (same shapes as the per-domain tools). Sections with no data are empty and listed in `unavailable` with a `reason` (`not_found`\|`no_data`). `date` (YYYY-MM-DD) defaults to today; `weekly` covers the anchor day and the six prior days. |
 
 Dates use `YYYY-MM-DD` format. Max date range: 90 days. Errors surface as MCP ToolError with the original error message.

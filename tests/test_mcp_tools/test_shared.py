@@ -60,6 +60,7 @@ class TestToolRegistration:
         "performance_zones",
         "device_list",
         "login_status",
+        "submit_mfa_code",
         "report_snapshot",
     })
 

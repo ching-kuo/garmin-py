@@ -148,7 +148,7 @@ def _validation_envelope(errors: list[str]) -> dict[str, Any]:
 
 
 def _classify_garmin_error(exc: GarminCliError) -> WriteOutcome:
-    if exc.error_code in ("AUTH_MISSING", "AUTH_FAILED"):
+    if exc.error_code in ("AUTH_MISSING", "AUTH_FAILED", "MFA_REQUIRED"):
         return "failed-auth"
     if exc.error_code == "INVALID_INPUT":
         # Rejected input (e.g. unknown activity type key surfaced by the live

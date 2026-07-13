@@ -306,6 +306,7 @@ garmin-cli --json activity list --limit 5
 |------|---------|
 | `AUTH_MISSING` | No credentials found (no session and no env vars) |
 | `AUTH_FAILED` | Credentials rejected by Garmin |
+| `MFA_REQUIRED` | Garmin sent a one-time MFA code; submit it to finish the login (MCP: `submit_mfa_code` tool, CLI: `garmin-cli login`) |
 | `NOT_FOUND` | API endpoint unavailable (404) |
 | `RATE_LIMITED` | 429 after 3 retries |
 | `SERVER_ERROR` | 5xx after 3 retries |
@@ -347,7 +348,11 @@ The `uv tool install` approach avoids this entirely. Alternatively, grant Claude
 
 ### Claude Desktop
 
-Add to your Claude Desktop config file:
+**One-click bundle (recommended for non-technical users):** download `garmin-py-<version>.mcpb` from the [latest GitHub release](https://github.com/ching-kuo/garmin-py/releases/latest) and open it with Claude Desktop (or drag it into Settings → Extensions). Claude Desktop asks for your Garmin Connect email and password during installation and stores them in the operating system keychain — they never appear in the conversation. On first launch the bundle creates a private virtual environment under `~/.garmin-py/mcpb/` and installs the matching `garmin-py` release from PyPI (internet required once). Requirements: Python 3.10+ on `PATH` (macOS ships 3.9 — install from [python.org](https://www.python.org/downloads/) or Homebrew).
+
+If the account uses multi-factor authentication, the first tool call reports `MFA_REQUIRED`; Claude then asks for the one-time code and completes the login with the `submit_mfa_code` tool. The session is saved, so this normally happens once.
+
+**Manual configuration (alternative):** add to your Claude Desktop config file:
 
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - Windows: `%APPDATA%\Claude\claude_desktop_config.json`

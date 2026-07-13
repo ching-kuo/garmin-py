@@ -47,22 +47,40 @@ class _FakeClient:
         self.put_calls.append((args, kwargs))
         return _FakeResponse(204, {})
 
+    def dumps(self) -> str:
+        return '{"di_token":"abc"}' + " " * 600  # >512 chars: treated as token data, not a path
+
 
 class _FakeGarmin:
     instances: list["_FakeGarmin"] = []
+    mfa_required: bool = False  # class-level toggle set by MFA tests
 
-    def __init__(self, email: str | None = None, password: str | None = None, prompt_mfa: Any = None) -> None:
+    def __init__(
+        self,
+        email: str | None = None,
+        password: str | None = None,
+        prompt_mfa: Any = None,
+        return_on_mfa: bool = False,
+    ) -> None:
         self.email = email
         self.password = password
         self.prompt_mfa = prompt_mfa
+        self.return_on_mfa = return_on_mfa
         self.client = _FakeClient()
         self.login_calls: list[str | None] = []
+        self.resume_login_calls: list[tuple[Any, str]] = []
         self.garmintokens_env_at_login: str | None = None
         _FakeGarmin.instances.append(self)
 
-    def login(self, /, tokenstore: str | None = None) -> tuple[None, None]:
+    def login(self, /, tokenstore: str | None = None) -> tuple[str | None, Any]:
         self.login_calls.append(tokenstore)
         self.garmintokens_env_at_login = os.environ.get("GARMINTOKENS")
+        if self.return_on_mfa and _FakeGarmin.mfa_required:
+            return "needs_mfa", {"signin_params": "opaque"}
+        return None, None
+
+    def resume_login(self, client_state: Any, mfa_code: str) -> tuple[None, None]:
+        self.resume_login_calls.append((client_state, mfa_code))
         return None, None
 
 
@@ -71,6 +89,7 @@ def _reset_backend_state(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(backend, "_backend", None)
     monkeypatch.setattr(backend, "_garth_home", None)
     _FakeGarmin.instances.clear()
+    _FakeGarmin.mfa_required = False
 
 
 class TestResume:
@@ -106,6 +125,61 @@ class TestLogin:
         instance = _FakeGarmin.instances[0]
         assert instance.login_calls == [None]
         assert instance.garmintokens_env_at_login is None
+        assert backend._garth_home == str(garth_home)
+
+    def test_login_returns_pending_mfa_when_challenged(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        garth_home = tmp_path / "garth"
+        garth_home.mkdir(mode=0o700)
+        monkeypatch.setattr(backend, "Garmin", _FakeGarmin)
+        _FakeGarmin.mfa_required = True
+
+        pending = backend.login(
+            "user@example.com", "secret", garth_home=str(garth_home), return_on_mfa=True
+        )
+
+        assert isinstance(pending, backend.PendingMFA)
+        assert pending.client_state == {"signin_params": "opaque"}
+        assert pending.garth_home == str(garth_home)
+        assert backend._backend is None  # not activated until MFA completes
+
+    def test_login_without_mfa_challenge_returns_none_and_reloads_profile(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        garth_home = tmp_path / "garth"
+        garth_home.mkdir(mode=0o700)
+        monkeypatch.setattr(backend, "Garmin", _FakeGarmin)
+
+        result = backend.login(
+            "user@example.com", "secret", garth_home=str(garth_home), return_on_mfa=True
+        )
+
+        assert result is None
+        instance = _FakeGarmin.instances[0]
+        assert backend._backend is instance
+        # Second login call replays from in-memory tokens to load the
+        # profile/settings that upstream's return_on_mfa mode skips.
+        assert len(instance.login_calls) == 2
+        assert instance.login_calls[1] is not None
+
+    def test_resume_mfa_login_activates_backend(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        garth_home = tmp_path / "garth"
+        garth_home.mkdir(mode=0o700)
+        monkeypatch.setattr(backend, "Garmin", _FakeGarmin)
+        _FakeGarmin.mfa_required = True
+
+        pending = backend.login(
+            "user@example.com", "secret", garth_home=str(garth_home), return_on_mfa=True
+        )
+        assert isinstance(pending, backend.PendingMFA)
+        backend.resume_mfa_login(pending, "123456")
+
+        instance = _FakeGarmin.instances[0]
+        assert instance.resume_login_calls == [({"signin_params": "opaque"}, "123456")]
+        assert backend._backend is instance
         assert backend._garth_home == str(garth_home)
 
     def test_resume_rejects_legacy_tokens_without_new_tokenstore(self, tmp_path: Path) -> None:

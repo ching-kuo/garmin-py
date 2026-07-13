@@ -5,6 +5,7 @@ import logging
 import os
 import threading
 import types
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
@@ -126,28 +127,69 @@ def _normalize_home(path: str | None = None) -> str | None:
     return str(ensure_secure_directory(path))
 
 
+@dataclass(frozen=True)
+class PendingMFA:
+    """A login halted by Garmin awaiting an MFA code.
+
+    Holds the half-authenticated client and the opaque SSO state needed by
+    :func:`resume_mfa_login`. Never persisted; lives only in process memory.
+    """
+
+    client: Garmin
+    client_state: dict[str, Any]
+    garth_home: str | None
+
+
 def login(
     email: str,
     password: str,
     *,
     garth_home: str | None = None,
     prompt_mfa: Any = None,
-) -> None:
-    """Authenticate with Garmin Connect without persisting the tokenstore yet."""
+    return_on_mfa: bool = False,
+) -> PendingMFA | None:
+    """Authenticate with Garmin Connect without persisting the tokenstore yet.
+
+    With ``return_on_mfa=True`` an MFA challenge does not block on
+    ``prompt_mfa``; instead the half-finished login is returned as a
+    :class:`PendingMFA` for the caller to complete via
+    :func:`resume_mfa_login`. Returns ``None`` when login finished cleanly.
+    """
     normalized_home = _normalize_home(garth_home)
-    client = Garmin(email, password, prompt_mfa=prompt_mfa)
+    client = Garmin(email, password, prompt_mfa=prompt_mfa, return_on_mfa=return_on_mfa)
     _apply_timeout(client)
     _serialize_refresh(client)
     previous_env = os.environ.pop("GARMINTOKENS", None)
     try:
-        client.login()
+        result = client.login()
     finally:
         if previous_env is not None:
             os.environ["GARMINTOKENS"] = previous_env
-    if normalized_home is not None:
-        client.client._tokenstore_path = normalized_home
-    _set_backend(client, normalized_home)
+    if return_on_mfa:
+        if result is not None and result[0] == "needs_mfa":
+            logger.debug("Garmin login halted awaiting an MFA code")
+            return PendingMFA(client=client, client_state=result[1], garth_home=normalized_home)
+        # Upstream's return_on_mfa mode early-returns even on a clean login,
+        # skipping the profile/settings load that displayName-scoped endpoints
+        # need. Replay login from the in-memory tokens to load them.
+        client.login(tokenstore=client.client.dumps())
+    _activate(client, normalized_home)
     logger.debug("Garmin login succeeded for configured account")
+    return None
+
+
+def _activate(client: Garmin, garth_home: str | None) -> None:
+    """Make *client* the process-wide backend, pinned to *garth_home*."""
+    if garth_home is not None:
+        client.client._tokenstore_path = garth_home
+    _set_backend(client, garth_home)
+
+
+def resume_mfa_login(pending: PendingMFA, mfa_code: str) -> None:
+    """Complete a login previously halted for MFA and activate the backend."""
+    pending.client.resume_login(pending.client_state, mfa_code)
+    _activate(pending.client, pending.garth_home)
+    logger.debug("Garmin MFA login completed")
 
 
 def resume(garth_home: str) -> None:

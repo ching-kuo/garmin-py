@@ -264,6 +264,48 @@ class TestLoginStatus:
             _call(server, "login_status", {})
 
 
+class TestSubmitMfaCode:
+
+    def test_submit_mfa_code_success(self, mocker: Any) -> None:
+        mock_complete = mocker.patch("garmin_cli.mcp_tools.misc.complete_mfa_login")
+        server = create_mcp_server(_config())
+        result = _call(server, "submit_mfa_code", {"mfa_code": " 123456 "})
+        assert result["authenticated"] is True
+        assert "garmin_home" in result
+        assert mock_complete.call_args[0][1] == "123456"  # whitespace stripped
+
+    def test_submit_mfa_code_empty_raises(self, mocker: Any) -> None:
+        mock_complete = mocker.patch("garmin_cli.mcp_tools.misc.complete_mfa_login")
+        server = create_mcp_server(_config())
+        with pytest.raises(ToolError, match="non-empty"):
+            _call(server, "submit_mfa_code", {"mfa_code": "   "})
+        mock_complete.assert_not_called()
+
+    def test_submit_mfa_code_no_pending_login(self, mocker: Any) -> None:
+        mocker.patch(
+            "garmin_cli.mcp_tools.misc.complete_mfa_login",
+            side_effect=GarminCliError(
+                error="No Garmin login is awaiting an MFA code.",
+                error_code="INVALID_INPUT",
+            ),
+        )
+        server = create_mcp_server(_config())
+        with pytest.raises(ToolError, match="awaiting an MFA code"):
+            _call(server, "submit_mfa_code", {"mfa_code": "123456"})
+
+    def test_submit_mfa_code_rejected_code(self, mocker: Any) -> None:
+        mocker.patch(
+            "garmin_cli.mcp_tools.misc.complete_mfa_login",
+            side_effect=GarminCliError(
+                error="MFA verification failed.",
+                error_code="AUTH_FAILED",
+            ),
+        )
+        server = create_mcp_server(_config())
+        with pytest.raises(ToolError, match="MFA verification failed"):
+            _call(server, "submit_mfa_code", {"mfa_code": "000000"})
+
+
 class TestReportSnapshot:
 
     def _server(self) -> Any:

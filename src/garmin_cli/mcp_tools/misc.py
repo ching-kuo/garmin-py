@@ -15,7 +15,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from garmin_cli import backend as garth
-from garmin_cli.auth import _probe_session, _secure_directory
+from garmin_cli.auth import _probe_session, _secure_directory, complete_mfa_login
 from garmin_cli.config import CliConfig
 from garmin_cli.endpoints.activities import list_activities
 from garmin_cli.endpoints.devices import get_devices
@@ -99,6 +99,26 @@ def register_misc_tools(mcp: MCPServer, config: CliConfig) -> None:
         except Exception:
             pass  # garth session expired/corrupt -- report as not authenticated
         return {"authenticated": authenticated, "garmin_home": garmin_home}
+
+    @mcp.tool()
+    def submit_mfa_code(mfa_code: str) -> dict[str, Any]:
+        """Complete a Garmin login that failed with MFA_REQUIRED.
+
+        When any tool reports that Garmin requires a multi-factor
+        authentication code, ask the user for the one-time code Garmin sent
+        them (email, SMS, or authenticator app) and submit it here. On success
+        the session is saved and all other tools work without logging in
+        again. Codes are single-use: if verification fails, retry the original
+        tool call to trigger a fresh code before submitting a new one.
+        """
+        code = mfa_code.strip()
+        if not code:
+            raise ToolError("mfa_code must be a non-empty string")
+        try:
+            complete_mfa_login(config, code)
+        except GarminCliError as exc:
+            raise _handle_error(exc) from exc
+        return {"authenticated": True, "garmin_home": os.path.expanduser(config.garth_home)}
 
     @mcp.tool()
     def report_snapshot(kind: str, date: str | None = None) -> dict[str, Any]:

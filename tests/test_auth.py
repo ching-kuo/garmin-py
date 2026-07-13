@@ -11,7 +11,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from garmin_cli import auth as auth_module
-from garmin_cli.auth import ensure_authenticated
+from garmin_cli.auth import complete_mfa_login, ensure_authenticated
+from garmin_cli.backend import PendingMFA
 from garmin_cli.config import CliConfig
 from garmin_cli.exceptions import GarminCliError
 from tests.helpers import make_http_error as _http_error
@@ -34,8 +35,9 @@ def _make_config(**kwargs: Any) -> CliConfig:
 
 @pytest.fixture(autouse=True)
 def _reset_probe_cache() -> None:
-    """Reset the auth probe cache between tests."""
+    """Reset the auth probe cache and pending-MFA state between tests."""
     auth_module._invalidate_probe_cache()
+    auth_module._stash_pending_mfa(None)
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +139,7 @@ class TestEnsureAuthenticatedLoginSuccess:
             "user@test.com",
             "secret",
             garth_home=str(garth_dir),
+            return_on_mfa=True,
         )
 
     def test_calls_save_after_login(self, mocker: Any, tmp_path: Path) -> None:
@@ -170,6 +173,7 @@ class TestEnsureAuthenticatedLoginSuccess:
             "user@test.com",
             "pass",
             garth_home=str(garth_dir),
+            return_on_mfa=True,
         )
 
     def test_stale_resumed_session_falls_back_to_login(
@@ -190,6 +194,7 @@ class TestEnsureAuthenticatedLoginSuccess:
             "user@test.com",
             "pass",
             garth_home=str(garth_dir),
+            return_on_mfa=True,
         )
 
     def test_probe_server_error_raises_auth_failed(
@@ -236,6 +241,239 @@ class TestEnsureAuthenticatedLoginFailure:
             ensure_authenticated(config)
         assert exc_info.value.error_code == "AUTH_FAILED"
 
+
+
+# ---------------------------------------------------------------------------
+# MFA-required login flow
+# ---------------------------------------------------------------------------
+
+def _pending_mfa() -> PendingMFA:
+    return PendingMFA(client=MagicMock(), client_state={"k": "v"}, garth_home=None)
+
+
+class TestMFALogin:
+
+    def test_mfa_challenge_raises_mfa_required_and_stashes_state(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        garth_dir = tmp_path / "garth"
+        garth_dir.mkdir(mode=0o700)
+
+        mock_garth = MagicMock()
+        mock_garth.resume.side_effect = Exception("no session")
+        mock_garth.login.return_value = _pending_mfa()
+        mocker.patch("garmin_cli.auth.garth", mock_garth)
+
+        config = _make_config(
+            garth_home=str(garth_dir), email="user@test.com", password="pass"
+        )
+        with pytest.raises(GarminCliError) as exc_info:
+            ensure_authenticated(config)
+        assert exc_info.value.error_code == "MFA_REQUIRED"
+        assert auth_module._pending_mfa is not None
+        mock_garth.save.assert_not_called()
+
+    def test_complete_mfa_login_resumes_and_saves(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        garth_dir = tmp_path / "garth"
+        garth_dir.mkdir(mode=0o700)
+
+        mock_garth = MagicMock()
+        mocker.patch("garmin_cli.auth.garth", mock_garth)
+        pending = _pending_mfa()
+        auth_module._stash_pending_mfa(pending)
+
+        config = _make_config(garth_home=str(garth_dir))
+        complete_mfa_login(config, "123456")
+
+        mock_garth.resume_mfa_login.assert_called_once_with(pending, "123456")
+        mock_garth.save.assert_called_once_with(str(garth_dir))
+        assert auth_module._pending_mfa is None
+
+    def test_complete_mfa_login_records_probe_so_next_call_skips_resume(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        garth_dir = tmp_path / "garth"
+        garth_dir.mkdir(mode=0o700)
+
+        mock_garth = MagicMock()
+        mocker.patch("garmin_cli.auth.garth", mock_garth)
+        auth_module._stash_pending_mfa(_pending_mfa())
+
+        config = _make_config(garth_home=str(garth_dir))
+        complete_mfa_login(config, "123456")
+        ensure_authenticated(config)
+
+        mock_garth.resume.assert_not_called()
+
+    def test_pending_challenge_short_circuits_without_new_login(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        garth_dir = tmp_path / "garth"
+        garth_dir.mkdir(mode=0o700)
+
+        mock_garth = MagicMock()
+        mock_garth.resume.side_effect = Exception("no session")
+        mocker.patch("garmin_cli.auth.garth", mock_garth)
+        auth_module._stash_pending_mfa(_pending_mfa())
+
+        config = _make_config(
+            garth_home=str(garth_dir), email="user@test.com", password="pass"
+        )
+        with pytest.raises(GarminCliError) as exc_info:
+            ensure_authenticated(config)
+        assert exc_info.value.error_code == "MFA_REQUIRED"
+        mock_garth.login.assert_not_called()  # no fresh challenge sent
+
+    def test_successful_probe_clears_pending_challenge(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        garth_dir = tmp_path / "garth"
+        garth_dir.mkdir(mode=0o700)
+
+        mocker.patch("garmin_cli.auth.garth", MagicMock())
+        auth_module._stash_pending_mfa(_pending_mfa())
+
+        ensure_authenticated(_make_config(garth_home=str(garth_dir)))
+
+        assert auth_module._pending_mfa is None
+
+    def test_complete_mfa_login_rate_limited(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        garth_dir = tmp_path / "garth"
+        garth_dir.mkdir(mode=0o700)
+
+        mock_garth = MagicMock()
+        mock_garth.resume_mfa_login.side_effect = _http_error(429)
+        mocker.patch("garmin_cli.auth.garth", mock_garth)
+        auth_module._stash_pending_mfa(_pending_mfa())
+
+        config = _make_config(garth_home=str(garth_dir))
+        with pytest.raises(GarminCliError) as exc_info:
+            complete_mfa_login(config, "123456")
+        assert exc_info.value.error_code == "RATE_LIMITED"
+        # Throttled, not rejected: the challenge is restored for a retry.
+        assert auth_module._pending_mfa is not None
+
+    def test_complete_mfa_login_local_precondition_failure_keeps_challenge(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        mocker.patch("garmin_cli.auth.garth", MagicMock())
+        mocker.patch(
+            "garmin_cli.auth._secure_directory",
+            side_effect=GarminCliError(error="symlink", error_code="AUTH_FAILED"),
+        )
+        auth_module._stash_pending_mfa(_pending_mfa())
+
+        config = _make_config(garth_home=str(tmp_path / "garth"))
+        with pytest.raises(GarminCliError, match="symlink"):
+            complete_mfa_login(config, "123456")
+        # A repairable local failure must not burn the still-valid challenge.
+        assert auth_module._pending_mfa is not None
+
+    def test_concurrent_cold_calls_send_single_mfa_challenge(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        """Racing unauthenticated calls must trigger exactly one Garmin login."""
+        garth_dir = tmp_path / "garth"
+        garth_dir.mkdir(mode=0o700)
+
+        mock_garth = MagicMock()
+        mock_garth.resume.side_effect = Exception("no session")
+        mock_garth.login.side_effect = lambda *a, **k: _pending_mfa()
+        mocker.patch("garmin_cli.auth.garth", mock_garth)
+
+        config = _make_config(
+            garth_home=str(garth_dir), email="user@test.com", password="pass"
+        )
+        n_threads = 8
+        barrier = threading.Barrier(n_threads)
+        codes: list[str] = []
+        codes_lock = threading.Lock()
+
+        def worker() -> None:
+            barrier.wait()
+            try:
+                ensure_authenticated(config)
+            except GarminCliError as exc:
+                with codes_lock:
+                    codes.append(exc.error_code)
+
+        threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert codes == ["MFA_REQUIRED"] * n_threads
+        mock_garth.login.assert_called_once()  # only one code sent to the user
+
+    def test_complete_mfa_login_save_failure_reports_persistence(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        garth_dir = tmp_path / "garth"
+        garth_dir.mkdir(mode=0o700)
+
+        mock_garth = MagicMock()
+        mock_garth.save.side_effect = OSError("read-only")
+        mocker.patch("garmin_cli.auth.garth", mock_garth)
+        auth_module._stash_pending_mfa(_pending_mfa())
+
+        config = _make_config(garth_home=str(garth_dir))
+        with pytest.raises(GarminCliError) as exc_info:
+            complete_mfa_login(config, "123456")
+        assert exc_info.value.error_code == "AUTH_FAILED"
+        assert "saving the session" in exc_info.value.error  # not blamed on the code
+
+    def test_complete_mfa_login_prefers_pending_garth_home(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        pending_dir = tmp_path / "pending_home"
+        pending_dir.mkdir(mode=0o700)
+
+        mock_garth = MagicMock()
+        mocker.patch("garmin_cli.auth.garth", mock_garth)
+        auth_module._stash_pending_mfa(
+            PendingMFA(client=MagicMock(), client_state={"k": "v"}, garth_home=str(pending_dir))
+        )
+
+        config = _make_config(garth_home=str(tmp_path / "other_home"))
+        complete_mfa_login(config, "123456")
+
+        mock_garth.save.assert_called_once_with(str(pending_dir))
+
+    def test_complete_mfa_login_without_pending_raises_invalid_input(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        mocker.patch("garmin_cli.auth.garth", MagicMock())
+        config = _make_config(garth_home=str(tmp_path / "garth"))
+        with pytest.raises(GarminCliError) as exc_info:
+            complete_mfa_login(config, "123456")
+        assert exc_info.value.error_code == "INVALID_INPUT"
+
+    def test_complete_mfa_login_failure_raises_auth_failed_and_consumes_state(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        garth_dir = tmp_path / "garth"
+        garth_dir.mkdir(mode=0o700)
+
+        mock_garth = MagicMock()
+        mock_garth.resume_mfa_login.side_effect = Exception("bad code")
+        mocker.patch("garmin_cli.auth.garth", mock_garth)
+        auth_module._stash_pending_mfa(_pending_mfa())
+
+        config = _make_config(garth_home=str(garth_dir))
+        with pytest.raises(GarminCliError) as exc_info:
+            complete_mfa_login(config, "000000")
+        assert exc_info.value.error_code == "AUTH_FAILED"
+
+        # Pending state is single-use: a retry without a fresh challenge
+        # reports INVALID_INPUT rather than replaying the stale state.
+        with pytest.raises(GarminCliError) as exc_info:
+            complete_mfa_login(config, "000000")
+        assert exc_info.value.error_code == "INVALID_INPUT"
 
 
 # ---------------------------------------------------------------------------

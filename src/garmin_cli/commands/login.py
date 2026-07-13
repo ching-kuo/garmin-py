@@ -51,6 +51,8 @@ def login(ctx: click.Context, email: str | None, password: str | None) -> None:
             garth_home=garmin_home,
             prompt_mfa=_prompt_mfa_code,
         )
+        # Kept inline rather than reusing auth._persist_session: tests patch
+        # this module's ``garth`` seam, and the helper would bypass it.
         os.makedirs(garmin_home, mode=0o700, exist_ok=True)
         garth.save(garmin_home)
     except GarminCliError:

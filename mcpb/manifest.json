@@ -1,0 +1,57 @@
+{
+  "manifest_version": "0.2",
+  "name": "garmin-py",
+  "display_name": "Garmin Connect",
+  "version": "0.0.0",
+  "description": "Garmin Connect health, activity, workout, and training data as MCP tools.",
+  "long_description": "Exposes your Garmin Connect data (sleep, HRV, body battery, activities, workouts, training status, personal records, and more) to Claude as MCP tools. Enter your Garmin Connect credentials once during installation; they are stored in your operating system's keychain and used only to log in to Garmin. If your account uses multi-factor authentication, Claude will ask you for the one-time code on first use. Requires Python 3.10+ on your machine and an internet connection on first launch.",
+  "author": {
+    "name": "Ching Kuo",
+    "url": "https://github.com/ching-kuo"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ching-kuo/garmin-py"
+  },
+  "homepage": "https://github.com/ching-kuo/garmin-py",
+  "license": "MIT",
+  "keywords": ["garmin", "health", "fitness", "training", "mcp"],
+  "server": {
+    "type": "python",
+    "entry_point": "server/main.py",
+    "mcp_config": {
+      "command": "python3",
+      "args": ["${__dirname}/server/main.py"],
+      "env": {
+        "GARMIN_EMAIL": "${user_config.garmin_email}",
+        "GARMIN_PASSWORD": "${user_config.garmin_password}"
+      },
+      "platform_overrides": {
+        "win32": {
+          "command": "python"
+        }
+      }
+    }
+  },
+  "user_config": {
+    "garmin_email": {
+      "type": "string",
+      "title": "Garmin Connect email",
+      "description": "The email address of your Garmin Connect account.",
+      "required": true
+    },
+    "garmin_password": {
+      "type": "string",
+      "title": "Garmin Connect password",
+      "description": "Stored securely in your OS keychain; sent only to Garmin to log in.",
+      "required": true,
+      "sensitive": true
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "python": ">=3.10"
+    }
+  }
+}

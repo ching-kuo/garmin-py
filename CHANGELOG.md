@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Claude Desktop one-click bundle: `scripts/build_mcpb.py` packages a `.mcpb` extension (manifest with keychain-stored `GARMIN_EMAIL`/`GARMIN_PASSWORD` user config plus a stdlib-only bootstrap that installs the matching PyPI release into a private venv under `~/.garmin-py/mcpb/` on first launch). The install is wheels-only (`--only-binary=:all:`, so no sdist build hooks execute) with the Garmin credentials stripped from pip's environment, serialized by a cross-process lock on POSIX, and self-repairs if the cached venv's interpreter disappears. The publish workflow builds the bundle and attaches it to every GitHub release after the PyPI upload succeeds.
+- `submit_mfa_code` MCP tool and `MFA_REQUIRED` error code: when the env-credential auto-login hits a Garmin multi-factor challenge, the tool call fails with `MFA_REQUIRED` and the login can be completed in-conversation with the one-time code (resumable MFA via `garminconnect` `return_on_mfa`/`resume_login`; the pending login is held in process memory and is single-use).
+
+### Changed
+- `ensure_authenticated`'s credential fallback now uses `return_on_mfa=True`: on MFA-protected accounts it raises `MFA_REQUIRED` (previously the challenge surfaced as an opaque `AUTH_FAILED`), and while a challenge is outstanding further calls re-raise `MFA_REQUIRED` without starting a new login, so concurrent tool calls don't spam the user with fresh codes. Interactive `garmin-cli login` still prompts for the code as before.
+
 ## [2.7.0] - 2026-07-08
 
 ### Added

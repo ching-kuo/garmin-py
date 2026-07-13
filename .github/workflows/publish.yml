@@ -38,3 +38,34 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  mcpb:
+    # The bundle installs the matching release from PyPI on first launch, so
+    # only attach it once the PyPI publish has succeeded.
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build Claude Desktop bundle
+        run: python scripts/build_mcpb.py
+
+      - name: Attach bundle to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        # No --clobber: it deletes the existing asset before uploading, so a
+        # failed rerun could leave the published release without its bundle.
+        run: |
+          ASSET=$(basename dist/*.mcpb)
+          if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qxF "$ASSET"; then
+            echo "$ASSET already attached; skipping upload."
+          else
+            gh release upload "$TAG" dist/*.mcpb
+          fi
