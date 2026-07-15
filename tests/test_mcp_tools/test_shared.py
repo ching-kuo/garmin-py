@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 import pytest
@@ -62,6 +63,11 @@ class TestToolRegistration:
         "login_status",
         "submit_mfa_code",
         "report_snapshot",
+        "coach_snapshot",
+        "training_plan_reconcile",
+        "training_plan_preview",
+        "training_plan_apply",
+        "training_plan_reschedule",
     })
 
     def test_all_tools_registered(self) -> None:
@@ -142,6 +148,20 @@ class TestErrorPropagation:
         server = create_mcp_server(_config())
         with pytest.raises(ToolError, match="garmin-cli login"):
             _call(server, "health_sleep", {"start_date": "2026-01-01", "end_date": "2026-01-01"})
+
+    def test_error_text_has_machine_readable_metadata(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.mcp_tools.health.get_sleep",
+            side_effect=GarminCliError(error="Rate limited by Garmin API.", error_code="RATE_LIMITED"),
+        )
+        server = create_mcp_server(_config())
+        with pytest.raises(ToolError) as exc_info:
+            _call(server, "health_sleep", {"start_date": "2026-01-01", "end_date": "2026-01-01"})
+        payload = json.loads(str(exc_info.value).split(": ", 1)[1])
+        assert payload["error_code"] == "RATE_LIMITED"
+        assert payload["category"] == "rate_limit"
+        assert "retry" in payload["recovery_hint"].lower()
 
     def test_auth_failed_no_login_hint(self, mocker: Any) -> None:
 

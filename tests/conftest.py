@@ -431,6 +431,7 @@ def sample_calendar_raw() -> dict:
             {
                 "date": "2026-03-12",
                 "workoutId": 987654,
+                "workoutScheduleId": 7654321,
                 "title": "Tempo Run",
                 "workoutTypeKey": "running",
                 "durationInSeconds": 3600,
@@ -547,4 +548,3 @@ def sample_all_thresholds_raw() -> dict:
             },
         ]
     }
-

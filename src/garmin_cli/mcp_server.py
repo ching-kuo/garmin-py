@@ -15,9 +15,11 @@ from mcp.server.mcpserver import MCPServer
 from garmin_cli.config import CliConfig
 from garmin_cli.mcp_tools.activities import register_activity_tools
 from garmin_cli.mcp_tools.activities_write import register_activity_write_tools
+from garmin_cli.mcp_tools.coaching import register_coaching_tools
 from garmin_cli.mcp_tools.health import register_health_tools
 from garmin_cli.mcp_tools.misc import register_misc_tools
 from garmin_cli.mcp_tools.performance import register_performance_tools
+from garmin_cli.mcp_tools.training_plan import register_training_plan_tools
 from garmin_cli.mcp_tools.workouts import register_workout_tools
 
 
@@ -50,6 +52,8 @@ def create_mcp_server(
     register_activity_tools(mcp, config)
     register_activity_write_tools(mcp, config)
     register_workout_tools(mcp, config)
+    register_coaching_tools(mcp, config)
+    register_training_plan_tools(mcp, config)
     register_performance_tools(mcp, config)
     register_misc_tools(mcp, config)
 

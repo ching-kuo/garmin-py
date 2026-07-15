@@ -8,6 +8,7 @@ inline at their own module scope instead.
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future
 from contextlib import contextmanager
@@ -69,7 +70,36 @@ def _handle_error(exc: GarminCliError) -> ToolError:
     msg = exc.error
     if exc.error_code == "AUTH_MISSING":
         msg = f"{msg} Run `garmin-cli login` to authenticate interactively."
-    return ToolError(msg)
+    category = {
+        "AUTH_MISSING": "authentication",
+        "AUTH_FAILED": "authentication",
+        "MFA_REQUIRED": "authentication",
+        "INVALID_INPUT": "validation",
+        "NOT_FOUND": "not_found",
+        "RATE_LIMITED": "rate_limit",
+    }.get(exc.error_code, "upstream")
+    recovery_hint = {
+        "authentication": "Reconnect the Garmin account and retry.",
+        "validation": "Correct the request and retry.",
+        "not_found": "Confirm the identifier and retry if the resource still exists.",
+        "rate_limit": "Wait before retrying; do not retry immediately.",
+        "upstream": "Retry later. If the problem persists, check Garmin service status.",
+    }[category]
+    if exc.error_code == "AUTH_MISSING":
+        recovery_hint = "Authenticate with garmin-cli login and retry."
+    elif exc.error_code == "MFA_REQUIRED":
+        # Reconnecting would discard the pending challenge; the MFA flow must
+        # be completed with the code the user received.
+        recovery_hint = "Complete the pending challenge with submit_mfa_code."
+    # MCP's ToolError is text-only in the bundled SDK. A JSON object in that
+    # text channel preserves a stable machine-readable contract while keeping
+    # the existing human-readable message available to older clients.
+    return ToolError(json.dumps({
+        "error_code": exc.error_code,
+        "category": category,
+        "message": msg,
+        "recovery_hint": recovery_hint,
+    }, sort_keys=True))
 
 
 def _authenticated(config: CliConfig, produce: Callable[[], _T]) -> _T:

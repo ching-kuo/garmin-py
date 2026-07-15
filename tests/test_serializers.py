@@ -359,6 +359,8 @@ class TestSerializeCalendarWorkout:
         row = result[0]
         assert row["date"] == "2026-03-12"
         assert row["id"] == 987654
+        assert row["workout_id"] == 987654
+        assert row["workout_schedule_id"] == 7654321
         assert row["name"] == "Tempo Run"
         assert row["type"] == "running"
         # 3600s -> 60 min
@@ -395,6 +397,79 @@ class TestSerializeCalendarWorkout:
         assert row["event_time"] == "07:30"
         assert row["location"] == "Taipei"
         assert row["name"] == "City Half Marathon"
+        assert row["workout_id"] is None
+        assert row["workout_schedule_id"] is None
+
+
+class TestSerializeWorkoutDetailStructure:
+
+    def test_preserves_repeat_tree_and_exposes_write_projection(self) -> None:
+        raw = {
+            "workoutId": 7,
+            "workoutName": "Intervals",
+            "sportType": {"sportTypeKey": "running"},
+            "workoutSegments": [{
+                "segmentOrder": 1,
+                "sportType": {"sportTypeKey": "running"},
+                "workoutSteps": [{
+                    "type": "RepeatGroupDTO",
+                    "stepOrder": 1,
+                    "endCondition": {"conditionTypeKey": "iterations"},
+                    "endConditionValue": 3,
+                    "workoutSteps": [{
+                        "type": "ExecutableStepDTO",
+                        "stepOrder": 1,
+                        "stepType": {"stepTypeKey": "interval"},
+                        "endCondition": {"conditionTypeKey": "time"},
+                        "endConditionValue": 60,
+                        "targetType": {"workoutTargetTypeKey": "no.target"},
+                    }],
+                }],
+            }],
+        }
+
+        row = serialize_workout_detail(raw)[0]
+
+        assert row["segments"][0]["segment_order"] == 1
+        repeat = row["segments"][0]["steps"][0]
+        assert repeat["step_type"] == "repeat"
+        assert repeat["steps"][0]["step_type"] == "interval"
+        assert repeat["raw"]["workoutSteps"][0]["endConditionValue"] == 60
+        assert row["write_compatible"] is True
+        assert row["write_projection"]["steps"][0]["count"] == 3
+
+    def test_supported_builder_shape_has_a_write_projection(self) -> None:
+        raw = {
+            "workoutId": 8,
+            "workoutName": "Easy Run",
+            "sportType": {"sportTypeKey": "running"},
+            "workoutSegments": [{
+                "segmentOrder": 1,
+                "sportType": {"sportTypeKey": "running"},
+                "workoutSteps": [{
+                    "type": "ExecutableStepDTO",
+                    "stepOrder": 1,
+                    "stepType": {"stepTypeKey": "interval"},
+                    "endCondition": {"conditionTypeKey": "time"},
+                    "endConditionValue": 300,
+                    "targetType": {"workoutTargetTypeKey": "heart.rate.zone"},
+                    "zoneNumber": 2,
+                }],
+            }],
+        }
+
+        row = serialize_workout_detail(raw)[0]
+
+        assert row["write_compatible"] is True
+        assert row["write_projection"] == {
+            "name": "Easy Run",
+            "sport": "running",
+            "steps": [{
+                "type": "interval",
+                "duration": {"type": "time", "value": 300},
+                "target": {"type": "heart.rate.zone", "zone": 2},
+            }],
+        }
 
 # ---------------------------------------------------------------------------
 # serialize_thresholds
@@ -1630,3 +1705,8 @@ class TestSerializeBodyBatteryReportsDaily:
 
     def test_empty_values_array_skipped(self) -> None:
         assert serialize_body_battery([{"date": "2026-07-04", "bodyBatteryValuesArray": []}]) == []
+
+
+def test_workout_detail_tolerates_null_segments() -> None:
+    rows = serialize_workout_detail({"workoutId": 1, "workoutName": "X", "workoutSegments": None})
+    assert rows[0]["steps"] == []

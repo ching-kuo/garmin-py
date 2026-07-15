@@ -24,6 +24,7 @@ from garmin_cli.endpoints.workouts import (
     unschedule_workout,
     update_workout,
 )
+from garmin_cli.exceptions import GarminCliError
 from garmin_cli.mcp_tools._shared import (
     WriteLogEvent,
     _envelope,
@@ -74,28 +75,33 @@ def _extract_workout_id(raw: Any) -> int | None:
 def register_workout_tools(mcp: MCPServer, config: CliConfig) -> None:
     """Register the workout read and write tools on ``mcp``."""
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def workout_list(limit: int = 20) -> dict[str, Any]:
         """List saved workouts. Returns id, name, sport, duration_min, description."""
         _validate_limit(limit)
         return _run_tool(config, lambda: list_workouts(limit), serialize_workout_summary)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def workout_get(workout_id: int) -> dict[str, Any]:
         """Get workout detail by ID. Returns id, name, sport, duration_min, description, steps_summary, steps[]."""
         _validate_positive_id(workout_id, "workout_id")
         return _run_tool(config, lambda: get_workout(workout_id), serialize_workout_detail)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def workout_calendar(start_date: str, end_date: str) -> dict[str, Any]:
-        """Get calendar items for a date range (YYYY-MM-DD): scheduled workouts plus races/events. Returns date, id (workoutId for scheduled workouts), name, type, duration_min, description, item_type, is_race, primary_event, event_time, location. Completed activities link back via their workout_id field (activity_get detail=true)."""
+        """Get calendar items for a date range (YYYY-MM-DD).
+
+        Returns scheduled workouts plus races/events. ``id`` remains the legacy
+        calendar identifier; use ``workout_id`` to join a scheduled calendar
+        item to a workout template and ``workout_schedule_id`` to unschedule it.
+        """
         start, end = _parse_date_range(start_date, end_date)
         return _run_tool(
             config, lambda: get_calendar_range(start, end),
             lambda raw: serialize_calendar_workout({"calendarItems": raw}),
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
     def workout_create(
         workout: dict[str, Any], dry_run: bool = False
     ) -> dict[str, Any]:
@@ -187,14 +193,47 @@ def register_workout_tools(mcp: MCPServer, config: CliConfig) -> None:
         base = WriteLogEvent(tool="workout_schedule", outcome="success", workout_id=workout_id)
         with _write_audit(base, _emit_write_log) as audit:
             ensure_authenticated(config)
+            calendar = get_calendar_range(parsed_date, parsed_date)
+            scheduled = serialize_calendar_workout({"calendarItems": calendar})
+            existing = next(
+                (
+                    row
+                    for row in scheduled
+                    if row.get("workout_id") == workout_id
+                ),
+                None,
+            )
+            if existing is not None:
+                audit.success()
+                return _envelope([{
+                    "ok": True,
+                    "action": "no_op",
+                    "workout_id": workout_id,
+                    "workout_schedule_id": existing.get("workout_schedule_id"),
+                    "date": parsed_date.isoformat(),
+                }])
+            if any(row.get("workout_id") is not None for row in scheduled):
+                raise GarminCliError(
+                    error="Target date already has a different scheduled workout.",
+                    error_code="INVALID_INPUT",
+                )
             raw = schedule_workout(workout_id, parsed_date)
             raw_dict = raw if isinstance(raw, dict) else {}
+            schedule_id = raw_dict.get("workoutScheduleId")
+            if not isinstance(schedule_id, int):
+                # Garmin occasionally omits the id from the write response;
+                # re-read the date so the caller can still unschedule later.
+                re_read = serialize_calendar_workout(
+                    {"calendarItems": get_calendar_range(parsed_date, parsed_date)}
+                )
+                match = next((row for row in re_read if row.get("workout_id") == workout_id), None)
+                schedule_id = match.get("workout_schedule_id") if match is not None else None
             audit.success()
             return _envelope([{
                 "ok": True,
                 "action": "scheduled",
                 "workout_id": workout_id,
-                "workout_schedule_id": raw_dict.get("workoutScheduleId"),
+                "workout_schedule_id": schedule_id,
                 "date": raw_dict.get("calendarDate") or parsed_date.isoformat(),
             }])
 

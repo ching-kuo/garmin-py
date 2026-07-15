@@ -2,7 +2,7 @@
 
 Garmin Connect for AI assistants and the command line. garmin-py exposes your health, activity, workout, and performance data as an **MCP server** (Claude Desktop, Claude Code, and any other MCP client) and as a **CLI** (`garmin-cli`) with table, JSON, and CSV output.
 
-Read tools cover sleep, HRV, stress, body battery, training status/load, activities (including raw per-sample streams), planned workouts, race predictions, and personal records; write tools create and schedule structured workouts and manage activities. The `report_snapshot` tool assembles a full morning/evening/weekly report in one call.
+Read tools cover sleep, HRV, stress, body battery, training status/load, activities (including raw per-sample streams), planned workouts, race predictions, and personal records; write tools create and schedule structured workouts and manage activities. `coach_snapshot` assembles bounded recovery, load, execution, and calendar facts for AI coaching, while `training_plan_reconcile` links prescribed workouts to completed activities. The existing `report_snapshot` remains available for fixed morning, evening, and weekly reports.
 
 ## Quick Start: Claude Desktop (one-click)
 
@@ -162,6 +162,17 @@ garmin-cli health intensity-minutes [--date DATE | --from DATE --to DATE | --day
 
 `health status` returns Garmin's full training-load picture for the day: training status, acute/chronic load, acute:chronic workload ratio (ACWR), the chronic-load "tunnel", monthly load-focus buckets with their targets, and load-balance status.
 
+### AI coach
+
+```bash
+garmin-cli --json coach snapshot [--date DATE] [--baseline-days N] [--recent-daily-days N]
+                                  [--include-extended-daily-baselines] [--sport TYPE]...
+```
+
+The default snapshot uses the 28 prior days for ranged signals and activities, nine prior days plus the current date for daily resting-HR and stress calls (leaving slack over the seven-sample baseline minimum for days without data), and at most 30 upstream requests. Baseline medians exclude the current date and require seven valid samples; the resting-HR and stress signals report the shorter daily window they were actually fetched over. Missing and stale values remain explicit in `data_quality`; the server returns neutral facts and does not assign a proprietary readiness score or decide whether a workout is safe.
+
+Extended daily baselines are rejected if their estimated cost exceeds the 30-request cap. A terminal rate limit stops further Garmin calls while preserving completed sections with `complete: false` and `aborted: true`.
+
 ### Activities
 
 ```bash
@@ -268,8 +279,8 @@ Recent fixes normalized several JSON payloads for agent-safe output:
 
 - `performance vo2max` returns `date`, `vo2max`, `sport`
 - `performance zones` returns `sport`, `lt_hr_bpm`, `lt_pace`
-- `workout calendar` includes `id`
-- `workout get` includes `steps` and `steps_summary`
+- `workout calendar` includes compatibility `id` plus explicit `workout_id` and `workout_schedule_id`
+- `workout get` includes recursive `segments`, compatibility `steps`/`steps_summary`, and a `write_projection` only when the workout fits the simplified write schema
 - `health hrv` reads `lastNightAvg` and still falls back to legacy `lastNight`
 
 ## Date Range Options
@@ -338,7 +349,17 @@ garmin-cli --json activity list --limit 5
 
 ## MCP Server
 
-The MCP server exposes read tools for health, activities, workouts, performance, and devices, plus write tools for workouts (`workout_create`, `workout_schedule`, `workout_update`, `workout_delete`, `workout_unschedule`, with dry-run preview on create and update) and activities (`activity_download`, `activity_upload`, `activity_delete`, `activity_rename`, `activity_set_type`). The `report_snapshot` tool assembles a full morning/evening/weekly report in a single call, fanning out the underlying reads server-side — designed for recurring agent-driven daily summaries. See [SKILL.md](SKILL.md#report_snapshot-section-composition) for its section composition.
+The MCP server exposes primitive health, activity, workout, performance, and device tools plus AI-coaching orchestration tools. `coach_snapshot` returns a bounded evidence packet, `training_plan_reconcile` compares the calendar with detailed activities, and `training_plan_preview` provides a no-write diff before the destructive `training_plan_apply` or `training_plan_reschedule` tools. Existing workout and activity write tools remain available. See [SKILL.md](SKILL.md) for complete contracts and limits.
+
+### Synthetic Claude coaching workflow
+
+1. Claude calls `coach_snapshot` and explains the recovery, load, plan, provenance, and any missing-data facts without inventing a readiness score.
+2. Claude calls `training_plan_reconcile` in `summary` mode to separate exact workout associations from explicitly inferred or ambiguous matches.
+3. If the user asks for a changed plan, Claude builds the strict plan object and calls `training_plan_preview`. Preview performs live reads only.
+4. Claude shows the diff and asks for approval in the client. Only after approval should the client invoke `training_plan_apply`; the server does not treat an agent-supplied boolean as human approval.
+5. Apply rechecks live state, creates and verifies destinations first, removes source schedules last, and reports `complete`, `compensated`, `partial`, or `unknown` truthfully.
+
+`training_plan_reconcile(detail="targets")` currently preserves the bounded contract but reports target comparison as `insufficient_data`; interval/metric-stream target coverage remains pending. Apply tools can mutate the Garmin calendar and rely on the MCP client's destructive-tool approval UX.
 
 ### Installation
 

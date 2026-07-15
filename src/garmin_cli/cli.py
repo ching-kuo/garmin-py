@@ -22,6 +22,7 @@ _GLOBAL_OPTIONS_WITH_VALUES = ("--format", "--garmin-home", "--garth-home")
 # asserts they stay in sync.
 _LAZY_SUBCOMMANDS: dict[str, tuple[str, str, str]] = {
     "activity": ("garmin_cli.commands.activities", "activity", "Activity commands."),
+    "coach": ("garmin_cli.commands.coaching", "coach", "AI-coaching data commands."),
     "device": ("garmin_cli.commands.devices", "device", "Device commands."),
     "health": ("garmin_cli.commands.health", "health", "Health data commands."),
     "login": (

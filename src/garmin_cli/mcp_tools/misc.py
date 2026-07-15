@@ -13,6 +13,7 @@ from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp_types import ToolAnnotations
 
 from garmin_cli import backend as garth
 from garmin_cli.auth import _probe_session, _secure_directory, complete_mfa_login
@@ -68,12 +69,12 @@ def _calendar_rows(raw: Any) -> list[dict[str, Any]]:
 def register_misc_tools(mcp: MCPServer, config: CliConfig) -> None:
     """Register device, login-status, and report_snapshot tools on ``mcp``."""
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def device_list() -> dict[str, Any]:
         """List registered Garmin devices. Returns device_id, display_name, device_type, last_sync_time."""
         return _run_tool(config, get_devices, serialize_device)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def login_status() -> dict[str, Any]:
         """Check authentication status. Returns authenticated (bool) and garmin_home path. Never raises for missing sessions."""
         garmin_home = os.path.expanduser(config.garth_home)
@@ -100,7 +101,7 @@ def register_misc_tools(mcp: MCPServer, config: CliConfig) -> None:
             pass  # garth session expired/corrupt -- report as not authenticated
         return {"authenticated": authenticated, "garmin_home": garmin_home}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
     def submit_mfa_code(mfa_code: str) -> dict[str, Any]:
         """Complete a Garmin login that failed with MFA_REQUIRED.
 
@@ -120,7 +121,7 @@ def register_misc_tools(mcp: MCPServer, config: CliConfig) -> None:
             raise _handle_error(exc) from exc
         return {"authenticated": True, "garmin_home": os.path.expanduser(config.garth_home)}
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def report_snapshot(kind: str, date: str | None = None) -> dict[str, Any]:
         """Assemble a multi-section daily or weekly report in a single call, fanning out the underlying reads server-side.
 

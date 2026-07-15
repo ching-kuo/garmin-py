@@ -359,6 +359,59 @@ class TestValidateWorkoutInput:
         errors = _errors(data)
         assert len(errors) >= 2
 
+    @pytest.mark.parametrize("value", [True, False, 0, -1, float("inf"), float("nan")])
+    def test_duration_requires_positive_finite_non_boolean_number(self, value: object) -> None:
+        data = _minimal_workout()
+        data["steps"][0]["duration"]["value"] = value
+        assert any("positive finite number" in error for error in _errors(data))
+
+    @pytest.mark.parametrize(
+        ("target_type", "zone"),
+        [("heart.rate.zone", 0), ("heart.rate.zone", 6), ("power.zone", 0), ("power.zone", 8), ("power.zone", True)],
+    )
+    def test_zone_target_bounds_are_enforced(self, target_type: str, zone: object) -> None:
+        data = _minimal_workout()
+        data["steps"][0]["target"] = {"type": target_type, "zone": zone}
+        assert any("zone" in error and "between" in error for error in _errors(data))
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            {"type": "speed.zone", "min": 4.0, "max": 4.0},
+            {"type": "speed.zone", "min": 4.1, "max": 4.0},
+            {"type": "cadence.zone", "min": -1, "max": 180},
+            {"type": "cadence.zone", "min": 170, "max": float("inf")},
+        ],
+    )
+    def test_range_target_bounds_must_be_finite_non_negative_and_ordered(self, target: dict) -> None:
+        data = _minimal_workout()
+        data["steps"][0]["target"] = target
+        assert _errors(data)
+
+    def test_nested_repeat_is_rejected(self) -> None:
+        data = {
+            **_minimal_workout(),
+            "steps": [{
+                "type": "repeat",
+                "count": 2,
+                "steps": [{
+                    "type": "repeat",
+                    "count": 2,
+                    "steps": [{"type": "interval", "duration": {"type": "time", "value": 60}}],
+                }],
+            }],
+        }
+        assert any("nested repeat" in error for error in _errors(data))
+
+    def test_aggregate_workout_limits_are_enforced(self) -> None:
+        data = _minimal_workout()
+        data["steps"] = [{
+            "type": "repeat",
+            "count": 99,
+            "steps": [{"type": "interval", "duration": {"type": "time", "value": 1000}}],
+        }]
+        assert any("total duration" in error for error in _errors(data))
+
 
 def test_live_verified_end_condition_ids() -> None:
     assert END_CONDITIONS["time"] == 2
@@ -367,3 +420,15 @@ def test_live_verified_end_condition_ids() -> None:
     assert END_CONDITIONS["power"] == 5
     assert END_CONDITIONS["heart.rate"] == 6
     assert END_CONDITIONS["iterations"] == 7
+
+
+def test_description_must_be_a_string_when_supplied() -> None:
+    errors = validate_workout_input(
+        {
+            "name": "Run",
+            "sport": "running",
+            "description": 5,
+            "steps": [{"type": "interval", "duration": {"type": "time", "value": 300}}],
+        }
+    )
+    assert any("'description' must be a string" in error for error in errors)

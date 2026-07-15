@@ -29,7 +29,11 @@ def _call_tool_json(
         result = asyncio.run(mcp_server.call_tool(tool_name, args or {}))
     finally:
         rate_limiter.mark_complete()
-    content_list = result[0] if isinstance(result, tuple) else result
+    # mcp 2.x returns a CallToolResult; 1.x returned a (content, meta) tuple.
+    if hasattr(result, "content"):
+        content_list = result.content
+    else:
+        content_list = result[0] if isinstance(result, tuple) else result
     return json.loads(content_list[0].text)
 
 

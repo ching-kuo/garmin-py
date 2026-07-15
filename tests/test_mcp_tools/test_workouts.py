@@ -228,6 +228,7 @@ class TestMcpWorkoutSchedule:
 
     def test_happy_path(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.mcp_tools.workouts.ensure_authenticated")
+        mocker.patch("garmin_cli.mcp_tools.workouts.get_calendar_range", return_value=[])
         mocker.patch(
             "garmin_cli.mcp_tools.workouts.schedule_workout",
             return_value={"workoutScheduleId": 9988, "calendarDate": "2026-06-01"},
@@ -253,6 +254,37 @@ class TestMcpWorkoutSchedule:
         assert event.tool == "workout_schedule"
         assert event.outcome == "success"
         assert event.workout_id == 12345
+
+    def test_existing_schedule_returns_no_op(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_tools.workouts.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.mcp_tools.workouts.get_calendar_range",
+            return_value=[{
+                "date": "2026-06-01",
+                "workoutId": 12345,
+                "workoutScheduleId": 9988,
+                "title": "Easy Run",
+            }],
+        )
+        schedule = mocker.patch("garmin_cli.mcp_tools.workouts.schedule_workout")
+        log = mocker.patch("garmin_cli.mcp_tools.workouts._emit_write_log")
+        server = create_mcp_server(_config())
+
+        result = _call(
+            server,
+            "workout_schedule",
+            {"workout_id": 12345, "date": "2026-06-01"},
+        )
+
+        assert result["rows"] == [{
+            "ok": True,
+            "action": "no_op",
+            "workout_id": 12345,
+            "workout_schedule_id": 9988,
+            "date": "2026-06-01",
+        }]
+        schedule.assert_not_called()
+        assert log.call_args.args[0].outcome == "success"
 
     def test_destructive_annotation(self) -> None:
         server = create_mcp_server(_config())
@@ -288,6 +320,7 @@ class TestMcpWorkoutSchedule:
 
     def test_upstream_not_found(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.mcp_tools.workouts.ensure_authenticated")
+        mocker.patch("garmin_cli.mcp_tools.workouts.get_calendar_range", return_value=[])
         mocker.patch(
             "garmin_cli.mcp_tools.workouts.schedule_workout",
             side_effect=GarminCliError(error="Not found.", error_code="NOT_FOUND"),
@@ -385,6 +418,20 @@ class TestMcpWorkoutUpdate:
         assert called_payload["atpPlanId"] == 7
         event = log.call_args.args[0]
         assert event.outcome == "success"
+
+    def test_conflicting_schedule_is_rejected(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_tools.workouts.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.mcp_tools.workouts.get_calendar_range",
+            return_value=[{"date": "2026-06-01", "workoutId": 98765, "workoutScheduleId": 9988}],
+        )
+        schedule = mocker.patch("garmin_cli.mcp_tools.workouts.schedule_workout")
+        server = create_mcp_server(_config())
+
+        with pytest.raises(ToolError, match="different scheduled workout"):
+            _call(server, "workout_schedule", {"workout_id": 12345, "date": "2026-06-01"})
+
+        schedule.assert_not_called()
 
     def test_merge_warnings_in_dry_run(self, mocker: Any) -> None:
         """When user_input contains read-only fields, merge_workout_payload

@@ -558,7 +558,7 @@ See README.md for full HTTP transport options and authentication notes.
 
 ### Available tools
 
-Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, `workout_update`, `workout_delete`, `workout_unschedule`) and activities (`activity_download`, `activity_upload`, `activity_delete`, `activity_rename`, `activity_set_type`) are exposed. Mutating write tools carry the SDK `destructive_hint` annotation; workout create and update accept `dry_run=True` for a no-write preview.
+Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, `workout_update`, `workout_delete`, `workout_unschedule`) and activities (`activity_download`, `activity_upload`, `activity_delete`, `activity_rename`, `activity_set_type`) are exposed. AI-coaching tools add bounded snapshots, plan reconciliation, read-only preview, and stateless application. Mutating write tools carry the SDK `destructive_hint` annotation; workout create and update accept `dry_run=True` for a no-write preview.
 
 | Tool | Parameters | Returns |
 |------|-----------|---------|
@@ -583,12 +583,17 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `activity_detail_metrics` | `activity_id`, `metrics?` | `{count, rows}` — raw per-sample time series, one row per sample keyed by metric key (~2000 samples typical). Pass `metrics` as a comma-separated key list (from `activity_metrics_describe`) to keep the response small, e.g. `"directTimestamp,directHeartRate,directPower"`. Use for intra-activity analyses (aerobic decoupling, drift) |
 | `workout_list` | `limit?` | `{count, rows}` |
 | `workout_get` | `workout_id` | `{count, rows}` |
-| `workout_calendar` | `start_date`, `end_date` | `{count, rows}` — scheduled workouts plus races/events (`item_type`, `is_race`, `primary_event`, `event_time`, `location`) |
+| `workout_calendar` | `start_date`, `end_date` | `{count, rows}` — scheduled workouts plus races/events. Rows retain compatibility `id` and add `workout_id` for template/activity joins plus `workout_schedule_id` for unscheduling. |
 | `workout_create` | `workout`, `dry_run?` | `{count, rows}` — `ok: true, action: "created", workout_id` on success; `ok: true, dry_run: true, wire_payload, validation_report` on dry-run; `ok: false, error_code: "INVALID_INPUT", errors` on validation failure. Dry-run skips all Garmin contact. |
 | `workout_schedule` | `workout_id`, `date` | `{count, rows}` — `ok: true, action: "scheduled", workout_id, workout_schedule_id, date`. **Destructive.** |
 | `workout_update` | `workout_id`, `workout`, `dry_run?` | `{count, rows}` — `ok: true, action: "updated", workout_id` on success; dry-run returns the merged wire payload (one Garmin read, no write). Merge semantics preserve `workoutId`/`ownerId`/`createdDate`/`atpPlanId`. **Destructive.** |
 | `workout_delete` | `workout_id` | `{count, rows}` — `ok: true, action: "deleted", workout_id`. **Destructive.** |
 | `workout_unschedule` | `schedule_id` | `{count, rows}` — `ok: true, action: "unscheduled", schedule_id`. Removes a calendar entry (the workout template is preserved); `schedule_id` is the `workout_schedule_id` returned by `workout_schedule`, not the workout id. **Destructive.** |
+| `coach_snapshot` | `date?`, `baseline_days?`, `recent_daily_days?`, `include_extended_daily_baselines?`, `sports?` | Bounded recovery baselines, activity-derived weekly load, current Garmin training status, upcoming plan (today plus six days), wellness rows (readiness, SpO2, steps, weight), execution, data quality, and request provenance. Default cost is 30 Garmin calls, which is also the hard cap. A terminal 429 preserves fetched sections with `complete=false`, `aborted=true`. **Read-only.** |
+| `training_plan_reconcile` | `start_date`, `end_date`, `detail?`, `max_activities?` | Planned-versus-actual entries with exact/inferred/ambiguous match state and request provenance. Range max 28 days; activity cap max 100. Every examined activity requires one detail call because list rows lack `workout_id`. `targets` currently reports explicit `insufficient_data` pending metric-stream coverage. **Read-only.** |
+| `training_plan_preview` | `plan` | Strict validation (one entry per date, canonical YYYY-MM-DD) plus a live, normalized `create_template`/`schedule`/`keep`/`move`/`replace`/`unschedule` diff; conflicts report `source_schedule_changed` or `destination_occupied`. Already-applied moves and removals preview as `keep`/`no_op`. Performs no write. **Read-only.** |
+| `training_plan_apply` | `plan` | Revalidates and rereads live state, writes destinations first, removes sources last, and reports per-operation state plus `complete`, `no_op`, `compensated`, `partial`, or `unknown`. Compensation only touches identifiers returned by this call's own writes. No `confirm` parameter exists; client approval must precede invocation. **Destructive.** |
+| `training_plan_reschedule` | `schedule_id`, `new_date`, `expected_date` | Verifies the expected source date, schedules/verifies the destination before source removal, and compensates a failed move when possible. **Destructive.** |
 | `activity_download` | `activity_id`, `fmt?` (`original`\|`tcx`\|`gpx`\|`kml`\|`csv`), `output_path?`, `overwrite?` | `{count, rows}` — `ok: true, action: "downloaded", activity_id, format, path, size_bytes`. Writes the file to disk (default `activity_<id><ext>` in the cwd); raw bytes are never returned. Refuses to overwrite an existing file unless `overwrite=true`. |
 | `activity_upload` | `file_path` (.fit/.gpx/.tcx) | `{count, rows}` — `ok: true, action: "uploaded", status, activity_id`. `status` is `rejected` when Garmin declines the import (e.g. duplicate); `activity_id` is then null. |
 | `activity_delete` | `activity_id` | `{count, rows}` — `ok: true, action: "deleted", activity_id`. **Destructive.** |
@@ -606,7 +611,13 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `submit_mfa_code` | `mfa_code` | `{authenticated, garmin_home}` — completes a login that failed with `MFA_REQUIRED`; ask the user for the one-time code Garmin sent them. Codes are single-use: on failure, retry the original tool call to trigger a fresh code |
 | `report_snapshot` | `kind` (`morning`\|`evening`\|`weekly`), `date?` | `{kind, date_range, sections, unavailable?}` — one composite call that fans out the day's (or week's) reads server-side. `sections` maps section name → rows (same shapes as the per-domain tools). Sections with no data are empty and listed in `unavailable` with a `reason` (`not_found`\|`no_data`). `date` (YYYY-MM-DD) defaults to today; `weekly` covers the anchor day and the six prior days. |
 
-Dates use `YYYY-MM-DD` format. Max date range: 90 days. Errors surface as MCP ToolError with the original error message.
+Dates use `YYYY-MM-DD` format. Max primitive date range: 90 days. Garmin failures surface as MCP ToolError text containing a JSON object with `error_code`, `category`, `message`, and `recovery_hint` so clients can branch without parsing prose.
+
+#### AI-coaching tool sequence
+
+Use `coach_snapshot` for evidence and `training_plan_reconcile(detail="summary")` for adherence. Keep coaching judgments in the AI host: the server reports neutral deltas, sample counts, Garmin status values, and missing-data state. If a plan change is requested, call `training_plan_preview`, present its live diff to the user, and invoke `training_plan_apply` only after the MCP client obtains human approval. Reapplying an already completed plan is a no-op when the calendar or normalized inline workout is equivalent.
+
+The training-plan schema is closed: unknown fields fail validation. Each entry has a stable `entry_id`, a date, and exactly one of `workout_id` or an inline simplified `workout`; moves, replacements, and removals also require the source schedule ID and expected source date. Preview and apply are stateless and always treat live Garmin calendar state as authoritative.
 
 #### `report_snapshot` section composition
 

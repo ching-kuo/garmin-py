@@ -117,7 +117,7 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
                 "size_bytes": len(payload),
             }])
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
     def activity_upload(file_path: str) -> dict[str, Any]:
         """Upload an activity file (FIT, GPX, or TCX) to Garmin Connect.
 

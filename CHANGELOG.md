@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.9.0] - 2026-07-16
+
+### Added
+
+- AI-coaching read surfaces: `coach_snapshot` (MCP and `garmin-cli coach snapshot`) returns bounded recovery baselines, activity-derived weekly load, current Garmin training status, upcoming calendar items (today plus six days), wellness rows (training readiness, SpO2, steps, weight), execution summaries, data quality, and request provenance. Its default request budget is 30, which is also the hard cap; a terminal rate limit stops further requests and preserves completed sections.
+- `training_plan_reconcile` MCP tool for bounded planned-versus-actual matching. It fetches detail for each examined activity, prefers the structured `workout_id` association, labels date/sport fallback matches as inferred, and leaves ambiguous sessions explicit. Summary mode is implemented; target mode currently reports explicit insufficient-data state pending interval/metric-stream analysis.
+- Stateless `training_plan_preview`, `training_plan_apply`, and `training_plan_reschedule` MCP tools with a closed plan schema, live-state rechecks, semantic duplicate protection, destination-first/destructive-last ordering, compensation of newly created resources, and truthful partial/unknown outcomes. Preview is read-only; apply and reschedule are destructive and rely on MCP client approval.
+
+### Changed
+
+- Calendar workout rows now add `workout_id` and `workout_schedule_id` while retaining compatibility `id`. Workout detail rows preserve recursive segment/repeat structure and expose a simplified `write_projection` only for supported constructs; unsupported constructs remain visible with incompatibility reasons.
+- Workout and plan validation rejects non-finite or non-positive durations, invalid target zones/ranges, unsupported nested repeats, excessive aggregate size, duplicate source schedules, and unknown AI-facing fields before writes.
+- MCP tool annotations now consistently identify read-only and destructive operations. Garmin failures retain machine-readable `error_code`, `category`, `message`, and `recovery_hint` data at the MCP boundary.
+
+### Fixed
+
+- `coach_snapshot` capped its steps window to 28 dates: Garmin's daily-steps endpoint rejects wider spans with a 400 (observed live), which failed every default snapshot. Steps feed the wellness section only, so baselines are unaffected.
+
 ## [2.8.0] - 2026-07-14
 
 ### Added
