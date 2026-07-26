@@ -3,10 +3,10 @@
     {
       "date": "2026-07-05",
       "durationInSeconds": 3000,
+      "id": 4001,
       "itemType": "workout",
       "title": "Tempo Run",
       "workoutId": 3001,
-      "workoutScheduleId": 4001,
       "workoutTypeKey": "running"
     }
   ]

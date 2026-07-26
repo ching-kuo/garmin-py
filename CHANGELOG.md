@@ -19,6 +19,10 @@
 - Read-only status surfaces (`garmin-cli doctor`, MCP `login_status`, and the MCP resources) no longer repair token-store directory permissions or migrate legacy tokens while probing the session — they only report. Login and authenticated tool calls still perform those repairs.
 - Lap-based target scores in `training_plan_reconcile(detail="targets")` report `quality: "lap_summary_aggregate"` when the activity's lap structure does not match the planned steps, since values are then whole-activity aggregates rather than per-step measurements.
 
+### Fixed
+
+- Calendar rows now populate `workout_schedule_id` from the item's `id` field for scheduled workouts. The live calendar payload has no `workoutScheduleId` key (that key only appears in schedule-write responses; verified by the live calendar probe on 2026-07-27), so since v2.9.0 the field was always `null`, which silently broke unschedule matching in `training_plan_apply`/`training_plan_reschedule`. Race and event rows keep `workout_schedule_id: null` because their `id` is not a schedule id.
+
 ## [2.9.0] - 2026-07-16
 
 ### Added

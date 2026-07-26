@@ -449,9 +449,11 @@ def sample_calendar_raw() -> dict:
     return {
         "calendarItems": [
             {
+                # Live calendar shape (verified 2026-07-27): the schedule id
+                # is the plain "id" field; workoutScheduleId is absent.
                 "date": "2026-03-12",
                 "workoutId": 987654,
-                "workoutScheduleId": 7654321,
+                "id": 7654321,
                 "title": "Tempo Run",
                 "workoutTypeKey": "running",
                 "durationInSeconds": 3600,

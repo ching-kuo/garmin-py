@@ -379,6 +379,9 @@ class TestSerializeCalendarWorkout:
             {
                 "calendarItems": [
                     {
+                        # "id" on event rows is an event id, not a schedule id;
+                        # workout_schedule_id must stay None without a workoutId.
+                        "id": 555,
                         "date": "2026-09-20",
                         "itemType": "event",
                         "title": "City Half Marathon",

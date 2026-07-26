@@ -72,9 +72,16 @@ def test_live_calendar_workout_and_schedule_identifier_probe(
         workout_id = _numeric_field(created, "workoutId", "id")
         assert workout_id is not None, "create response lacks an integer workout id field"
 
-        _live_call(
+        scheduled = _live_call(
             rate_limiter,
             lambda: schedule_workout(workout_id, schedule_date),
+        )
+        # Verified live 2026-07-27: the schedule response carries
+        # workoutScheduleId; calendar items do NOT — their schedule id is the
+        # plain ``id`` field.
+        schedule_id = _numeric_field(scheduled, "workoutScheduleId")
+        assert schedule_id is not None, (
+            "schedule response lacks an integer workoutScheduleId field"
         )
         raw_items = _live_call(
             rate_limiter,
@@ -89,9 +96,12 @@ def test_live_calendar_workout_and_schedule_identifier_probe(
             "calendar probe expected one item selected by workoutId field and integer type"
         )
         raw_item = matching[0]
-        schedule_id = _numeric_field(raw_item, "workoutScheduleId")
-        assert schedule_id is not None, (
-            "calendar item lacks an integer workoutScheduleId field"
+        assert "workoutScheduleId" not in raw_item, (
+            "calendar item unexpectedly grew a workoutScheduleId field - "
+            "re-verify the serializer fallback contract"
+        )
+        assert _numeric_field(raw_item, "id") == schedule_id, (
+            "calendar item id does not match the schedule response workoutScheduleId"
         )
 
         serialized = serialize_calendar_workout({"calendarItems": [raw_item]})
@@ -99,8 +109,8 @@ def test_live_calendar_workout_and_schedule_identifier_probe(
         assert serialized[0]["workout_id"] == raw_item["workoutId"], (
             "serialized workout_id does not match raw workoutId field"
         )
-        assert serialized[0]["workout_schedule_id"] == raw_item["workoutScheduleId"], (
-            "serialized workout_schedule_id does not match raw workoutScheduleId field"
+        assert serialized[0]["workout_schedule_id"] == schedule_id, (
+            "serialized workout_schedule_id does not match the live schedule id"
         )
     except Exception as exc:  # cleanup must run for partial writes
         primary_error = exc
@@ -117,13 +127,13 @@ def test_live_calendar_workout_and_schedule_identifier_probe(
                         for item in raw_items
                         if isinstance(item, dict) and item.get("workoutId") == workout_id
                         if (
-                            candidate := _numeric_field(item, "workoutScheduleId")
+                            candidate := _numeric_field(item, "workoutScheduleId", "id")
                         ) is not None
                     ),
                     None,
                 )
             except Exception as exc:
-                cleanup_errors.append(f"calendar lookup: {type(exc).__name__}")
+                cleanup_errors.append(f"calendar lookup: {type(exc).__name__}: {exc}")
         if schedule_id is not None:
             try:
                 _live_call(
@@ -131,7 +141,7 @@ def test_live_calendar_workout_and_schedule_identifier_probe(
                     lambda: unschedule_workout(schedule_id),
                 )
             except Exception as exc:
-                cleanup_errors.append(f"unschedule: {type(exc).__name__}")
+                cleanup_errors.append(f"unschedule: {type(exc).__name__}: {exc}")
         if workout_id is not None:
             try:
                 preserved = _live_call(
@@ -142,18 +152,18 @@ def test_live_calendar_workout_and_schedule_identifier_probe(
                     "workout template was not readable after unscheduling"
                 )
             except Exception as exc:
-                cleanup_errors.append(f"post-unschedule read: {type(exc).__name__}")
+                cleanup_errors.append(f"post-unschedule read: {type(exc).__name__}: {exc}")
             try:
                 _live_call(
                     rate_limiter,
                     lambda: delete_workout(workout_id),
                 )
             except Exception as exc:
-                cleanup_errors.append(f"delete: {type(exc).__name__}")
+                cleanup_errors.append(f"delete: {type(exc).__name__}: {exc}")
 
     if primary_error is not None or cleanup_errors:
         parts = []
         if primary_error is not None:
-            parts.append(f"probe: {type(primary_error).__name__}")
+            parts.append(f"probe: {type(primary_error).__name__}: {primary_error}")
         parts.extend(cleanup_errors)
         pytest.fail("calendar identifier probe errors: " + "; ".join(parts))

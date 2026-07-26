@@ -84,7 +84,7 @@ _CALENDAR_WORKOUT_TABLE = FieldTable(
         FieldEntry("date", (("date",),)),
         FieldEntry("id", (("workoutId",), ("id",))),
         FieldEntry("workout_id", (("workoutId",),)),
-        FieldEntry("workout_schedule_id", (("workoutScheduleId",),)),
+        FieldEntry("workout_schedule_id", (("workoutScheduleId",), ("id",))),
         FieldEntry("name", (("title",),)),
         FieldEntry("type", (("workoutTypeKey",),)),
         FieldEntry("duration_min", (("durationInSeconds",),), _minutes),
@@ -100,9 +100,17 @@ _CALENDAR_WORKOUT_TABLE = FieldTable(
 
 def serialize_calendar_workout(raw: Any) -> list[dict[str, Any]]:
     items = raw.get("calendarItems", []) if isinstance(raw, dict) else []
-    return _CALENDAR_WORKOUT_TABLE.project_all(
+    rows = _CALENDAR_WORKOUT_TABLE.project_all(
         [item for item in items if isinstance(item, dict)]
     )
+    # Live calendar items carry the schedule id in ``id`` (verified against
+    # the live API on 2026-07-27; ``workoutScheduleId`` is absent there and
+    # only appears in schedule-write responses). ``id`` on race/event rows is
+    # not a schedule id, so the fallback applies only to scheduled workouts.
+    for row in rows:
+        if row["workout_id"] is None:
+            row["workout_schedule_id"] = None
+    return rows
 
 
 def serialize_workout_summary(raw: Any) -> list[dict[str, Any]]:
