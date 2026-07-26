@@ -26,7 +26,10 @@ RECORDABLE_BACKEND_FUNCTIONS: tuple[str, ...] = (
     "list_workouts",
 )
 
-_IDENTITY_KEYS = frozenset({
+# Fragments, not exact keys: live payloads prefix identity fields freely
+# (ownerFullName, ownerProfileImageUrlLarge, weather latitude/longitude), so
+# exact matching leaks them. Deny-by-default over-redaction is acceptable.
+_IDENTITY_FRAGMENTS = (
     "displayname",
     "fullname",
     "firstname",
@@ -34,12 +37,13 @@ _IDENTITY_KEYS = frozenset({
     "emailaddress",
     "userprofileid",
     "userprofilepk",
+    "userid",
+    "ownerid",
     "location",
-    "startlatitude",
-    "startlongitude",
-    "endlatitude",
-    "endlongitude",
-})
+    "latitude",
+    "longitude",
+    "profileimageurl",
+)
 _SECRET_FRAGMENTS = ("token", "password", "secret")
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9._=-]+")
 _NUMERIC_PATH_SEGMENT = re.compile(r"(?<=/)\d+(?=/|$)")
@@ -51,10 +55,9 @@ class FixtureMissingError(FileNotFoundError):
 
 def _sensitive_key(key: Any) -> bool:
     lowered = str(key).lower()
-    return (
-        lowered in _IDENTITY_KEYS
-        or lowered.startswith("profileimageurl")
-        or any(fragment in lowered for fragment in _SECRET_FRAGMENTS)
+    return any(
+        fragment in lowered
+        for fragment in _IDENTITY_FRAGMENTS + _SECRET_FRAGMENTS
     )
 
 

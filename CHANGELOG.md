@@ -21,6 +21,7 @@
 
 ### Fixed
 
+- Fixture recording now redacts sensitive key fragments anywhere in a key name instead of exact names: live payloads prefix identity fields (`ownerFullName`, `ownerDisplayName`, `ownerProfileImageUrl*`), carry bare `userId`/`ownerId`, and weather rows carry bare `latitude`/`longitude`, all of which previously leaked into recorded fixtures (found by a live recording run; the leaked local recordings were deleted).
 - Calendar rows now populate `workout_schedule_id` from the item's `id` field for scheduled workouts. The live calendar payload has no `workoutScheduleId` key (that key only appears in schedule-write responses; verified by the live calendar probe on 2026-07-27), so since v2.9.0 the field was always `null`, which silently broke unschedule matching in `training_plan_apply`/`training_plan_reschedule`. Race and event rows keep `workout_schedule_id: null` because their `id` is not a schedule id.
 
 ## [2.9.0] - 2026-07-16

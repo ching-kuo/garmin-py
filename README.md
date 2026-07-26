@@ -524,7 +524,7 @@ To refresh read fixtures against an authenticated account, run:
 pytest tests/ --e2e --record-fixtures
 ```
 
-`--record-fixtures` is rejected unless `--e2e` is also present. Recording occurs at the backend function boundary and redacts identity, location, profile-image, token, password, and secret fields before deterministic, sorted JSON is written. Review every fixture diff before committing it.
+`--record-fixtures` is rejected unless `--e2e` is also present. Recording occurs at the backend function boundary and redacts identity (names, user/owner ids, coordinates), location, profile-image, token, password, and secret key fragments before deterministic, sorted JSON is written. Review every fixture diff before committing it.
 
 Tests that write to Garmin require a second opt-in and are never part of the default or ordinary `--e2e` run:
 

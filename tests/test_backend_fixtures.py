@@ -33,6 +33,15 @@ def test_sanitize_scrubs_every_identity_and_secret_key_recursively() -> None:
         "startLongitude": 139.1,
         "endLatitude": 35.2,
         "endLongitude": 139.2,
+        # Live payloads prefix identity keys (activity owner, weather
+        # coordinates); the sanitizer must match fragments, not exact names.
+        "ownerId": 987,
+        "userId": 654,
+        "ownerDisplayName": "athlete",
+        "ownerFullName": "Athlete Example",
+        "ownerProfileImageUrlSmall": "https://example.test/private-small.jpg",
+        "latitude": 35.3,
+        "longitude": 139.3,
         "nested": [
             {
                 "accessToken": "token-value",
@@ -59,6 +68,13 @@ def test_sanitize_scrubs_every_identity_and_secret_key_recursively() -> None:
         "startLongitude": 0.0,
         "endLatitude": 0.0,
         "endLongitude": 0.0,
+        "ownerId": 0,
+        "userId": 0,
+        "ownerDisplayName": "REDACTED",
+        "ownerFullName": "REDACTED",
+        "ownerProfileImageUrlSmall": "REDACTED",
+        "latitude": 0.0,
+        "longitude": 0.0,
         "nested": [{
             "accessToken": "REDACTED",
             "PASSWORD_HINT": "REDACTED",
