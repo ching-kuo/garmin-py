@@ -19,6 +19,8 @@ from garmin_cli.mcp_tools.coaching import register_coaching_tools
 from garmin_cli.mcp_tools.health import register_health_tools
 from garmin_cli.mcp_tools.misc import register_misc_tools
 from garmin_cli.mcp_tools.performance import register_performance_tools
+from garmin_cli.mcp_tools.prompts import register_prompts
+from garmin_cli.mcp_tools.resources import register_resources
 from garmin_cli.mcp_tools.training_plan import register_training_plan_tools
 from garmin_cli.mcp_tools.workouts import register_workout_tools
 
@@ -56,5 +58,7 @@ def create_mcp_server(
     register_training_plan_tools(mcp, config)
     register_performance_tools(mcp, config)
     register_misc_tools(mcp, config)
+    register_resources(mcp, config)
+    register_prompts(mcp)
 
     return mcp

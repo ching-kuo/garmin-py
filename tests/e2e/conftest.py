@@ -1,12 +1,14 @@
 import json
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
 from click.testing import CliRunner
 
 from garmin_cli.cli import cli
+from tests.backend_fixtures import BackendFixtureController
 
 
 class RateLimiter:
@@ -23,6 +25,15 @@ class RateLimiter:
 
     def mark_complete(self) -> None:
         self._last_completed = time.monotonic()
+
+
+@pytest.fixture(autouse=True)
+def record_backend_fixtures(request, monkeypatch):
+    """Patch backend reads only when the explicit record flag is active."""
+    if not request.config.getoption("--record-fixtures", default=False):
+        return
+    root = Path(__file__).parents[1] / "fixtures" / "backend"
+    BackendFixtureController("record", root).install(monkeypatch)
 
 
 def assert_envelope_ok(parsed: dict[str, Any] | None) -> None:

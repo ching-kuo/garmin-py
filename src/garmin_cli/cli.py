@@ -24,6 +24,11 @@ _LAZY_SUBCOMMANDS: dict[str, tuple[str, str, str]] = {
     "activity": ("garmin_cli.commands.activities", "activity", "Activity commands."),
     "coach": ("garmin_cli.commands.coaching", "coach", "AI-coaching data commands."),
     "device": ("garmin_cli.commands.devices", "device", "Device commands."),
+    "doctor": (
+        "garmin_cli.commands.doctor",
+        "doctor",
+        "Diagnose configuration, authentication, and MCP readiness.",
+    ),
     "health": ("garmin_cli.commands.health", "health", "Health data commands."),
     "login": (
         "garmin_cli.commands.login",

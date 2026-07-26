@@ -48,6 +48,10 @@ def reconcile_plan(
     max_activities: int,
     truncated: bool,
     today: date | None = None,
+    target_comparisons: dict[Any, dict[str, Any]] | None = None,
+    stream_requests: int = 0,
+    sample_budget: int = 0,
+    stream_truncated: bool = False,
 ) -> dict[str, Any]:
     """Match scheduled calendar workouts to fully fetched activity details.
 
@@ -159,10 +163,17 @@ def reconcile_plan(
             else:
                 row.update({"state": "skipped", "match_method": None, "match_confidence": None})
         if detail == "targets" and row["actual"] is not None:
-            row["target_comparison"] = {
-                "state": "insufficient_data",
-                "reason": "target stream analysis is unavailable for this activity",
-            }
+            activity_id = row["actual"]["activity_id"]
+            comparison = (target_comparisons or {}).get(activity_id)
+            if comparison is None:
+                comparison = {
+                    "state": "insufficient_data",
+                    "reason": "target_data_unavailable",
+                    "targets": [],
+                    "data_quality": [{"reason": "target_data_unavailable"}],
+                }
+            row["target_comparison"] = comparison
+            row["data_quality"].extend(comparison.get("data_quality", []))
         entries.append(row)
 
     for activity in activities:
@@ -189,13 +200,20 @@ def reconcile_plan(
                 "data_quality": [{"reason": "missing_activity_id"}],
             }
         )
+    provenance = {
+        "activities_examined": activities_examined,
+        "detail_requests": detail_requests,
+        "max_activities": max_activities,
+        "truncated": truncated,
+        "detail": detail,
+    }
+    if detail == "targets":
+        provenance.update({
+            "stream_requests": stream_requests,
+            "sample_budget": sample_budget,
+            "stream_truncated": stream_truncated,
+        })
     return {
         "entries": entries,
-        "provenance": {
-            "activities_examined": activities_examined,
-            "detail_requests": detail_requests,
-            "max_activities": max_activities,
-            "truncated": truncated,
-            "detail": detail,
-        },
+        "provenance": provenance,
     }

@@ -20,7 +20,12 @@ from mcp.server.mcpserver.exceptions import ToolError
 
 from garmin_cli.auth import ensure_authenticated
 from garmin_cli.config import CliConfig
-from garmin_cli.endpoints._base import _bounded_thread_pool, _cancel_futures_on_error
+from garmin_cli.endpoints._base import (
+    _bounded_thread_pool,
+    _cancel_futures_on_error,
+    _resolve_retry_delays,
+)
+from garmin_cli.error_contracts import error_contract
 from garmin_cli.exceptions import GarminCliError
 
 _MAX_DAYS = 90
@@ -58,8 +63,27 @@ def _validate_limit(value: int) -> int:
     return value
 
 
-def _envelope(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"count": len(rows), "rows": rows}
+def _envelope(
+    rows: list[dict[str, Any]],
+    *,
+    cap: int | None = None,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Wrap rows, preserving the legacy shape unless paging is requested."""
+    if cap is None:
+        return {"count": len(rows), "rows": rows}
+    total = len(rows)
+    page = rows[offset:offset + cap]
+    truncated = offset + len(page) < total
+    result: dict[str, Any] = {
+        "count": len(page),
+        "rows": page,
+        "total": total,
+        "truncated": truncated,
+    }
+    if truncated:
+        result["next_offset"] = offset + len(page)
+    return result
 
 
 def _identity_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -70,35 +94,19 @@ def _handle_error(exc: GarminCliError) -> ToolError:
     msg = exc.error
     if exc.error_code == "AUTH_MISSING":
         msg = f"{msg} Run `garmin-cli login` to authenticate interactively."
-    category = {
-        "AUTH_MISSING": "authentication",
-        "AUTH_FAILED": "authentication",
-        "MFA_REQUIRED": "authentication",
-        "INVALID_INPUT": "validation",
-        "NOT_FOUND": "not_found",
-        "RATE_LIMITED": "rate_limit",
-    }.get(exc.error_code, "upstream")
-    recovery_hint = {
-        "authentication": "Reconnect the Garmin account and retry.",
-        "validation": "Correct the request and retry.",
-        "not_found": "Confirm the identifier and retry if the resource still exists.",
-        "rate_limit": "Wait before retrying; do not retry immediately.",
-        "upstream": "Retry later. If the problem persists, check Garmin service status.",
-    }[category]
-    if exc.error_code == "AUTH_MISSING":
-        recovery_hint = "Authenticate with garmin-cli login and retry."
-    elif exc.error_code == "MFA_REQUIRED":
-        # Reconnecting would discard the pending challenge; the MFA flow must
-        # be completed with the code the user received.
-        recovery_hint = "Complete the pending challenge with submit_mfa_code."
+    contract = error_contract(exc.error_code)
+    retry_after_seconds = (
+        _resolve_retry_delays()[0] if exc.error_code == "RATE_LIMITED" else None
+    )
     # MCP's ToolError is text-only in the bundled SDK. A JSON object in that
     # text channel preserves a stable machine-readable contract while keeping
     # the existing human-readable message available to older clients.
     return ToolError(json.dumps({
         "error_code": exc.error_code,
-        "category": category,
+        "category": contract["category"],
         "message": msg,
-        "recovery_hint": recovery_hint,
+        "recovery_hint": contract["recovery_hint"],
+        "retry_after_seconds": retry_after_seconds,
     }, sort_keys=True))
 
 

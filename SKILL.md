@@ -59,6 +59,15 @@ Always use `--json` for machine-readable output. The tool returns a JSON envelop
 
 ## Commands
 
+### Diagnostics
+
+```bash
+garmin-cli --json doctor
+garmin-cli --json doctor --fast  # skip the authenticated network probe
+```
+
+`doctor` checks Python, configuration, token-store layout and permissions, the optional MCP install, the live session, and MCP write-surface binding. It returns one row per check and exits 1 if any check fails; paths are redacted and credentials are never included.
+
 ### Date range options (health range commands + workout calendar)
 
 | Option | Effect | Example |
@@ -556,6 +565,15 @@ garmin-cli mcp-server --transport streamable-http --host 0.0.0.0 --port 8000
 
 See README.md for full HTTP transport options and authentication notes.
 
+### Resources and prompts
+
+| Resource | Content |
+|----------|---------|
+| `garmin://server/manifest` | Runtime-generated tool inventory and annotations, auth state, error recovery contracts, envelope descriptions, and response caps |
+| `garmin://athlete/profile` | Cached thresholds, VO2max, race predictions, and 7/28-day activity load; unauthenticated reads return a structured body |
+
+Available prompts are `weekly_training_review`, `recovery_check`, `compare_recent_activities`, and `plan_next_week`. They contain workflow instructions only and reference the registered tool surface. `plan_next_week` reminds the client that `training_plan_apply` is destructive and requires human confirmation.
+
 ### Available tools
 
 Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, `workout_update`, `workout_delete`, `workout_unschedule`) and activities (`activity_download`, `activity_upload`, `activity_delete`, `activity_rename`, `activity_set_type`) are exposed. AI-coaching tools add bounded snapshots, plan reconciliation, read-only preview, and stateless application. Mutating write tools carry the SDK `destructive_hint` annotation; workout create and update accept `dry_run=True` for a no-write preview.
@@ -577,10 +595,10 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `activity_list` | `limit?`, `start?`, `activity_type?`, `search?`, `start_date?`, `end_date?` | `{count, rows}` — `start_date`/`end_date` (YYYY-MM-DD) must be provided together |
 | `activity_get` | `activity_id`, `detail?` | `{count, rows, children?, unavailable?}` — `detail=true` projects sport-aware metrics (running dynamics, cycling power, swim aggregates, training response) under a stable union schema and adds an `unavailable[]` capability manifest when non-empty |
 | `activity_weather` | `activity_id` | `{count, rows}` |
-| `activity_laps` | `activity_id` | `{count, rows}` — per-lap rows (run/bike) or per-pool-length rows (lap_swimming) with sport-aware fields. Auto-routes pool swim to typed_splits backend method. Multisport parents fan out to each child leg's laps with a 0-based ``leg_index`` stamped on every row |
+| `activity_laps` | `activity_id`, `offset?` | `{count, rows, total, truncated, next_offset?}` — at most 100 per-lap rows (run/bike) or per-pool-length rows (lap_swimming). Use `offset=next_offset` to continue. Auto-routes pool swim to typed_splits backend method. Multisport parents fan out to each child leg's laps with a 0-based `leg_index` stamped on every row |
 | `activity_hr_zones` | `activity_id` | `{count, rows}` — one row per HR zone with `zone`, `zone_low_bpm`, `zone_high_bpm`, `seconds_in_zone`, `minutes_in_zone` |
 | `activity_metrics_describe` | `activity_id` | `{count, rows}` — descriptors for the metric stream: `key`, `unit`, `metricsIndex`. Use to discover what metrics a watch recorded for a specific activity |
-| `activity_detail_metrics` | `activity_id`, `metrics?` | `{count, rows}` — raw per-sample time series, one row per sample keyed by metric key (~2000 samples typical). Pass `metrics` as a comma-separated key list (from `activity_metrics_describe`) to keep the response small, e.g. `"directTimestamp,directHeartRate,directPower"`. Use for intra-activity analyses (aerobic decoupling, drift) |
+| `activity_detail_metrics` | `activity_id`, `metrics?`, `max_samples?` | `{count, rows, samples_total, samples_returned, stride}` — deterministic whole-stream stride sample keyed by metric key. `max_samples` defaults to 1000 and must be 100..5000. Pass `metrics` as a comma-separated key list (from `activity_metrics_describe`) to reduce columns |
 | `workout_list` | `limit?` | `{count, rows}` |
 | `workout_get` | `workout_id` | `{count, rows}` |
 | `workout_calendar` | `start_date`, `end_date` | `{count, rows}` — scheduled workouts plus races/events. Rows retain compatibility `id` and add `workout_id` for template/activity joins plus `workout_schedule_id` for unscheduling. |
@@ -590,7 +608,7 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `workout_delete` | `workout_id` | `{count, rows}` — `ok: true, action: "deleted", workout_id`. **Destructive.** |
 | `workout_unschedule` | `schedule_id` | `{count, rows}` — `ok: true, action: "unscheduled", schedule_id`. Removes a calendar entry (the workout template is preserved); `schedule_id` is the `workout_schedule_id` returned by `workout_schedule`, not the workout id. **Destructive.** |
 | `coach_snapshot` | `date?`, `baseline_days?`, `recent_daily_days?`, `include_extended_daily_baselines?`, `sports?` | Bounded recovery baselines, activity-derived weekly load, current Garmin training status, upcoming plan (today plus six days), wellness rows (readiness, SpO2, steps, weight), execution, data quality, and request provenance. Default cost is 30 Garmin calls, which is also the hard cap. A terminal 429 preserves fetched sections with `complete=false`, `aborted=true`. **Read-only.** |
-| `training_plan_reconcile` | `start_date`, `end_date`, `detail?`, `max_activities?` | Planned-versus-actual entries with exact/inferred/ambiguous match state and request provenance. Range max 28 days; activity cap max 100. Every examined activity requires one detail call because list rows lack `workout_id`. `targets` currently reports explicit `insufficient_data` pending metric-stream coverage. **Read-only.** |
+| `training_plan_reconcile` | `start_date`, `end_date`, `detail?`, `max_activities?` | Planned-versus-actual entries with exact/inferred/ambiguous match state and request provenance. Range max 28 days; activity cap max 100. `detail="targets"` compares HR, pace, power, and cadence for matched running/cycling activities using zones/laps first and at most 10 streams per call (1000 samples each) only when needed; per-target coverage and quality distinguish missing sensors as `insufficient_data`. **Read-only.** |
 | `training_plan_preview` | `plan` | Strict validation (one entry per date, canonical YYYY-MM-DD) plus a live, normalized `create_template`/`schedule`/`keep`/`move`/`replace`/`unschedule` diff; conflicts report `source_schedule_changed` or `destination_occupied`. Already-applied moves and removals preview as `keep`/`no_op`. Performs no write. **Read-only.** |
 | `training_plan_apply` | `plan` | Revalidates and rereads live state, writes destinations first, removes sources last, and reports per-operation state plus `complete`, `no_op`, `compensated`, `partial`, or `unknown`. Compensation only touches identifiers returned by this call's own writes. No `confirm` parameter exists; client approval must precede invocation. **Destructive.** |
 | `training_plan_reschedule` | `schedule_id`, `new_date`, `expected_date` | Verifies the expected source date, schedules/verifies the destination before source removal, and compensates a failed move when possible. **Destructive.** |
@@ -608,10 +626,11 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `performance_personal_records` | *(none)* | `{count, rows}` — all-time PRs with human-readable `label` (null for unmapped typeIds) |
 | `device_list` | *(none)* | `{count, rows}` — registered devices with type and last sync |
 | `login_status` | *(none)* | `{authenticated, garmin_home}` |
+| `server_doctor` | `fast?` | `{count, rows}` — non-raising Python, config, token-store, session, and MCP write-surface diagnostics. `fast=true` skips the network probe. **Read-only.** |
 | `submit_mfa_code` | `mfa_code` | `{authenticated, garmin_home}` — completes a login that failed with `MFA_REQUIRED`; ask the user for the one-time code Garmin sent them. Codes are single-use: on failure, retry the original tool call to trigger a fresh code |
 | `report_snapshot` | `kind` (`morning`\|`evening`\|`weekly`), `date?` | `{kind, date_range, sections, unavailable?}` — one composite call that fans out the day's (or week's) reads server-side. `sections` maps section name → rows (same shapes as the per-domain tools). Sections with no data are empty and listed in `unavailable` with a `reason` (`not_found`\|`no_data`). `date` (YYYY-MM-DD) defaults to today; `weekly` covers the anchor day and the six prior days. |
 
-Dates use `YYYY-MM-DD` format. Max primitive date range: 90 days. Garmin failures surface as MCP ToolError text containing a JSON object with `error_code`, `category`, `message`, and `recovery_hint` so clients can branch without parsing prose.
+Dates use `YYYY-MM-DD` format. Max primitive date range: 90 days. Garmin failures surface as MCP ToolError text containing a JSON object with `error_code`, `category`, `message`, `recovery_hint`, and `retry_after_seconds` so clients can branch without parsing prose. The retry delay is populated for `RATE_LIMITED` and `null` otherwise.
 
 #### AI-coaching tool sequence
 
@@ -637,6 +656,6 @@ Latency note: `weekly` (and the `daily-summary`/`endurance-score`/`hill-score` r
 
 `activity_get(detail=true)` may carry an `unavailable[]` array (omitted when empty) annotating registry-known metrics with `not_applicable_to_sport` (the metric isn't meaningful for the sport) or `absent_in_response` (the metric applies but the upstream payload didn't include it). Multisport parents union per-child manifests with a 0-based `leg_index` attached. `activity_laps`, `activity_hr_zones`, and `activity_metrics_describe` do not carry the manifest in this release; use `activity_get(detail=true)` for sport-applicability checks.
 
-Planned but not yet implemented: `activity_swim_lengths` (covered by `activity_laps` for `lap_swimming`) and `activity_metrics_series` (down-sampling policy pending). Hardware/profile manifest reasons (`requires_hardware`, `requires_profile_config`) will land alongside a future profile/threshold fetch.
+`activity_swim_lengths` remains unnecessary because `activity_laps` already returns pool lengths for `lap_swimming`. Hardware/profile manifest reasons (`requires_hardware`, `requires_profile_config`) remain future work.
 
 SKILL.md remains the default and simpler integration method. Use MCP when you want native tool semantics without shell command parsing.

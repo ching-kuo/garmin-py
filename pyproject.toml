@@ -44,6 +44,7 @@ exclude = ["tests*"]
 testpaths = ["tests"]
 markers = [
     "e2e: end-to-end tests against real Garmin Connect API",
+    "e2e_writes: end-to-end tests that perform live Garmin writes",
 ]
 
 [tool.ruff]

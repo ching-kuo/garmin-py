@@ -1,0 +1,11 @@
+[
+  {
+    "description": "Synthetic contract fixture",
+    "estimatedDurationInSecs": 3000,
+    "sportType": {
+      "sportTypeKey": "running"
+    },
+    "workoutId": 3001,
+    "workoutName": "Tempo Run"
+  }
+]

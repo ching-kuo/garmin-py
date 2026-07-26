@@ -13,7 +13,38 @@ from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402
 
 from garmin_cli.exceptions import GarminCliError  # noqa: E402
 from garmin_cli.mcp_server import create_mcp_server  # noqa: E402
+from garmin_cli.mcp_tools._shared import _envelope  # noqa: E402
 from tests.test_mcp_tools.support import _call, _config  # noqa: E402
+
+
+def test_envelope_without_cap_preserves_legacy_shape() -> None:
+    rows = [{"id": 1}, {"id": 2}]
+
+    assert _envelope(rows) == {"count": 2, "rows": rows}
+
+
+def test_envelope_cap_pages_and_sets_next_offset() -> None:
+    rows = [{"id": value} for value in range(300)]
+
+    first = _envelope(rows, cap=100)
+    second = _envelope(rows, cap=100, offset=100)
+    final = _envelope(rows, cap=100, offset=200)
+
+    assert first == {
+        "count": 100,
+        "rows": rows[:100],
+        "total": 300,
+        "truncated": True,
+        "next_offset": 100,
+    }
+    assert second["rows"] == rows[100:200]
+    assert second["next_offset"] == 200
+    assert final == {
+        "count": 100,
+        "rows": rows[200:],
+        "total": 300,
+        "truncated": False,
+    }
 
 
 class TestToolRegistration:
@@ -61,6 +92,7 @@ class TestToolRegistration:
         "performance_zones",
         "device_list",
         "login_status",
+        "server_doctor",
         "submit_mfa_code",
         "report_snapshot",
         "coach_snapshot",
@@ -149,7 +181,12 @@ class TestErrorPropagation:
         with pytest.raises(ToolError, match="garmin-cli login"):
             _call(server, "health_sleep", {"start_date": "2026-01-01", "end_date": "2026-01-01"})
 
-    def test_error_text_has_machine_readable_metadata(self, mocker: Any) -> None:
+    def test_error_text_has_machine_readable_metadata(
+        self,
+        mocker: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("GARMIN_CLI_RETRY_DELAYS", raising=False)
         mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
         mocker.patch(
             "garmin_cli.mcp_tools.health.get_sleep",
@@ -162,6 +199,7 @@ class TestErrorPropagation:
         assert payload["error_code"] == "RATE_LIMITED"
         assert payload["category"] == "rate_limit"
         assert "retry" in payload["recovery_hint"].lower()
+        assert payload["retry_after_seconds"] == 2
 
     def test_auth_failed_no_login_hint(self, mocker: Any) -> None:
 

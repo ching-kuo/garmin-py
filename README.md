@@ -102,6 +102,17 @@ The default session directory is `~/.garminconnect`. It is created with `0o700` 
 
 New sessions are stored as `garmin_tokens.json` inside `GARMIN_HOME`. If you still have an existing `~/.garth/garmin_tokens.json`, the CLI will copy it into the new default home on first use. `GARTH_HOME` / `--garth-home` still work as deprecated aliases when you need to keep an older path explicitly.
 
+## Troubleshooting
+
+Run the diagnostic command and paste its output when reporting an installation or authentication problem:
+
+```bash
+garmin-cli doctor
+garmin-cli doctor --fast --format json  # skip the live session probe
+```
+
+The checks cover Python, configuration, token-store layout and permissions, the optional MCP install, the authenticated session, and MCP write-surface binding. Paths are home-relative where possible, and credentials are never included. MCP clients can run the same non-interactive checks with the read-only `server_doctor` tool.
+
 ## Output Formats
 
 All commands default to table output. Use `--json` or `--format csv` to change:
@@ -359,7 +370,18 @@ The MCP server exposes primitive health, activity, workout, performance, and dev
 4. Claude shows the diff and asks for approval in the client. Only after approval should the client invoke `training_plan_apply`; the server does not treat an agent-supplied boolean as human approval.
 5. Apply rechecks live state, creates and verifies destinations first, removes source schedules last, and reports `complete`, `compensated`, `partial`, or `unknown` truthfully.
 
-`training_plan_reconcile(detail="targets")` currently preserves the bounded contract but reports target comparison as `insufficient_data`; interval/metric-stream target coverage remains pending. Apply tools can mutate the Garmin calendar and rely on the MCP client's destructive-tool approval UX.
+`training_plan_reconcile(detail="targets")` adds HR, pace, power, and cadence target comparisons for matched running and cycling activities. It uses HR-zone and lap summaries first, fetches stride-downsampled streams only when required (at most 10 streams per call and 1000 samples per stream), and reports per-target coverage and data quality. Missing sensors and unsupported sports remain explicit `insufficient_data` states rather than failure verdicts. Apply tools can mutate the Garmin calendar and rely on the MCP client's destructive-tool approval UX.
+
+### Resources and prompts
+
+MCP clients can preload two resources:
+
+- `garmin://server/manifest` describes the runtime tool inventory, annotations, error recovery contracts, envelopes, and response limits.
+- `garmin://athlete/profile` returns a cached, bounded thresholds, VO2max, race-prediction, and 7/28-day load snapshot. An unauthenticated read returns a structured unauthenticated body.
+
+Four content-only prompts guide common workflows: `weekly_training_review`, `recovery_check`, `compare_recent_activities`, and `plan_next_week`. The planning prompt explicitly requires human confirmation before invoking destructive apply tools.
+
+Large MCP reads are bounded. `activity_laps(activity_id, offset=0)` returns at most 100 rows and supplies `total`, `truncated`, and `next_offset` paging metadata. `activity_detail_metrics(activity_id, metrics="", max_samples=1000)` accepts 100–5000 samples and deterministically samples the whole stream by stride, reporting `samples_total`, `samples_returned`, and `stride`.
 
 ### Installation
 
@@ -476,8 +498,8 @@ See [SKILL.md](SKILL.md#mcp-server-alternative) for the full tool list and param
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/            # unit tests (1100+ tests)
-pytest tests/ --e2e      # unit + e2e tests (requires GARMIN_HOME/garmin_tokens.json)
+pytest tests/                 # unit and offline contract tests
+pytest tests/ --e2e           # add read-only live e2e tests
 ```
 
 To run MCP server tests, also install the mcp extra:
@@ -487,3 +509,27 @@ pip install -e ".[dev,mcp]"
 ```
 
 E2E tests make real Garmin Connect API calls. They require a valid `garmin_tokens.json` session in `~/.garminconnect` (or `GARMIN_HOME`; `GARTH_HOME` still works as an alias). Set `E2E_RATE_LIMIT_SECONDS` (default: 5) to adjust the inter-request delay.
+
+### Contract tests and fixtures
+
+The default suite includes offline CLI and MCP contract flows backed by sanitized JSON payloads under `tests/fixtures/backend/`:
+
+```bash
+pytest tests/test_contract/
+```
+
+To refresh read fixtures against an authenticated account, run:
+
+```bash
+pytest tests/ --e2e --record-fixtures
+```
+
+`--record-fixtures` is rejected unless `--e2e` is also present. Recording occurs at the backend function boundary and redacts identity, location, profile-image, token, password, and secret fields before deterministic, sorted JSON is written. Review every fixture diff before committing it.
+
+Tests that write to Garmin require a second opt-in and are never part of the default or ordinary `--e2e` run:
+
+```bash
+pytest tests/e2e/test_calendar_probe_e2e.py --e2e --e2e-writes
+```
+
+That probe creates, schedules, unschedules, and deletes a temporary workout. It is intended for maintainer-run identifier verification only.

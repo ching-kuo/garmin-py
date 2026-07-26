@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from garmin_cli import auth as auth_module
-from garmin_cli.auth import complete_mfa_login, ensure_authenticated
+from garmin_cli.auth import complete_mfa_login, ensure_authenticated, probe_session_status
 from garmin_cli.backend import PendingMFA
 from garmin_cli.config import CliConfig
 from garmin_cli.exceptions import GarminCliError
@@ -787,6 +787,43 @@ class TestProbeTtlCache:
 
         ensure_authenticated(config)  # cache hit — security check skipped
         assert secure.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Read-only session probe
+# ---------------------------------------------------------------------------
+
+class TestProbeSessionStatusReadOnly:
+
+    def test_insecure_permissions_are_reported_not_repaired(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        garth_dir = tmp_path / "garth"
+        garth_dir.mkdir()
+        garth_dir.chmod(0o755)
+        mocker.patch("garmin_cli.auth.garth", MagicMock())
+
+        result = probe_session_status(_make_config(garth_home=str(garth_dir)))
+
+        assert result.authenticated is True
+        # The probe is a read surface: it must not chmod the directory.
+        assert stat.S_IMODE(garth_dir.stat().st_mode) == 0o755
+
+    def test_symlinked_home_fails_without_touching_backend(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        real = tmp_path / "real"
+        real.mkdir(mode=0o700)
+        link = tmp_path / "garth"
+        link.symlink_to(real)
+        mock_garth = MagicMock()
+        mocker.patch("garmin_cli.auth.garth", mock_garth)
+
+        result = probe_session_status(_make_config(garth_home=str(link)))
+
+        assert result.authenticated is False
+        assert result.error_code == "AUTH_FAILED"
+        mock_garth.resume.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

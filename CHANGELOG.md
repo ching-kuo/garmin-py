@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Sanitized backend-boundary fixture recording (`--e2e --record-fixtures`) and an offline CLI/MCP replay contract tier with a focused synthetic corpus. Fixture keys are deterministic and identifier-safe; identity, location, image, token, password, and secret fields are redacted before writing.
+- MCP resources `garmin://server/manifest` and `garmin://athlete/profile`, plus the `weekly_training_review`, `recovery_check`, `compare_recent_activities`, and `plan_next_week` prompts. The athlete profile snapshot is cached in-process with the auth-probe TTL: a cache hit performs no network calls, and a rebuild reuses a fresh auth probe instead of issuing its own.
+- `garmin-cli doctor` and the read-only MCP `server_doctor` tool for non-raising configuration, token-store, session, MCP-extra, and write-surface diagnostics.
+- Running/cycling target analysis for `training_plan_reconcile(detail="targets")`, including HR-zone, lap, bounded sample-stream, interval-mapping, coverage, and data-quality results. Missing sensors and unsupported sports report `insufficient_data`. Sample-stream fallback scores are always time-weighted (`time_in_band_pct`), even for distance-prescribed steps, because samples carry equal weights.
+- A maintainer-run calendar identifier probe gated behind both `--e2e` and `--e2e-writes`.
+
+### Changed
+
+- MCP `activity_laps` responses are capped at 100 rows with offset paging metadata.
+- MCP `activity_detail_metrics` now returns a deterministic whole-stream stride sample (1000 samples by default; configurable from 100 to 5000) with sample and stride metadata. Previously it returned the complete stream.
+- Structured MCP errors now include `retry_after_seconds`; rate-limit errors use the first configured retry delay and other errors return `null`.
+- MCP `login_status` no longer raises on an unusable Garmin home (for example a symlinked directory); every failure mode now reports `authenticated: false`. `garmin-cli doctor` surfaces the underlying cause.
+- Read-only status surfaces (`garmin-cli doctor`, MCP `login_status`, and the MCP resources) no longer repair token-store directory permissions or migrate legacy tokens while probing the session — they only report. Login and authenticated tool calls still perform those repairs.
+- Lap-based target scores in `training_plan_reconcile(detail="targets")` report `quality: "lap_summary_aggregate"` when the activity's lap structure does not match the planned steps, since values are then whole-activity aggregates rather than per-step measurements.
+
 ## [2.9.0] - 2026-07-16
 
 ### Added

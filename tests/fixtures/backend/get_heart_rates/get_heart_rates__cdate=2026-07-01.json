@@ -1,0 +1,15 @@
+{
+  "calendarDate": "2026-07-01",
+  "heartRateValues": [
+    [
+      1782860400000,
+      55
+    ],
+    [
+      1782864000000,
+      62
+    ]
+  ],
+  "maxHeartRate": 184,
+  "restingHeartRate": 51
+}

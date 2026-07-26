@@ -1,0 +1,23 @@
+{
+  "mostRecentTrainingLoadBalance": {
+    "metricsTrainingLoadBalanceDTOMap": {
+      "1": {
+        "anaerobicLow": 80,
+        "highAerobicLow": 190,
+        "lowAerobicLow": 270
+      }
+    }
+  },
+  "mostRecentTrainingStatus": {
+    "latestTrainingStatusData": {
+      "1": {
+        "acuteTrainingLoadDTO": {
+          "dailyTrainingLoadAcute": 640
+        },
+        "deviceId": 1,
+        "primaryTrainingDevice": true,
+        "trainingStatus": 2
+      }
+    }
+  }
+}

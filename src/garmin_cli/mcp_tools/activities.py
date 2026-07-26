@@ -41,6 +41,7 @@ from garmin_cli.serializers import (
 )
 from garmin_cli.services.activities import (
     build_capability_manifest,
+    downsample_rows,
     fetch_laps_for_activity,
 )
 
@@ -48,6 +49,18 @@ from garmin_cli.services.activities import (
 def _validate_start_offset(value: int) -> int:
     if value < 0:
         raise ToolError(f"start offset must be >= 0, got {value}")
+    return value
+
+
+def _validate_offset(value: int) -> int:
+    if value < 0:
+        raise ToolError(f"offset must be >= 0, got {value}")
+    return value
+
+
+def _validate_max_samples(value: int) -> int:
+    if value < 100 or value > 5000:
+        raise ToolError(f"max_samples must be between 100 and 5000, got {value}")
     return value
 
 
@@ -135,10 +148,18 @@ def register_activity_tools(mcp: MCPServer, config: CliConfig) -> None:
         return _run_tool(config, lambda: get_activity_weather(activity_id), serialize_activity_weather)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def activity_laps(activity_id: int) -> dict[str, Any]:
-        """Get lap-by-lap data for an activity. For pool-swim activities returns per-pool-length rows with SWOLF, stroke type, and stroke counts; for run/bike activities returns per-lap rows with start_time_gmt/start_time_local, HR, power and cadence (cycling), and running dynamics. For multisport parents (triathlon etc.), returns each child leg's laps concatenated with a 0-based ``leg_index`` stamped on every row."""
+    def activity_laps(activity_id: int, offset: int = 0) -> dict[str, Any]:
+        """Get lap-by-lap data for an activity, capped at 100 rows. Use ``offset`` with ``next_offset`` to page. For pool-swim activities returns per-pool-length rows with SWOLF, stroke type, and stroke counts; for run/bike activities returns per-lap rows with start_time_gmt/start_time_local, HR, power and cadence (cycling), and running dynamics. For multisport parents (triathlon etc.), returns each child leg's laps concatenated with a 0-based ``leg_index`` stamped on every row."""
         _validate_positive_id(activity_id, "activity_id")
-        return _run_tool(config, lambda: _fetch_laps_rows_for_activity(get_activity(activity_id), activity_id))
+        _validate_offset(offset)
+        return _authenticated(
+            config,
+            lambda: _envelope(
+                _fetch_laps_rows_for_activity(get_activity(activity_id), activity_id),
+                cap=100,
+                offset=offset,
+            ),
+        )
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def activity_hr_zones(activity_id: int) -> dict[str, Any]:
@@ -153,10 +174,27 @@ def register_activity_tools(mcp: MCPServer, config: CliConfig) -> None:
         return _run_tool(config, lambda: get_activity_details(activity_id), serialize_metrics_descriptors)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def activity_detail_metrics(activity_id: int, metrics: str = "") -> dict[str, Any]:
-        """Get the raw per-sample metric time series for an activity (Garmin's metricDescriptors/activityDetailMetrics stream). Returns one row per recorded sample keyed by metric key (e.g. directTimestamp, directHeartRate, directPower, directSpeed). A typical activity has ~2000 samples, so pass `metrics` as a comma-separated key list to keep the response small (e.g. "directTimestamp,directHeartRate,directPower"); use activity_metrics_describe to discover available keys. Useful for first-half vs second-half analyses such as aerobic decoupling."""
+    def activity_detail_metrics(
+        activity_id: int,
+        metrics: str = "",
+        max_samples: int = 1000,
+    ) -> dict[str, Any]:
+        """Get a deterministic stride sample of an activity metric stream. ``max_samples`` must be 100..5000 and defaults to 1000; metadata reports the original sample count and stride. Rows are keyed by metric key (e.g. directTimestamp, directHeartRate, directPower, directSpeed). Pass `metrics` as a comma-separated key list to reduce columns; use activity_metrics_describe to discover available keys."""
         _validate_positive_id(activity_id, "activity_id")
+        _validate_max_samples(max_samples)
         wanted = tuple(m.strip() for m in metrics.split(",") if m.strip()) or None
-        # serialize inside the fetch lambda so an unknown-key INVALID_INPUT is
-        # translated by _authenticated like any other GarminCliError
-        return _run_tool(config, lambda: serialize_detail_metrics(get_activity_details(activity_id), wanted))
+
+        def produce() -> dict[str, Any]:
+            rows = serialize_detail_metrics(get_activity_details(activity_id), wanted)
+            sampled, stride = downsample_rows(rows, max_samples)
+            result = _envelope(sampled)
+            result.update({
+                "samples_total": len(rows),
+                "samples_returned": len(sampled),
+                "stride": stride,
+            })
+            return result
+
+        # serialize inside the authenticated producer so an unknown-key
+        # INVALID_INPUT is translated like any other GarminCliError.
+        return _authenticated(config, produce)

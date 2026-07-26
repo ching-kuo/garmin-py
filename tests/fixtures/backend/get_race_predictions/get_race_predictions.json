@@ -1,0 +1,13 @@
+{
+  "calendarDate": "2026-07-01",
+  "raceTimePredictions": [
+    {
+      "distance": 5000,
+      "predictedTime": 1260
+    },
+    {
+      "distance": 10000,
+      "predictedTime": 2640
+    }
+  ]
+}

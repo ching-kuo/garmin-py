@@ -16,6 +16,7 @@ targets effective while the algorithm lives in exactly one place.
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Callable
 
 from garmin_cli.metrics.registry import LAP_SWIM_TYPE_KEYS
@@ -31,6 +32,17 @@ ActivityTypeKeyFn = Callable[[dict[str, Any]], str | None]
 SerializeLapsFn = Callable[[dict[str, Any], Any, SportProfile], list[dict[str, Any]]]
 SerializeDetailFn = Callable[[dict[str, Any]], list[dict[str, Any]]]
 SerializeManifestFn = Callable[..., list[dict[str, Any]]]
+
+
+def downsample_rows(
+    rows: list[dict[str, Any]],
+    max_samples: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """Return a deterministic whole-stream stride sample and its stride."""
+    if not rows:
+        return [], 1
+    stride = max(1, math.ceil(len(rows) / max_samples))
+    return rows[::stride], stride
 
 
 def fetch_one_activity_laps(

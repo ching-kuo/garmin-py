@@ -1,0 +1,26 @@
+[
+  {
+    "activityId": 2001,
+    "activityName": "Morning Run",
+    "activityType": {
+      "typeKey": "running"
+    },
+    "averageHR": 152,
+    "distance": 10000,
+    "duration": 3000,
+    "startTimeLocal": "2026-07-05T07:00:00",
+    "trainingLoad": 110
+  },
+  {
+    "activityId": 2002,
+    "activityName": "Endurance Ride",
+    "activityType": {
+      "typeKey": "cycling"
+    },
+    "averageHR": 138,
+    "distance": 50000,
+    "duration": 7200,
+    "startTimeLocal": "2026-07-08T06:30:00",
+    "trainingLoad": 135
+  }
+]

@@ -1,0 +1,17 @@
+[
+  {
+    "dailySleepDTO": {
+      "awakeSleepSeconds": 1200,
+      "calendarDate": "2026-07-01",
+      "deepSleepSeconds": 5400,
+      "lightSleepSeconds": 12600,
+      "remSleepSeconds": 5400,
+      "sleepScores": {
+        "overall": {
+          "value": 82
+        }
+      },
+      "sleepTimeSeconds": 23400
+    }
+  }
+]

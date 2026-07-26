@@ -15,8 +15,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
 
-from garmin_cli import backend as garth
-from garmin_cli.auth import _probe_session, _secure_directory, complete_mfa_login
+from garmin_cli.auth import complete_mfa_login, probe_session_status
 from garmin_cli.config import CliConfig
 from garmin_cli.endpoints.activities import list_activities
 from garmin_cli.endpoints.devices import get_devices
@@ -32,7 +31,8 @@ from garmin_cli.endpoints.health import (
 )
 from garmin_cli.endpoints.metrics import get_endurance_score_range, get_race_predictions
 from garmin_cli.endpoints.workouts import get_calendar_range
-from garmin_cli.exceptions import GarminCliError, extract_status_code
+from garmin_cli.doctor import run_checks
+from garmin_cli.exceptions import GarminCliError
 from garmin_cli.mcp_tools._shared import (
     ReportSection,
     _authenticated,
@@ -77,29 +77,20 @@ def register_misc_tools(mcp: MCPServer, config: CliConfig) -> None:
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def login_status() -> dict[str, Any]:
         """Check authentication status. Returns authenticated (bool) and garmin_home path. Never raises for missing sessions."""
-        garmin_home = os.path.expanduser(config.garth_home)
-        authenticated = False
-        try:
-            _secure_directory(garmin_home)
-            garth.resume(garmin_home)
-            try:
-                _probe_session(garth)
-                authenticated = True
-            except Exception as exc:
-                if extract_status_code(exc) not in (401, 403):
-                    raise GarminCliError(
-                        error="Saved Garmin session could not be validated.",
-                        error_code="AUTH_FAILED",
-                    ) from exc
-        except FileNotFoundError:
-            pass
-        except OSError as exc:
-            raise ToolError(f"Cannot access session directory: {exc}") from exc
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        except Exception:
-            pass  # garth session expired/corrupt -- report as not authenticated
-        return {"authenticated": authenticated, "garmin_home": garmin_home}
+        probe = probe_session_status(config)
+        return {
+            "authenticated": probe.authenticated,
+            "garmin_home": probe.garmin_home,
+        }
+
+    @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
+    def server_doctor(fast: bool = False) -> dict[str, Any]:
+        """Run non-raising server diagnostics and return one row per check."""
+        results = run_checks(config, fast=fast, include_mcp_extra=False)
+        return {
+            "count": len(results),
+            "rows": [result.to_row() for result in results],
+        }
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
     def submit_mfa_code(mfa_code: str) -> dict[str, Any]:

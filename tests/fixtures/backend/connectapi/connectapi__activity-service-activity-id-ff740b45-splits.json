@@ -1,0 +1,22 @@
+{
+  "lapDTOs": [
+    {
+      "averageBikeCadence": 84,
+      "averageHR": 134,
+      "averagePower": 178,
+      "distance": 25000,
+      "duration": 3600,
+      "lapIndex": 1,
+      "startTimeGMT": "2026-07-07T21:30:00"
+    },
+    {
+      "averageBikeCadence": 88,
+      "averageHR": 142,
+      "averagePower": 192,
+      "distance": 25000,
+      "duration": 3600,
+      "lapIndex": 2,
+      "startTimeGMT": "2026-07-07T22:30:00"
+    }
+  ]
+}

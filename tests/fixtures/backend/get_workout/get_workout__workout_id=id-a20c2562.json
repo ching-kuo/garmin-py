@@ -1,0 +1,32 @@
+{
+  "description": "Synthetic contract fixture",
+  "estimatedDurationInSecs": 3000,
+  "sportType": {
+    "sportTypeKey": "running"
+  },
+  "workoutId": 3001,
+  "workoutName": "Tempo Run",
+  "workoutSegments": [
+    {
+      "segmentOrder": 1,
+      "sportType": {
+        "sportTypeKey": "running"
+      },
+      "workoutSteps": [
+        {
+          "durationType": "time",
+          "durationValue": 3000,
+          "stepOrder": 1,
+          "stepType": {
+            "stepTypeKey": "interval"
+          },
+          "targetType": {
+            "workoutTargetTypeKey": "heart.rate.zone"
+          },
+          "targetValueOne": 3,
+          "zoneNumber": 3
+        }
+      ]
+    }
+  ]
+}

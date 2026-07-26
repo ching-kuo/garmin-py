@@ -38,15 +38,35 @@ def pytest_addoption(parser):
             "tests expect an account with HRV, VO2 max, and threshold data"
         ),
     )
+    parser.addoption(
+        "--record-fixtures",
+        action="store_true",
+        default=False,
+        help="record sanitized backend fixtures (requires --e2e)",
+    )
+    parser.addoption(
+        "--e2e-writes",
+        action="store_true",
+        default=False,
+        help="allow explicitly marked e2e tests that perform live Garmin writes",
+    )
+
+
+def pytest_configure(config):
+    if config.getoption("--record-fixtures") and not config.getoption("--e2e"):
+        raise pytest.UsageError("--record-fixtures is only valid together with --e2e")
 
 
 def pytest_collection_modifyitems(config, items):
-    if config.getoption("--e2e", default=False):
-        return
+    run_e2e = config.getoption("--e2e", default=False)
+    allow_writes = config.getoption("--e2e-writes", default=False)
     skip_e2e = pytest.mark.skip(reason="need --e2e option to run")
+    skip_writes = pytest.mark.skip(reason="need --e2e and --e2e-writes options to run live writes")
     for item in items:
-        if "e2e" in item.keywords:
+        if "e2e" in item.keywords and not run_e2e:
             item.add_marker(skip_e2e)
+        if "e2e_writes" in item.keywords and not (run_e2e and allow_writes):
+            item.add_marker(skip_writes)
 
 
 # ---------------------------------------------------------------------------

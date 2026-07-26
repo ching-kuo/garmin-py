@@ -1,0 +1,20 @@
+{
+  "lapDTOs": [
+    {
+      "averageHR": 145,
+      "averageRunCadence": 170,
+      "distance": 5000,
+      "duration": 1560,
+      "lapIndex": 1,
+      "startTimeGMT": "2026-07-04T22:00:00"
+    },
+    {
+      "averageHR": 159,
+      "averageRunCadence": 176,
+      "distance": 5000,
+      "duration": 1440,
+      "lapIndex": 2,
+      "startTimeGMT": "2026-07-04T22:26:00"
+    }
+  ]
+}

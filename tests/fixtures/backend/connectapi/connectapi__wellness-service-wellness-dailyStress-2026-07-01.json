@@ -1,0 +1,15 @@
+{
+  "avgStressLevel": 28,
+  "calendarDate": "2026-07-01",
+  "maxStressLevel": 72,
+  "stressValuesArray": [
+    [
+      "2026-07-01T08:00:00",
+      24
+    ],
+    [
+      "2026-07-01T12:00:00",
+      35
+    ]
+  ]
+}

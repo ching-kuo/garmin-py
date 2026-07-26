@@ -1,0 +1,20 @@
+{
+  "activityId": 2002,
+  "activityName": "Endurance Ride",
+  "activityType": {
+    "typeKey": "cycling"
+  },
+  "averageHR": 138,
+  "distance": 50000,
+  "duration": 7200,
+  "startTimeGMT": "2026-07-07T21:30:00",
+  "startTimeLocal": "2026-07-08T06:30:00",
+  "summaryDTO": {
+    "averageBikeCadence": 86,
+    "averagePower": 185,
+    "distance": 50000,
+    "duration": 7200,
+    "normalizedPower": 198,
+    "trainingLoad": 135
+  }
+}

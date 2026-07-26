@@ -1,0 +1,50 @@
+{
+  "activityDetailMetrics": [
+    {
+      "metrics": [
+        1783202400000,
+        148,
+        3.2,
+        172
+      ]
+    },
+    {
+      "metrics": [
+        1783202401000,
+        151,
+        3.4,
+        174
+      ]
+    }
+  ],
+  "metricDescriptors": [
+    {
+      "key": "directTimestamp",
+      "metricsIndex": 0,
+      "unit": {
+        "key": "ms"
+      }
+    },
+    {
+      "key": "directHeartRate",
+      "metricsIndex": 1,
+      "unit": {
+        "key": "bpm"
+      }
+    },
+    {
+      "key": "directSpeed",
+      "metricsIndex": 2,
+      "unit": {
+        "key": "mps"
+      }
+    },
+    {
+      "key": "directRunCadence",
+      "metricsIndex": 3,
+      "unit": {
+        "key": "spm"
+      }
+    }
+  ]
+}

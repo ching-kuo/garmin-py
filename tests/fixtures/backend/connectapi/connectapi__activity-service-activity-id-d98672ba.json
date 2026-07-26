@@ -1,0 +1,23 @@
+{
+  "activityId": 2001,
+  "activityName": "Morning Run",
+  "activityType": {
+    "typeKey": "running"
+  },
+  "averageHR": 152,
+  "distance": 10000,
+  "duration": 3000,
+  "metadataDTO": {
+    "associatedWorkoutId": 3001
+  },
+  "startTimeGMT": "2026-07-04T22:00:00",
+  "startTimeLocal": "2026-07-05T07:00:00",
+  "summaryDTO": {
+    "aerobicTrainingEffect": 3.4,
+    "anaerobicTrainingEffect": 1.1,
+    "averageHR": 152,
+    "distance": 10000,
+    "duration": 3000,
+    "trainingLoad": 110
+  }
+}

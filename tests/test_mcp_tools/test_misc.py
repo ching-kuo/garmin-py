@@ -12,6 +12,7 @@ pytest.importorskip("mcp", reason="mcp extra not installed")
 from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402
 
 from garmin_cli import serializers as garmin_serializers  # noqa: E402
+from garmin_cli.auth import SessionProbeResult  # noqa: E402
 from garmin_cli.endpoints import devices as devices_endpoints  # noqa: E402
 from garmin_cli.exceptions import GarminCliError  # noqa: E402
 from garmin_cli.mcp_server import create_mcp_server  # noqa: E402
@@ -239,9 +240,15 @@ class TestLoginStatus:
 
     def test_login_status_authenticated(self, mocker: Any) -> None:
 
-        mocker.patch("garmin_cli.mcp_tools.misc._secure_directory")
-        mocker.patch("garmin_cli.mcp_tools.misc.garth")
-        mocker.patch("garmin_cli.mcp_tools.misc._probe_session")
+        mocker.patch(
+            "garmin_cli.mcp_tools.misc.probe_session_status",
+            return_value=SessionProbeResult(
+                authenticated=True,
+                garmin_home="/tmp/garth",
+                latency_ms=1.0,
+                detail="valid",
+            ),
+        )
         server = create_mcp_server(_config())
         result = _call(server, "login_status", {})
         assert result["authenticated"] is True
@@ -249,19 +256,51 @@ class TestLoginStatus:
 
     def test_login_status_not_authenticated(self, mocker: Any) -> None:
 
-        mocker.patch("garmin_cli.mcp_tools.misc._secure_directory")
-        mocker.patch("garmin_cli.mcp_tools.misc.garth")
-        mocker.patch("garmin_cli.mcp_tools.misc.garth.resume", side_effect=FileNotFoundError)
+        mocker.patch(
+            "garmin_cli.mcp_tools.misc.probe_session_status",
+            return_value=SessionProbeResult(
+                authenticated=False,
+                garmin_home="/tmp/garth",
+                latency_ms=1.0,
+                error_code="AUTH_MISSING",
+                detail="missing",
+            ),
+        )
         server = create_mcp_server(_config())
         result = _call(server, "login_status", {})
         assert result["authenticated"] is False
 
-    def test_login_status_symlink_raises(self, mocker: Any) -> None:
+    def test_login_status_symlink_is_non_raising(self, mocker: Any) -> None:
 
-        mocker.patch("garmin_cli.mcp_tools.misc._secure_directory", side_effect=GarminCliError(error="symlink", error_code="AUTH_FAILED"))
+        mocker.patch(
+            "garmin_cli.mcp_tools.misc.probe_session_status",
+            return_value=SessionProbeResult(
+                authenticated=False,
+                garmin_home="/tmp/garth",
+                latency_ms=1.0,
+                error_code="AUTH_FAILED",
+                detail="unusable",
+            ),
+        )
         server = create_mcp_server(_config())
-        with pytest.raises(ToolError, match="symlink"):
-            _call(server, "login_status", {})
+        result = _call(server, "login_status", {})
+        assert result["authenticated"] is False
+
+
+class TestServerDoctor:
+
+    def test_server_doctor_returns_check_rows(self, mocker: Any) -> None:
+        mocker.patch(
+            "garmin_cli.doctor.probe_session_status",
+            side_effect=RuntimeError("unexpected"),
+        )
+        server = create_mcp_server(_config())
+
+        result = _call(server, "server_doctor", {})
+
+        assert result["count"] == len(result["rows"])
+        assert any(row["name"] == "session" for row in result["rows"])
+        assert all("ok" in row for row in result["rows"])
 
 
 class TestSubmitMfaCode:

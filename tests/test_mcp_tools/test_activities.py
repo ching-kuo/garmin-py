@@ -518,3 +518,71 @@ class TestActivityTools:
         server = create_mcp_server(_config())
         with pytest.raises(ToolError, match="positive"):
             _call(server, "activity_metrics_describe", {"activity_id": 0})
+
+
+def test_activity_laps_pages_large_payload(mocker: Any) -> None:
+    mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+    mocker.patch(
+        "garmin_cli.mcp_tools.activities.get_activity",
+        return_value={"activityId": 1, "activityType": {"typeKey": "running"}},
+    )
+    mocker.patch(
+        "garmin_cli.mcp_tools.activities.get_activity_splits",
+        return_value={
+            "lapDTOs": [
+                {"duration": 60, "distance": 1000}
+                for _ in range(300)
+            ],
+        },
+    )
+    server = create_mcp_server(_config())
+
+    first = _call(server, "activity_laps", {"activity_id": 1})
+    second = _call(server, "activity_laps", {"activity_id": 1, "offset": 100})
+
+    assert first["count"] == 100
+    assert first["total"] == 300
+    assert first["truncated"] is True
+    assert first["next_offset"] == 100
+    assert first["rows"][0]["lap_index"] == 1
+    assert second["rows"][0]["lap_index"] == 101
+    assert second["next_offset"] == 200
+
+
+def test_activity_detail_metrics_downsamples_deterministically(mocker: Any) -> None:
+    mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+    mocker.patch(
+        "garmin_cli.mcp_tools.activities.get_activity_details",
+        return_value={
+            "metricDescriptors": [
+                {"key": "directTimestamp", "metricsIndex": 0},
+                {"key": "directHeartRate", "metricsIndex": 1},
+            ],
+            "activityDetailMetrics": [
+                {"metrics": [index, 120 + index % 20]}
+                for index in range(20_000)
+            ],
+        },
+    )
+    server = create_mcp_server(_config())
+
+    first = _call(server, "activity_detail_metrics", {"activity_id": 1})
+    second = _call(server, "activity_detail_metrics", {"activity_id": 1})
+
+    assert first == second
+    assert first["samples_total"] == 20_000
+    assert first["samples_returned"] == 1000
+    assert first["stride"] == 20
+    assert len(first["rows"]) <= 1000
+    assert [row["directTimestamp"] for row in first["rows"][:3]] == [0, 20, 40]
+
+
+@pytest.mark.parametrize("max_samples", [99, 5001])
+def test_activity_detail_metrics_rejects_invalid_sample_cap(max_samples: int) -> None:
+    server = create_mcp_server(_config())
+    with pytest.raises(ToolError, match="max_samples must be between"):
+        _call(
+            server,
+            "activity_detail_metrics",
+            {"activity_id": 1, "max_samples": max_samples},
+        )

@@ -1,0 +1,17 @@
+[
+  {
+    "calendarDate": "2026-07-01",
+    "totalDistance": 7200,
+    "totalSteps": 9100
+  },
+  {
+    "calendarDate": "2026-07-02",
+    "totalDistance": 8400,
+    "totalSteps": 10500
+  },
+  {
+    "calendarDate": "2026-07-03",
+    "totalDistance": 6400,
+    "totalSteps": 8000
+  }
+]

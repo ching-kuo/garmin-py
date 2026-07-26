@@ -5,6 +5,7 @@ import logging
 import os
 import threading
 import time
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
@@ -28,6 +29,17 @@ _probe_cache_lock: threading.Lock = threading.Lock()
 _last_probe_ok: dict[str, float] = {}
 # The garth_home for which the backend is currently loaded.
 _cached_garth_home: str | None = None
+
+
+@dataclass(frozen=True)
+class SessionProbeResult:
+    """Non-raising status from validating a saved Garmin session."""
+
+    authenticated: bool
+    garmin_home: str
+    latency_ms: float
+    error_code: str | None = None
+    detail: str = ""
 
 
 def _get_probe_ttl() -> float:
@@ -222,6 +234,61 @@ def _probe_session(garth_client: Any | None = None) -> None:
     today = date.today()
     garth_client.connectapi(
         f"/calendar-service/year/{today.year}/month/{today.month - 1}/day/{today.day}/start/1"
+    )
+
+
+def probe_session_status(config: CliConfig) -> SessionProbeResult:
+    """Resume and validate the saved session without ever raising.
+
+    This is a read-only surface (doctor, login_status, resources): it reports
+    problems without repairing directory permissions or migrating legacy
+    tokens — those side effects belong to :func:`ensure_authenticated`.
+
+    Error details are intentionally generic: callers may print this result and
+    must not leak upstream response bodies, account identifiers, or tokens.
+    """
+    garmin_home = os.path.expanduser(config.garth_home)
+    started = time.monotonic()
+    authenticated = False
+    error_code: str | None = None
+    detail = "Saved Garmin session is unavailable."
+    try:
+        if os.path.islink(garmin_home):
+            raise GarminCliError(
+                error=f"garmin_home path '{garmin_home}' is a symlink — refusing for security",
+                error_code="AUTH_FAILED",
+            )
+        garth.resume(garmin_home)
+        _probe_session()
+        authenticated = True
+        detail = "Saved Garmin session is valid."
+    except FileNotFoundError:
+        error_code = "AUTH_MISSING"
+        detail = "No saved Garmin session was found."
+    except OSError:
+        error_code = "AUTH_FAILED"
+        detail = "The Garmin session directory cannot be accessed."
+    except GarminCliError as exc:
+        error_code = exc.error_code
+        detail = (
+            "The Garmin session path is not usable."
+            if exc.error_code == "AUTH_FAILED"
+            else "The saved Garmin session could not be validated."
+        )
+    except Exception as exc:
+        status = extract_status_code(exc)
+        error_code = "AUTH_FAILED"
+        detail = (
+            "The saved Garmin session was rejected."
+            if status in (401, 403)
+            else "The saved Garmin session could not be validated."
+        )
+    return SessionProbeResult(
+        authenticated=authenticated,
+        garmin_home=garmin_home,
+        latency_ms=round((time.monotonic() - started) * 1000, 1),
+        error_code=error_code,
+        detail=detail,
     )
 
 
