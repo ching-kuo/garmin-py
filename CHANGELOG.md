@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [2.10.0] - 2026-07-30
 
 ### Added
 
@@ -15,6 +15,7 @@
 - MCP `activity_laps` responses are capped at 100 rows with offset paging metadata.
 - MCP `activity_detail_metrics` now returns a deterministic whole-stream stride sample (1000 samples by default; configurable from 100 to 5000) with sample and stride metadata. Previously it returned the complete stream.
 - Structured MCP errors now include `retry_after_seconds`; rate-limit errors use the first configured retry delay and other errors return `null`.
+- The `mcp` extra now requires the stable v2 SDK: `mcp[cli]>=2.0.0,<3` (the v2.0.0 stable release is out; the pre-release floor `2.0.0b1` is no longer needed). No code changes were required — the server-side surface this package uses (`MCPServer`, `ToolAnnotations`, `ToolError`, auth settings) is unchanged since the beta.
 - MCP `login_status` no longer raises on an unusable Garmin home (for example a symlinked directory); every failure mode now reports `authenticated: false`. `garmin-cli doctor` surfaces the underlying cause.
 - Read-only status surfaces (`garmin-cli doctor`, MCP `login_status`, and the MCP resources) no longer repair token-store directory permissions or migrate legacy tokens while probing the session — they only report. Login and authenticated tool calls still perform those repairs.
 - Lap-based target scores in `training_plan_reconcile(detail="targets")` report `quality: "lap_summary_aggregate"` when the activity's lap structure does not match the planned steps, since values are then whole-activity aggregates rather than per-step measurements.
