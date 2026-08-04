@@ -27,15 +27,16 @@ from garmin_cli.endpoints.workouts import (
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.mcp_tools._shared import (
     WriteLogEvent,
-    _envelope,
     _parse_date,
     _parse_date_range,
     _run_tool,
     _validate_limit,
     _validate_positive_id,
     _validation_envelope,
+    _write_envelope,
     _write_audit,
 )
+from garmin_cli.mcp_tools._schemas import Envelope, WriteEnvelope
 from garmin_cli.serializers import (
     serialize_calendar_workout,
     serialize_workout_detail,
@@ -76,19 +77,19 @@ def register_workout_tools(mcp: MCPServer, config: CliConfig) -> None:
     """Register the workout read and write tools on ``mcp``."""
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def workout_list(limit: int = 20) -> dict[str, Any]:
+    def workout_list(limit: int = 20) -> Envelope:
         """List saved workouts. Returns id, name, sport, duration_min, description."""
         _validate_limit(limit)
         return _run_tool(config, lambda: list_workouts(limit), serialize_workout_summary)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def workout_get(workout_id: int) -> dict[str, Any]:
+    def workout_get(workout_id: int) -> Envelope:
         """Get workout detail by ID. Returns id, name, sport, duration_min, description, steps_summary, steps[]."""
         _validate_positive_id(workout_id, "workout_id")
         return _run_tool(config, lambda: get_workout(workout_id), serialize_workout_detail)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def workout_calendar(start_date: str, end_date: str) -> dict[str, Any]:
+    def workout_calendar(start_date: str, end_date: str) -> Envelope:
         """Get calendar items for a date range (YYYY-MM-DD).
 
         Returns scheduled workouts plus races/events. ``id`` remains the legacy
@@ -104,7 +105,7 @@ def register_workout_tools(mcp: MCPServer, config: CliConfig) -> None:
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
     def workout_create(
         workout: dict[str, Any], dry_run: bool = False
-    ) -> dict[str, Any]:
+    ) -> WriteEnvelope:
         """Create a new workout from a simplified schema dict.
 
         The ``workout`` parameter accepts:
@@ -163,7 +164,7 @@ def register_workout_tools(mcp: MCPServer, config: CliConfig) -> None:
 
             if dry_run:
                 audit.dry_run()
-                return _envelope([{
+                return _write_envelope([{
                     "ok": True,
                     "dry_run": True,
                     "wire_payload": payload,
@@ -174,14 +175,14 @@ def register_workout_tools(mcp: MCPServer, config: CliConfig) -> None:
             raw = create_workout(payload)
             workout_id = _extract_workout_id(raw)
             audit.success(workout_id=workout_id)
-            return _envelope([{
+            return _write_envelope([{
                 "ok": True,
                 "action": "created",
                 "workout_id": workout_id,
             }])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
-    def workout_schedule(workout_id: int, date: str) -> dict[str, Any]:
+    def workout_schedule(workout_id: int, date: str) -> WriteEnvelope:
         """Schedule a saved workout on a calendar date (YYYY-MM-DD).
 
         Destructive: a scheduled date is added to the user's training calendar.
@@ -205,7 +206,7 @@ def register_workout_tools(mcp: MCPServer, config: CliConfig) -> None:
             )
             if existing is not None:
                 audit.success()
-                return _envelope([{
+                return _write_envelope([{
                     "ok": True,
                     "action": "no_op",
                     "workout_id": workout_id,
@@ -229,7 +230,7 @@ def register_workout_tools(mcp: MCPServer, config: CliConfig) -> None:
                 match = next((row for row in re_read if row.get("workout_id") == workout_id), None)
                 schedule_id = match.get("workout_schedule_id") if match is not None else None
             audit.success()
-            return _envelope([{
+            return _write_envelope([{
                 "ok": True,
                 "action": "scheduled",
                 "workout_id": workout_id,
@@ -242,7 +243,7 @@ def register_workout_tools(mcp: MCPServer, config: CliConfig) -> None:
         workout_id: int,
         workout: dict[str, Any],
         dry_run: bool = False,
-    ) -> dict[str, Any]:
+    ) -> WriteEnvelope:
         """Update an existing workout. Merge semantics: pass only the fields
         you want to change; omitted fields are preserved from the existing
         record (matches the ``garmin-cli workout update`` CLI behavior).
@@ -279,7 +280,7 @@ def register_workout_tools(mcp: MCPServer, config: CliConfig) -> None:
 
             if dry_run:
                 audit.dry_run()
-                return _envelope([{
+                return _write_envelope([{
                     "ok": True,
                     "dry_run": True,
                     "wire_payload": merged,
@@ -294,14 +295,14 @@ def register_workout_tools(mcp: MCPServer, config: CliConfig) -> None:
             # RAW_FALLBACKS until python-garminconnect exposes a typed helper.
             update_workout(workout_id, merged)
             audit.success()
-            return _envelope([{
+            return _write_envelope([{
                 "ok": True,
                 "action": "updated",
                 "workout_id": workout_id,
             }])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
-    def workout_delete(workout_id: int) -> dict[str, Any]:
+    def workout_delete(workout_id: int) -> WriteEnvelope:
         """Delete a saved workout by ID.
 
         Destructive: the workout is permanently removed. Returns
@@ -313,14 +314,14 @@ def register_workout_tools(mcp: MCPServer, config: CliConfig) -> None:
             ensure_authenticated(config)
             delete_workout(workout_id)
             audit.success()
-            return _envelope([{
+            return _write_envelope([{
                 "ok": True,
                 "action": "deleted",
                 "workout_id": workout_id,
             }])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
-    def workout_unschedule(schedule_id: int) -> dict[str, Any]:
+    def workout_unschedule(schedule_id: int) -> WriteEnvelope:
         """Remove a scheduled workout from the calendar by schedule ID.
 
         ``schedule_id`` is the ``workout_schedule_id`` returned by
@@ -337,7 +338,7 @@ def register_workout_tools(mcp: MCPServer, config: CliConfig) -> None:
             ensure_authenticated(config)
             unschedule_workout(schedule_id)
             audit.success()
-            return _envelope([{
+            return _write_envelope([{
                 "ok": True,
                 "action": "unscheduled",
                 "schedule_id": schedule_id,

@@ -162,8 +162,12 @@ class TestMcpActivityDownload:
     def test_not_destructive_annotation(self) -> None:
         server = create_mcp_server(_config())
         ann = _tool_annotations(server, "activity_download")
-        # Writing a local file is not a destructive Garmin mutation.
-        assert ann is None or ann.destructive_hint is not True
+        # Writing a local file is not a destructive Garmin mutation, but it is
+        # still a write; it refuses to overwrite an existing file by default.
+        assert ann is not None
+        assert ann.read_only_hint is False
+        assert ann.destructive_hint is False
+        assert ann.idempotent_hint is None
 
 
 class TestMcpActivityUpload:

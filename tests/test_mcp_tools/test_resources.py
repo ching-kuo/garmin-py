@@ -48,6 +48,87 @@ def test_server_lists_exactly_two_resources() -> None:
         "garmin://server/manifest",
         "garmin://athlete/profile",
     }
+    templates = asyncio.run(server.list_resource_templates())
+    assert {str(template.uri_template) for template in templates} == {
+        "garmin://activity/{id}",
+        "garmin://health/sleep/{date}",
+    }
+
+
+def test_activity_template_matches_activity_get_envelope(mocker: Any) -> None:
+    mocker.patch(
+        "garmin_cli.mcp_tools.resources._auth_state",
+        return_value=("authenticated", {"state": "authenticated"}),
+    )
+    mocker.patch(
+        "garmin_cli.mcp_tools.activities.get_activity",
+        return_value={
+            "activityId": 123,
+            "startTimeLocal": "2026-01-01",
+            "activityName": "Run",
+            "activityType": {"typeKey": "running"},
+            "distance": 10000,
+            "duration": 3600,
+        },
+    )
+    server = create_mcp_server(_config())
+
+    payload = _read(server, "garmin://activity/123")
+
+    assert payload["count"] == 1
+    assert payload["rows"][0]["id"] == 123
+
+
+def test_sleep_template_matches_one_day_health_sleep_envelope(mocker: Any) -> None:
+    mocker.patch(
+        "garmin_cli.mcp_tools.resources._auth_state",
+        return_value=("authenticated", {"state": "authenticated"}),
+    )
+    get_sleep = mocker.patch(
+        "garmin_cli.mcp_tools.resources.get_sleep",
+        return_value=[{"dailySleepDTO": {"calendarDate": "2026-01-01", "sleepTimeSeconds": 28800}}],
+    )
+    server = create_mcp_server(_config())
+
+    payload = _read(server, "garmin://health/sleep/2026-01-01")
+
+    assert payload["count"] == 1
+    assert payload["rows"][0]["date"] == "2026-01-01"
+    get_sleep.assert_called_once_with(date(2026, 1, 1), date(2026, 1, 1))
+
+
+@pytest.mark.parametrize(
+    ("uri", "error_code"),
+    [
+        ("garmin://activity/not-an-id", "INVALID_INPUT"),
+        ("garmin://health/sleep/not-a-date", "INVALID_INPUT"),
+    ],
+)
+def test_template_validation_errors_keep_json_error_contract(
+    uri: str,
+    error_code: str,
+) -> None:
+    server = create_mcp_server(_config())
+
+    with pytest.raises(Exception) as exc_info:
+        asyncio.run(server.read_resource(uri))
+
+    payload = json.loads(str(exc_info.value))
+    assert payload["error_code"] == error_code
+
+
+def test_template_auth_error_keeps_json_error_contract(mocker: Any) -> None:
+    mocker.patch(
+        "garmin_cli.mcp_tools.resources._auth_state",
+        return_value=("unauthenticated", {"error_code": "AUTH_MISSING"}),
+    )
+    server = create_mcp_server(_config())
+
+    with pytest.raises(Exception) as exc_info:
+        asyncio.run(server.read_resource("garmin://activity/123"))
+
+    payload = json.loads(str(exc_info.value))
+    assert payload["error_code"] == "AUTH_MISSING"
 
 
 def test_manifest_inventory_matches_registered_tools(
@@ -74,6 +155,12 @@ def test_manifest_inventory_matches_registered_tools(
     assert manifest["limits"]["activity_detail_metrics_default_samples"] == 1000
     assert manifest["limits"]["reconciliation_target_streams_per_call"] == 10
     assert manifest["error_codes"]["RATE_LIMITED"]["retry_after_seconds"] == 2
+    assert {
+        resource["uri"] for resource in manifest["resources"]["templates"]
+    } == {
+        "garmin://activity/{id}",
+        "garmin://health/sleep/{date}",
+    }
 
 
 def test_unauthenticated_profile_returns_structured_body_without_fetches(

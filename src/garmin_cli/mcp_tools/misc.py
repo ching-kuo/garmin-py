@@ -41,6 +41,7 @@ from garmin_cli.mcp_tools._shared import (
     _parse_date,
     _run_tool,
 )
+from garmin_cli.mcp_tools._schemas import Envelope, SessionStatus
 from garmin_cli.serializers import (
     serialize_activity_summary,
     serialize_body_battery,
@@ -70,12 +71,12 @@ def register_misc_tools(mcp: MCPServer, config: CliConfig) -> None:
     """Register device, login-status, and report_snapshot tools on ``mcp``."""
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def device_list() -> dict[str, Any]:
+    def device_list() -> Envelope:
         """List registered Garmin devices. Returns device_id, display_name, device_type, last_sync_time."""
         return _run_tool(config, get_devices, serialize_device)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def login_status() -> dict[str, Any]:
+    def login_status() -> SessionStatus:
         """Check authentication status. Returns authenticated (bool) and garmin_home path. Never raises for missing sessions."""
         probe = probe_session_status(config)
         return {
@@ -84,7 +85,7 @@ def register_misc_tools(mcp: MCPServer, config: CliConfig) -> None:
         }
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def server_doctor(fast: bool = False) -> dict[str, Any]:
+    def server_doctor(fast: bool = False) -> Envelope:
         """Run non-raising server diagnostics and return one row per check."""
         results = run_checks(config, fast=fast, include_mcp_extra=False)
         return {
@@ -93,7 +94,7 @@ def register_misc_tools(mcp: MCPServer, config: CliConfig) -> None:
         }
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
-    def submit_mfa_code(mfa_code: str) -> dict[str, Any]:
+    def submit_mfa_code(mfa_code: str) -> SessionStatus:
         """Complete a Garmin login that failed with MFA_REQUIRED.
 
         When any tool reports that Garmin requires a multi-factor

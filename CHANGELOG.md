@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- MCP v2 server instructions now describe authentication, response and error contracts, limits, write approval guidance, and discovery resources at connection time.
+- MCP entity resource templates for `garmin://activity/{id}` and `garmin://health/sleep/{date}`.
+
+### Changed
+
+- MCP tool output schemas now expose machine-readable envelope and locally-owned result contracts, including paging metadata, instead of generic open-object schemas.
+- `activity_download` now advertises explicit non-destructive local-file annotations, and all registered tools are guarded against missing annotations.
+- MCP list and discovery methods now carry one-hour private cache hints; resource reads remain uncached at the protocol level.
+
 ## [2.10.0] - 2026-07-30
 
 ### Added

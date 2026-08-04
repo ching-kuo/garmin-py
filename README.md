@@ -379,6 +379,13 @@ MCP clients can preload two resources:
 - `garmin://server/manifest` describes the runtime tool inventory, annotations, error recovery contracts, envelopes, and response limits.
 - `garmin://athlete/profile` returns a cached, bounded thresholds, VO2max, race-prediction, and 7/28-day load snapshot. An unauthenticated read returns a structured unauthenticated body.
 
+The server also publishes connection-time instructions with the authentication, response, error, limit, and write-approval contracts. Every typed tool envelope advertises the same contract through its machine-readable `outputSchema`.
+
+Two URI templates expose the most-read entities without a tool round trip:
+
+- `garmin://activity/{id}` returns the serialized `activity_get` envelope.
+- `garmin://health/sleep/{date}` returns the serialized one-day `health_sleep` envelope for an ISO date.
+
 Four content-only prompts guide common workflows: `weekly_training_review`, `recovery_check`, `compare_recent_activities`, and `plan_next_week`. The planning prompt explicitly requires human confirmation before invoking destructive apply tools.
 
 Large MCP reads are bounded. `activity_laps(activity_id, offset=0)` returns at most 100 rows and supplies `total`, `truncated`, and `next_offset` paging metadata. `activity_detail_metrics(activity_id, metrics="", max_samples=1000)` accepts 100–5000 samples and deterministically samples the whole stream by stride, reporting `samples_total`, `samples_returned`, and `stride`.

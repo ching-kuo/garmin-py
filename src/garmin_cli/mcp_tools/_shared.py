@@ -14,7 +14,7 @@ from concurrent.futures import Future
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import date
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal, TypeVar, cast
 
 from mcp.server.mcpserver.exceptions import ToolError
 
@@ -27,6 +27,7 @@ from garmin_cli.endpoints._base import (
 )
 from garmin_cli.error_contracts import error_contract
 from garmin_cli.exceptions import GarminCliError
+from garmin_cli.mcp_tools._schemas import Envelope, WriteEnvelope
 
 _MAX_DAYS = 90
 
@@ -68,14 +69,14 @@ def _envelope(
     *,
     cap: int | None = None,
     offset: int = 0,
-) -> dict[str, Any]:
+) -> Envelope:
     """Wrap rows, preserving the legacy shape unless paging is requested."""
     if cap is None:
         return {"count": len(rows), "rows": rows}
     total = len(rows)
     page = rows[offset:offset + cap]
     truncated = offset + len(page) < total
-    result: dict[str, Any] = {
+    result: Envelope = {
         "count": len(page),
         "rows": page,
         "total": total,
@@ -90,7 +91,8 @@ def _identity_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
-def _handle_error(exc: GarminCliError) -> ToolError:
+def _error_text(exc: GarminCliError) -> str:
+    """Serialize the stable Garmin error contract for MCP text channels."""
     msg = exc.error
     if exc.error_code == "AUTH_MISSING":
         msg = f"{msg} Run `garmin-cli login` to authenticate interactively."
@@ -101,13 +103,17 @@ def _handle_error(exc: GarminCliError) -> ToolError:
     # MCP's ToolError is text-only in the bundled SDK. A JSON object in that
     # text channel preserves a stable machine-readable contract while keeping
     # the existing human-readable message available to older clients.
-    return ToolError(json.dumps({
+    return json.dumps({
         "error_code": exc.error_code,
         "category": contract["category"],
         "message": msg,
         "recovery_hint": contract["recovery_hint"],
         "retry_after_seconds": retry_after_seconds,
-    }, sort_keys=True))
+    }, sort_keys=True)
+
+
+def _handle_error(exc: GarminCliError) -> ToolError:
+    return ToolError(_error_text(exc))
 
 
 def _authenticated(config: CliConfig, produce: Callable[[], _T]) -> _T:
@@ -128,7 +134,7 @@ def _run_tool(
     config: CliConfig,
     fetch: Callable[[], Any],
     serialize: Callable[[Any], list[dict[str, Any]]] = _identity_rows,
-) -> dict[str, Any]:
+) -> Envelope:
     """Auth, fetch, serialize, and envelope a read tool's rows.
 
     Collapses the read tools' identical 4-step body. Input parsing/validation
@@ -179,8 +185,13 @@ class WriteLogEvent:
     type_key: str | None = None
 
 
-def _validation_envelope(errors: list[str]) -> dict[str, Any]:
-    return _envelope(
+def _write_envelope(rows: list[dict[str, Any]]) -> WriteEnvelope:
+    """Preserve the common envelope while advertising the write result type."""
+    return cast(WriteEnvelope, _envelope(rows))
+
+
+def _validation_envelope(errors: list[str]) -> WriteEnvelope:
+    return _write_envelope(
         [{"ok": False, "error_code": "INVALID_INPUT", "errors": list(errors)}]
     )
 

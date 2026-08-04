@@ -28,11 +28,12 @@ from garmin_cli.endpoints.activities import (
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.mcp_tools._shared import (
     WriteLogEvent,
-    _envelope,
     _validate_positive_id,
     _validation_envelope,
+    _write_envelope,
     _write_audit,
 )
+from garmin_cli.mcp_tools._schemas import WriteEnvelope
 
 _logger = logging.getLogger(__name__)
 
@@ -44,13 +45,18 @@ def _emit_write_log(event: WriteLogEvent) -> None:
 def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
     """Register the activity-domain write tools on ``mcp``."""
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=False,
+        )
+    )
     def activity_download(
         activity_id: int,
         fmt: str = "original",
         output_path: str | None = None,
         overwrite: bool = False,
-    ) -> dict[str, Any]:
+    ) -> WriteEnvelope:
         """Download an activity file to disk and report the written path.
 
         ``fmt`` is one of original (FIT inside a ZIP), tcx, gpx, kml, csv.
@@ -108,7 +114,7 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
                     error_code="INTERNAL_ERROR",
                 ) from exc
             audit.success(path_len=len(str(target)), size_bytes=len(payload))
-            return _envelope([{
+            return _write_envelope([{
                 "ok": True,
                 "action": "downloaded",
                 "activity_id": activity_id,
@@ -118,7 +124,7 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
             }])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
-    def activity_upload(file_path: str) -> dict[str, Any]:
+    def activity_upload(file_path: str) -> WriteEnvelope:
         """Upload an activity file (FIT, GPX, or TCX) to Garmin Connect.
 
         On a missing file returns one row with ``ok: False, error_code:
@@ -140,7 +146,7 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
             raw = upload_activity(file_path)
             activity_id, status = _extract_upload_result(raw)
             audit.success(activity_id=activity_id)
-            return _envelope([{
+            return _write_envelope([{
                 "ok": True,
                 "action": "uploaded",
                 "status": status,
@@ -148,7 +154,7 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
             }])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
-    def activity_delete(activity_id: int) -> dict[str, Any]:
+    def activity_delete(activity_id: int) -> WriteEnvelope:
         """Delete an activity by ID.
 
         Destructive: the activity is permanently removed. Returns
@@ -162,14 +168,14 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
             ensure_authenticated(config)
             delete_activity(activity_id)
             audit.success()
-            return _envelope([{
+            return _write_envelope([{
                 "ok": True,
                 "action": "deleted",
                 "activity_id": activity_id,
             }])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
-    def activity_rename(activity_id: int, name: str) -> dict[str, Any]:
+    def activity_rename(activity_id: int, name: str) -> WriteEnvelope:
         """Rename an activity. The name must be non-empty.
 
         Destructive: the activity's stored title is replaced. On an empty name
@@ -191,7 +197,7 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
             ensure_authenticated(config)
             set_activity_name(activity_id, name)
             audit.success()
-            return _envelope([{
+            return _write_envelope([{
                 "ok": True,
                 "action": "renamed",
                 "activity_id": activity_id,
@@ -199,7 +205,7 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
             }])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
-    def activity_set_type(activity_id: int, type_key: str) -> dict[str, Any]:
+    def activity_set_type(activity_id: int, type_key: str) -> WriteEnvelope:
         """Set an activity's sport type from a Garmin ``typeKey`` (e.g. running).
 
         The key is resolved against Garmin's live sport-type table, so any key
@@ -225,7 +231,7 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
             ensure_authenticated(config)
             set_activity_type(activity_id, key_norm)
             audit.success()
-            return _envelope([{
+            return _write_envelope([{
                 "ok": True,
                 "action": "type-updated",
                 "activity_id": activity_id,
