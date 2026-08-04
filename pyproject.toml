@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "garmin-py"
-version = "2.10.0"
+version = "2.11.0"
 description = "CLI tool for extracting health and activity data from Garmin Connect"
 readme = "README.md"
 license = "MIT"
