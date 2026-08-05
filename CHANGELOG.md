@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- MCP server startup on Python 3.10: typed output schemas now express optional envelope keys via `total=False` TypedDict bases instead of `NotRequired`, which the MCP SDK's stdlib `get_type_hints` call leaked into pydantic on 3.10 and crashed tool registration with `PydanticForbiddenQualifier`. Generated JSON schemas are unchanged.
+
 ## [2.11.1] - 2026-08-06
 
 ### Fixed

@@ -3,25 +3,33 @@
 from typing import Any
 
 # pydantic rejects ``typing.TypedDict`` on Python < 3.12, so the
-# typing_extensions variants keep schema generation working on 3.10/3.11.
-from typing_extensions import NotRequired, TypedDict
+# typing_extensions variant keeps schema generation working on 3.10/3.11.
+# Optional keys use ``total=False`` bases instead of ``NotRequired`` because
+# the MCP SDK resolves TypedDict fields with stdlib ``typing.get_type_hints``,
+# which on 3.10 cannot strip the typing_extensions ``NotRequired`` backport
+# and pydantic then rejects the leaked qualifier (PydanticForbiddenQualifier).
+# Revert to ``NotRequired`` once Python 3.10 support is dropped.
+from typing_extensions import TypedDict
 
 
-class Envelope(TypedDict):
+class _EnvelopeOptional(TypedDict, total=False):
+    total: int
+    truncated: bool
+    next_offset: int
+
+
+class Envelope(_EnvelopeOptional):
     """Common response envelope used by list and row-oriented tools."""
 
     count: int
     rows: list[dict[str, Any]]
-    total: NotRequired[int]
-    truncated: NotRequired[bool]
-    next_offset: NotRequired[int]
 
 
-class ActivityGetEnvelope(Envelope):
+class ActivityGetEnvelope(Envelope, total=False):
     """Activity response with optional multisport and capability metadata."""
 
-    children: NotRequired[list[dict[str, Any]]]
-    unavailable: NotRequired[list[dict[str, Any]]]
+    children: list[dict[str, Any]]
+    unavailable: list[dict[str, Any]]
 
 
 class ActivityDetailMetricsEnvelope(Envelope):
