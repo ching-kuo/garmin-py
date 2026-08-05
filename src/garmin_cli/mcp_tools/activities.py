@@ -63,10 +63,22 @@ def _validate_offset(value: int) -> int:
     return value
 
 
+# Auto-fit budget for max_samples=0: samples x columns kept small enough that
+# the doubled MCP payload (text content + structuredContent) stays under
+# typical client tool-result token caps.
+_AUTO_CELL_BUDGET = 2400
+
+
 def _validate_max_samples(value: int) -> int:
-    if value < 100 or value > 5000:
-        raise ToolError(f"max_samples must be between 100 and 5000, got {value}")
+    if value != 0 and (value < 100 or value > 5000):
+        raise ToolError(f"max_samples must be between 100 and 5000 (or 0 for auto), got {value}")
     return value
+
+
+def _auto_max_samples(rows: list[dict[str, Any]]) -> int:
+    """Size the sample cap to the column count so payloads stay client-safe."""
+    columns = max(1, len(rows[0])) if rows else 1
+    return max(100, min(1000, _AUTO_CELL_BUDGET // columns))
 
 
 def _fetch_laps_rows_for_activity(activity: dict[str, Any], activity_id: Any) -> list[dict[str, Any]]:
@@ -184,16 +196,16 @@ def register_activity_tools(mcp: MCPServer, config: CliConfig) -> None:
     def activity_detail_metrics(
         activity_id: int,
         metrics: str = "",
-        max_samples: int = 1000,
+        max_samples: int = 0,
     ) -> ActivityDetailMetricsEnvelope:
-        """Get a deterministic stride sample of an activity metric stream. ``max_samples`` must be 100..5000 and defaults to 1000; metadata reports the original sample count and stride. Rows are keyed by metric key (e.g. directTimestamp, directHeartRate, directPower, directSpeed). Pass `metrics` as a comma-separated key list to reduce columns; use activity_metrics_describe to discover available keys."""
+        """Get a deterministic stride sample of an activity metric stream. Every row carries all requested metrics keyed by metric key (e.g. directTimestamp, directHeartRate, directPower, directSpeed), so channels are always timestamp-aligned at any stride — fetch ALL channels you need in ONE call; never split channels across calls and stitch. Response size scales with samples x metrics: the default ``max_samples=0`` auto-sizes the sample count to the column count (~2400 total values, clamped to 100..1000 samples) so multi-channel pulls fit client response limits; pass 100..5000 to override, lowering it rather than dropping channels when a response is too large. Pass ``metrics`` as a comma-separated key list to reduce columns; use activity_metrics_describe to discover available keys."""
         _validate_positive_id(activity_id, "activity_id")
         _validate_max_samples(max_samples)
         wanted = tuple(m.strip() for m in metrics.split(",") if m.strip()) or None
 
         def produce() -> ActivityDetailMetricsEnvelope:
             rows = serialize_detail_metrics(get_activity_details(activity_id), wanted)
-            sampled, stride = downsample_rows(rows, max_samples)
+            sampled, stride = downsample_rows(rows, max_samples or _auto_max_samples(rows))
             result: dict[str, Any] = dict(_envelope(sampled))
             result.update({
                 "samples_total": len(rows),

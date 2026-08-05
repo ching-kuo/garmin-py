@@ -152,7 +152,7 @@ def test_manifest_inventory_matches_registered_tools(
 
     assert inventoried == registered
     assert manifest["limits"]["activity_laps_rows"] == 100
-    assert manifest["limits"]["activity_detail_metrics_default_samples"] == 1000
+    assert manifest["limits"]["activity_detail_metrics_auto_cell_budget"] == 2400
     assert manifest["limits"]["reconciliation_target_streams_per_call"] == 10
     assert manifest["error_codes"]["RATE_LIMITED"]["retry_after_seconds"] == 2
     assert {

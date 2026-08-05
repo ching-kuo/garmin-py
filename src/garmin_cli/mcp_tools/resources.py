@@ -26,7 +26,7 @@ from garmin_cli.endpoints.metrics import get_race_predictions
 from garmin_cli.error_contracts import ERROR_CODE_TABLE
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.mcp_tools._shared import _envelope, _error_text
-from garmin_cli.mcp_tools.activities import _activity_get_result
+from garmin_cli.mcp_tools.activities import _AUTO_CELL_BUDGET, _activity_get_result
 from garmin_cli.mcp_tools.coaching import TARGET_SAMPLE_BUDGET, TARGET_STREAM_LIMIT
 from garmin_cli.serializers import (
     serialize_activity_summary,
@@ -288,7 +288,7 @@ def register_resources(mcp: MCPServer, config: CliConfig) -> None:
                 "activity_list_limit": 100,
                 "steps_window_days": 28,
                 "activity_laps_rows": 100,
-                "activity_detail_metrics_default_samples": 1000,
+                "activity_detail_metrics_auto_cell_budget": _AUTO_CELL_BUDGET,
                 "activity_detail_metrics_max_samples": 5000,
                 "reconciliation_range_days": 28,
                 "reconciliation_max_activities": 100,

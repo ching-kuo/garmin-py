@@ -577,7 +577,39 @@ def test_activity_detail_metrics_downsamples_deterministically(mocker: Any) -> N
     assert [row["directTimestamp"] for row in first["rows"][:3]] == [0, 20, 40]
 
 
-@pytest.mark.parametrize("max_samples", [99, 5001])
+def test_activity_detail_metrics_auto_fits_sample_cap_to_channel_count(mocker: Any) -> None:
+    mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+    mocker.patch(
+        "garmin_cli.mcp_tools.activities.get_activity_details",
+        return_value={
+            "metricDescriptors": [
+                {"key": key, "metricsIndex": index}
+                for index, key in enumerate(
+                    ["directTimestamp", "directHeartRate", "directPower",
+                     "directBikeCadence", "directElevation", "sumDistance"]
+                )
+            ],
+            "activityDetailMetrics": [
+                {"metrics": [index, 120, 200, 90, 45.0, index * 5.0]}
+                for index in range(1842)
+            ],
+        },
+    )
+    server = create_mcp_server(_config())
+
+    auto = _call(server, "activity_detail_metrics", {"activity_id": 1})
+    explicit = _call(server, "activity_detail_metrics", {"activity_id": 1, "max_samples": 1000})
+
+    # 6 channels -> 2400 // 6 = 400-sample budget instead of the 1000 default.
+    assert auto["samples_total"] == 1842
+    assert auto["stride"] == 5
+    assert auto["samples_returned"] == 369
+    assert len(auto["rows"][0]) == 6
+    assert explicit["samples_returned"] == 921
+    assert explicit["stride"] == 2
+
+
+@pytest.mark.parametrize("max_samples", [-1, 99, 5001])
 def test_activity_detail_metrics_rejects_invalid_sample_cap(max_samples: int) -> None:
     server = create_mcp_server(_config())
     with pytest.raises(ToolError, match="max_samples must be between"):

@@ -60,6 +60,12 @@ as the 28-day steps window, 100 activity-lap rows, and bounded metric-stream
 sampling. Keep requests inside those limits and prefer paging or smaller
 windows over broad speculative fan-out.
 
+Metric streams: activity_detail_metrics rows are timestamp-aligned, so request
+every channel you need in a single call — never split channels across calls
+and stitch. Its default max_samples=0 auto-sizes the response to fit client
+limits; if a response is still too large, lower max_samples rather than
+dropping channels.
+
 Read versus write: activity and workout mutations, activity file operations,
 and training-plan application/rescheduling are write tools. Their
 destructive_hint annotations tell compatible clients to request approval.

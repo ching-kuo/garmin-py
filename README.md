@@ -388,7 +388,7 @@ Two URI templates expose the most-read entities without a tool round trip:
 
 Four content-only prompts guide common workflows: `weekly_training_review`, `recovery_check`, `compare_recent_activities`, and `plan_next_week`. The planning prompt explicitly requires human confirmation before invoking destructive apply tools.
 
-Large MCP reads are bounded. `activity_laps(activity_id, offset=0)` returns at most 100 rows and supplies `total`, `truncated`, and `next_offset` paging metadata. `activity_detail_metrics(activity_id, metrics="", max_samples=1000)` accepts 100–5000 samples and deterministically samples the whole stream by stride, reporting `samples_total`, `samples_returned`, and `stride`.
+Large MCP reads are bounded. `activity_laps(activity_id, offset=0)` returns at most 100 rows and supplies `total`, `truncated`, and `next_offset` paging metadata. `activity_detail_metrics(activity_id, metrics="", max_samples=0)` deterministically samples the whole stream by stride, reporting `samples_total`, `samples_returned`, and `stride`. Rows carry all requested metrics, so channels stay timestamp-aligned in a single call. The default `max_samples=0` auto-sizes the sample count to the channel count (a ~2400-value budget, clamped to 100–1000 samples) so multi-channel pulls fit MCP client response limits; pass an explicit 100–5000 to override.
 
 ### Installation
 
