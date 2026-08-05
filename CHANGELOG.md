@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.11.1] - 2026-08-06
+
+### Fixed
+
+- `activity_detail_metrics` now defaults to `max_samples=0` (auto): the sample cap is sized to the number of requested channels (a ~2400-value budget, clamped to 100–1000 samples) so multi-channel pulls fit MCP client response limits in one call. Explicit `max_samples` values of 100–5000 behave as before. The tool docstring and server instructions now tell clients to fetch all channels in a single call — rows are timestamp-aligned at any stride — instead of splitting channels across calls and stitching. The server manifest reports `activity_detail_metrics_auto_cell_budget` in place of `activity_detail_metrics_default_samples`.
+
 ## [2.11.0] - 2026-08-04
 
 ### Added
