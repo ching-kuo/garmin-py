@@ -12,10 +12,13 @@ from typing import Any
 from typing_extensions import TypedDict
 
 
+# Optional keys must also be nullable: the MCP SDK dumps the generated output
+# model without exclude_none, so omitted optional keys reach the wire as null
+# and strict clients reject them unless the schema permits null.
 class _EnvelopeOptional(TypedDict, total=False):
-    total: int
-    truncated: bool
-    next_offset: int
+    total: int | None
+    truncated: bool | None
+    next_offset: int | None
 
 
 class Envelope(_EnvelopeOptional):
@@ -28,8 +31,8 @@ class Envelope(_EnvelopeOptional):
 class ActivityGetEnvelope(Envelope, total=False):
     """Activity response with optional multisport and capability metadata."""
 
-    children: list[dict[str, Any]]
-    unavailable: list[dict[str, Any]]
+    children: list[dict[str, Any]] | None
+    unavailable: list[dict[str, Any]] | None
 
 
 class ActivityDetailMetricsEnvelope(Envelope):

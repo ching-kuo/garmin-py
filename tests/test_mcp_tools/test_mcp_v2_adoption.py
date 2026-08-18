@@ -39,7 +39,14 @@ def test_envelope_tools_advertise_machine_readable_paging_schema() -> None:
         schema = _tool(server, name).output_schema
         assert schema is not None
         assert set(schema["required"]) == {"count", "rows"}
-        assert {"total", "truncated", "next_offset"} <= set(schema["properties"])
+        # The MCP SDK serializes omitted optional keys as null, so the schema
+        # must permit null or strict clients reject every envelope result.
+        for key in ("total", "truncated", "next_offset"):
+            assert {"type": "null"} in schema["properties"][key]["anyOf"]
+
+    activity_get = _tool(server, "activity_get").output_schema
+    for key in ("children", "unavailable"):
+        assert {"type": "null"} in activity_get["properties"][key]["anyOf"]
 
 
 def test_locally_owned_result_schemas_are_precise() -> None:

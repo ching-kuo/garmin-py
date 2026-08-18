@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- MCP tool calls no longer fail against clients that validate structured output (e.g. "None is not of type 'boolean'" on `truncated`): the MCP SDK serializes omitted optional envelope keys as `null`, so the typed output schemas now declare `total`, `truncated`, `next_offset`, `children`, and `unavailable` as nullable. Clients should treat a `null` paging key the same as an absent one.
 - MCP server startup on Python 3.10: typed output schemas now express optional envelope keys via `total=False` TypedDict bases instead of `NotRequired`, which the MCP SDK's stdlib `get_type_hints` call leaked into pydantic on 3.10 and crashed tool registration with `PydanticForbiddenQualifier`. Generated JSON schemas are unchanged.
 
 ## [2.11.1] - 2026-08-06
