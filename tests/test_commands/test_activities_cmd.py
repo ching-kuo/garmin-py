@@ -1151,15 +1151,16 @@ class TestActivityDownloadCommand:
         assert result.exit_code == 0
         assert existing.read_bytes() == b"NEW"
 
-    def test_download_default_filename(self, mocker: Any) -> None:
+    def test_download_default_filename(self, mocker: Any, tmp_path: Any, monkeypatch: Any) -> None:
         mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
         mocker.patch("garmin_cli.commands.activities.download_activity", return_value=b"D")
+        monkeypatch.chdir(tmp_path)
         runner = CliRunner(mix_stderr=False)
-        with runner.isolated_filesystem():
-            result = runner.invoke(cli, ["--json", "activity", "download", "777", "--fmt", "gpx"])
-            assert result.exit_code == 0
-            envelope = json.loads(result.stdout)
-            assert envelope["data"][0]["path"].endswith("activity_777.gpx")
+        result = runner.invoke(cli, ["--json", "activity", "download", "777", "--fmt", "gpx"])
+        assert result.exit_code == 0
+        envelope = json.loads(result.stdout)
+        assert envelope["data"][0]["path"].endswith("activity_777.gpx")
+        assert (tmp_path / "activity_777.gpx").read_bytes() == b"D"
 
     def test_download_rejects_unknown_format_at_parse_time(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
