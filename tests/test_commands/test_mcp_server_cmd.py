@@ -407,6 +407,7 @@ class TestMcpServerNonLoopbackAuth:
         # when no --port is supplied.
         assert "0.0.0.0" in str(auth_settings.issuer_url)
         assert "0.0.0.0" in str(auth_settings.resource_server_url)
+        assert auth_settings.validate_token_resource is False
 
     def test_auth_settings_url_uses_supplied_port(
         self, mocker: Any, monkeypatch: Any

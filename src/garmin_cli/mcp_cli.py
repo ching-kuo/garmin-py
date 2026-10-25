@@ -150,7 +150,13 @@ def _resolve_mcp_auth(
     base_url = f"http://{host}:{resolved_port}"
     # pydantic coerces these str URLs to AnyHttpUrl at construction; mypy only
     # sees the strict annotation when the mcp SDK's types are resolvable.
-    auth = AuthSettings(issuer_url=base_url, resource_server_url=base_url)  # type: ignore[arg-type]
+    # The static token carries no audience claim, so resource validation stays
+    # off; the token is only ever valid for this server anyway.
+    auth = AuthSettings(
+        issuer_url=base_url,  # type: ignore[arg-type]
+        resource_server_url=base_url,  # type: ignore[arg-type]
+        validate_token_resource=False,
+    )
     return verifier, auth
 
 
