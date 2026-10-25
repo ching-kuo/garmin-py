@@ -5,6 +5,11 @@ on:
     types: [published]
 
 jobs:
+  # Re-run the full CI (tests, lint, type-check, dependency audit) against the
+  # release tag so nothing reaches PyPI unless it passes.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -25,7 +30,7 @@ jobs:
           path: dist/
 
   publish:
-    needs: build
+    needs: [ci, build]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
