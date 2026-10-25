@@ -1,7 +1,9 @@
 """Tests for garmin_cli.input_reader.read_workout_input."""
 from __future__ import annotations
 
+import io
 import json
+import sys
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -36,6 +38,11 @@ steps:
 """
 
 
+def _patch_stdin(mocker: Any, payload: bytes, encoding: str = "utf-8") -> None:
+    """Replace sys.stdin with a real text stream over *payload* (``encoding`` mimics the locale)."""
+    mocker.patch.object(sys, "stdin", io.TextIOWrapper(io.BytesIO(payload), encoding=encoding))
+
+
 # ---------------------------------------------------------------------------
 # TestReadWorkoutInput
 # ---------------------------------------------------------------------------
@@ -68,16 +75,12 @@ class TestReadWorkoutInput:
         assert result["name"] == "Morning Run"
 
     def test_stdin_defaults_to_json(self, mocker: Any) -> None:
-        mock_stream = MagicMock()
-        mock_stream.read.return_value = _VALID_JSON
-        mocker.patch("garmin_cli.input_reader.click.get_text_stream", return_value=mock_stream)
+        _patch_stdin(mocker, _VALID_JSON.encode("utf-8"))
         result = read_workout_input(use_stdin=True)
         assert result["name"] == "Morning Run"
 
     def test_stdin_yaml_with_format_flag(self, mocker: Any) -> None:
-        mock_stream = MagicMock()
-        mock_stream.read.return_value = _VALID_YAML
-        mocker.patch("garmin_cli.input_reader.click.get_text_stream", return_value=mock_stream)
+        _patch_stdin(mocker, _VALID_YAML.encode("utf-8"))
         result = read_workout_input(use_stdin=True, input_format="yaml")
         assert result["sport"] == "running"
 
@@ -97,10 +100,53 @@ class TestReadWorkoutInput:
         with pytest.raises(GarminCliError):
             read_workout_input(file_path="/nonexistent/path/workout.json")
 
+    def test_unreadable_path_raises_invalid_input(self, tmp_path: Any) -> None:
+        with pytest.raises(GarminCliError) as exc:
+            read_workout_input(file_path=str(tmp_path))
+        assert exc.value.error_code == "INVALID_INPUT"
+
+    def test_file_and_stdin_together_raises_invalid_input(self, tmp_path: Any, mocker: Any) -> None:
+        f = tmp_path / "workout.json"
+        f.write_text(_VALID_JSON)
+        _patch_stdin(mocker, _VALID_JSON.encode("utf-8"))
+        with pytest.raises(GarminCliError) as exc:
+            read_workout_input(file_path=str(f), use_stdin=True)
+        assert exc.value.error_code == "INVALID_INPUT"
+
+    def test_stdin_decodes_utf8_regardless_of_locale(self, mocker: Any) -> None:
+        _patch_stdin(mocker, json.dumps({"name": "Läufe"}, ensure_ascii=False).encode("utf-8"), encoding="cp1252")
+        result = read_workout_input(use_stdin=True)
+        assert result["name"] == "Läufe"
+
+    def test_utf8_bom_is_accepted(self, tmp_path: Any, mocker: Any) -> None:
+        payload = b"\xef\xbb\xbf" + _VALID_JSON.encode("utf-8")
+        f = tmp_path / "bom.json"
+        f.write_bytes(payload)
+        assert read_workout_input(file_path=str(f)) == _VALID_WORKOUT
+        _patch_stdin(mocker, payload)
+        assert read_workout_input(use_stdin=True) == _VALID_WORKOUT
+
+    def test_file_invalid_utf8_raises_invalid_input(self, tmp_path: Any) -> None:
+        f = tmp_path / "bad.json"
+        f.write_bytes(b'{"name": "\xff"}')
+        with pytest.raises(GarminCliError) as exc:
+            read_workout_input(file_path=str(f))
+        assert exc.value.error_code == "INVALID_INPUT"
+
+    def test_closed_stdin_raises_invalid_input(self, mocker: Any) -> None:
+        mocker.patch.object(sys, "stdin", None)
+        with pytest.raises(GarminCliError) as exc:
+            read_workout_input(use_stdin=True)
+        assert exc.value.error_code == "INVALID_INPUT"
+
+    def test_stdin_invalid_utf8_raises_garmin_cli_error(self, mocker: Any) -> None:
+        _patch_stdin(mocker, b'{"name": "\xff"}')
+        with pytest.raises(GarminCliError) as exc:
+            read_workout_input(use_stdin=True)
+        assert exc.value.error_code == "INVALID_INPUT"
+
     def test_file_path_none_stdin_true_reads_stdin(self, mocker: Any) -> None:
-        mock_stream = MagicMock()
-        mock_stream.read.return_value = _VALID_JSON
-        mocker.patch("garmin_cli.input_reader.click.get_text_stream", return_value=mock_stream)
+        _patch_stdin(mocker, _VALID_JSON.encode("utf-8"))
         result = read_workout_input(file_path=None, use_stdin=True)
         assert isinstance(result, dict)
 

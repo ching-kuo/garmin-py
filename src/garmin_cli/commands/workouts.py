@@ -118,11 +118,11 @@ def create_cmd(
     input_format: str | None,
 ) -> None:
     """Create a new workout from a JSON or YAML file."""
-    ensure_authenticated(ctx.obj["config"])
     user_data = read_workout_input(file_path, use_stdin, input_format)
     errors = validate_workout_input(user_data)
     if errors:
         raise GarminCliError(error="; ".join(errors), error_code="INVALID_INPUT")
+    ensure_authenticated(ctx.obj["config"])
     garmin_payload = build_garmin_payload(user_data)
     raw = create_workout(garmin_payload)
     if raw is None:
@@ -145,11 +145,11 @@ def update_cmd(
     input_format: str | None,
 ) -> None:
     """Update an existing workout by ID."""
-    ensure_authenticated(ctx.obj["config"])
     user_data = read_workout_input(file_path, use_stdin, input_format)
     errors = validate_workout_input(user_data, partial=True)
     if errors:
         raise GarminCliError(error="; ".join(errors), error_code="INVALID_INPUT")
+    ensure_authenticated(ctx.obj["config"])
     existing = get_workout(workout_id)
     merged, warnings = merge_workout_payload(existing, user_data)
     for w in warnings:

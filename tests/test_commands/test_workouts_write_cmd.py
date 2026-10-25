@@ -5,6 +5,7 @@ import json
 from datetime import date
 from typing import Any
 
+import pytest
 from click.testing import CliRunner
 
 from garmin_cli.cli import cli
@@ -144,6 +145,23 @@ class TestWorkoutCreateCommand:
             input=json.dumps(_SAMPLE_WORKOUT_PAYLOAD),
         )
         assert result.exit_code == 0
+
+    @pytest.mark.parametrize("prefix", [["create"], ["update", "123"]])
+    def test_file_with_stdin_rejected_before_auth(
+        self, mocker: Any, tmp_path: Any, prefix: list[str]
+    ) -> None:
+        auth = mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
+        f = tmp_path / "w.json"
+        f.write_text(json.dumps(_SAMPLE_WORKOUT_PAYLOAD))
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(
+            cli,
+            ["--json", "workout", *prefix, str(f), "--stdin"],
+            input=json.dumps(_SAMPLE_WORKOUT_PAYLOAD),
+        )
+        assert result.exit_code == 1
+        assert json.loads(result.stdout)["error_code"] == "INVALID_INPUT"
+        auth.assert_not_called()
 
     def test_create_invalid_json_exit_1(self, mocker: Any, tmp_path: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
