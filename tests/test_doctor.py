@@ -2,15 +2,23 @@
 from __future__ import annotations
 
 import json
+import sys
+from collections import namedtuple
 from pathlib import Path
 from typing import Any
 
+import pytest
 from click.testing import CliRunner
 
 from garmin_cli.auth import SessionProbeResult
 from garmin_cli.cli import cli
 from garmin_cli.config import CliConfig
-from garmin_cli.doctor import check_session, check_write_surface, run_checks
+from garmin_cli.doctor import (
+    check_python_version,
+    check_session,
+    check_write_surface,
+    run_checks,
+)
 from garmin_cli.mcp_cli import _MCP_BEARER_ENV
 
 
@@ -87,6 +95,20 @@ def test_write_surface_reports_bearer_token_state(monkeypatch: Any) -> None:
     assert "Bearer token configured: false" in without_token.detail
     assert with_token.ok is True
     assert "Bearer token configured: true" in with_token.detail
+
+
+_VersionInfo = namedtuple("_VersionInfo", "major minor micro releaselevel serial")
+
+
+@pytest.mark.parametrize(("minor", "ok"), [(11, False), (12, True)])
+def test_python_version_minimum_is_3_12(minor: int, ok: bool, mocker: Any) -> None:
+    mocker.patch.object(sys, "version_info", _VersionInfo(3, minor, 0, "final", 0))
+
+    result = check_python_version(CliConfig())
+
+    assert result.ok is ok
+    if not ok:
+        assert "Python 3.12 or newer is required" in result.detail
 
 
 def test_doctor_cli_healthy_fast_path_exits_zero(tmp_path: Path) -> None:

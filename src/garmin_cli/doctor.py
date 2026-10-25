@@ -50,11 +50,11 @@ def _display_path(path: Path) -> str:
 
 def check_python_version(_config: CliConfig) -> CheckResult:
     version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    if sys.version_info >= (3, 10):  # noqa: UP036 - doctor reports runtime support
+    if sys.version_info >= (3, 12):  # noqa: UP036 - doctor reports runtime support
         return CheckResult("python_version", True, f"Python {version} is supported.")
     return _failure(
         "python_version",
-        f"Python {version} is unsupported; Python 3.10 or newer is required.",
+        f"Python {version} is unsupported; Python 3.12 or newer is required.",
         "INVALID_INPUT",
     )
 

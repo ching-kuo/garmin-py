@@ -1,5 +1,31 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **BREAKING:** garmin-py now requires Python 3.12 or newer (was 3.10). Every `garminconnect` release that fixes CVE-2026-54447 requires Python 3.12. CI now tests 3.12 and 3.13; `garmin-cli doctor` and the Claude Desktop bundle enforce the new minimum.
+- `--stdin` workout input is now decoded as UTF-8 (matching file input) instead of the console locale, and invalid UTF-8 reports `INVALID_INPUT`. Replaces `click.get_text_stream`, which Click 8.5 deprecates.
+- `workout create`/`update` now reject a FILE argument combined with `--stdin` (`INVALID_INPUT`) instead of silently reading stdin and ignoring the file.
+- `workout create`/`update` read and validate their input before authenticating, so input errors report `INVALID_INPUT` without a login or network round-trip.
+
+### Fixed
+
+- Workout input that cannot be read (a directory, missing permission, invalid UTF-8, or a closed stdin) now reports `INVALID_INPUT` instead of `INTERNAL_ERROR`.
+- Workout input with a UTF-8 byte-order mark (PowerShell pipes, Notepad-saved files) is now accepted instead of failing JSON parsing.
+- Bearer-token `mcp-server` HTTP transports set `AuthSettings.validate_token_resource=False` explicitly, silencing the mcp SDK deprecation warning. The static token carries no audience claim, so behavior is unchanged.
+
+### CI
+
+- The PyPI publish workflow now runs the full CI workflow (tests, lint, type-check, dependency audit) against the release and only publishes if it passes.
+
+### Security
+
+- Bump `garminconnect` to 0.3.5 for CVE-2026-54447 (GHSA-wjhr-76vg-2hvc): earlier versions wrote the OAuth token store world-readable. garmin-py already tightened the token file to 0600 after login; 0.3.5 now creates it 0600 itself.
+- Require `mcp>=2.2.0` for CVE-2026-59951 (GHSA-84m7-p3x7-pcfv): stateful Streamable HTTP servers leaked session state without bound. Affects `mcp-server --transport streamable-http` without `--stateless-http`.
+- Require `pytest>=9.0.3` (dev) for CVE-2025-71176 (predictable `/tmp/pytest-of-{user}` directory).
+- CI now runs `pip-audit` against the runtime dependencies (including the `mcp` extra) in a separate job.
+
 ## [2.11.2] - 2026-08-18
 
 ### Fixed

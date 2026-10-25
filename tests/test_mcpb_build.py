@@ -4,7 +4,10 @@ from __future__ import annotations
 import importlib.util
 import json
 import zipfile
+import tomllib
 from pathlib import Path
+
+import pytest
 
 from garmin_cli import __version__
 
@@ -29,5 +32,19 @@ class TestBuildMcpb:
         assert manifest["version"] == __version__
         # Security drift guard: the password must stay keychain-stored.
         assert manifest["user_config"]["garmin_password"]["sensitive"] is True
-        assert build_mcpb.PLACEHOLDER not in main_py
         assert f'VERSION = "{__version__}"' in main_py
+        # Python minimum is stamped from pyproject's requires-python.
+        requires = tomllib.loads((build_mcpb.REPO_ROOT / "pyproject.toml").read_text())["project"]["requires-python"]
+        minimum = requires.removeprefix(">=")
+        assert manifest["compatibility"]["runtimes"]["python"] == requires
+        assert f"Requires Python {minimum}+" in manifest["long_description"]
+        assert f'MIN_PYTHON = "{minimum}"' in main_py
+        assert "__GARMIN_PY_" not in json.dumps(manifest) + main_py
+
+    def test_min_python_parses_lower_bound(self) -> None:
+        assert build_mcpb.min_python(">=3.12") == "3.12"
+
+    @pytest.mark.parametrize("spec", [">=3.12,<4", "~=3.12", ">=3", ">= 3.12"])
+    def test_min_python_rejects_specifiers_main_py_cannot_parse(self, spec: str) -> None:
+        with pytest.raises(SystemExit, match="requires-python"):
+            build_mcpb.min_python(spec)

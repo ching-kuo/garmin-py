@@ -5,7 +5,7 @@ It creates, schedules, unschedules, and deletes one temporary workout.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Callable
 
 import pytest
@@ -51,7 +51,7 @@ def test_live_calendar_workout_and_schedule_identifier_probe(
     rate_limiter: Any,
 ) -> None:
     ensure_authenticated(CliConfig(garth_home=garth_session))
-    suffix = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    suffix = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     payload = build_garmin_payload({
         "name": f"__e2e_calendar_identifier_probe_{suffix}",
         "sport": "running",

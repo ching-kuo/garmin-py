@@ -14,7 +14,7 @@ from concurrent.futures import Future
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import date
-from typing import Any, Literal, TypeVar, cast
+from typing import Any, Literal, cast
 
 from mcp.server.mcpserver.exceptions import ToolError
 
@@ -30,8 +30,6 @@ from garmin_cli.exceptions import GarminCliError
 from garmin_cli.mcp_tools._schemas import Envelope, WriteEnvelope
 
 _MAX_DAYS = 90
-
-_T = TypeVar("_T")
 
 
 def _parse_date(value: str, name: str) -> date:
@@ -116,7 +114,7 @@ def _handle_error(exc: GarminCliError) -> ToolError:
     return ToolError(_error_text(exc))
 
 
-def _authenticated(config: CliConfig, produce: Callable[[], _T]) -> _T:
+def _authenticated[T](config: CliConfig, produce: Callable[[], T]) -> T:
     """Ensure auth, run ``produce``, and translate GarminCliError to ToolError.
 
     Centralizes the ``ensure_authenticated(config)`` -> fetch -> ``except

@@ -4,7 +4,7 @@
   "display_name": "Garmin Connect",
   "version": "0.0.0",
   "description": "Garmin Connect health, activity, workout, and training data as MCP tools.",
-  "long_description": "Exposes your Garmin Connect data (sleep, HRV, body battery, activities, workouts, training status, personal records, and more) to Claude as MCP tools. Enter your Garmin Connect credentials once during installation; they are stored in your operating system's keychain and used only to log in to Garmin. If your account uses multi-factor authentication, Claude will ask you for the one-time code on first use. Requires Python 3.10+ on your machine and an internet connection on first launch.",
+  "long_description": "Exposes your Garmin Connect data (sleep, HRV, body battery, activities, workouts, training status, personal records, and more) to Claude as MCP tools. Enter your Garmin Connect credentials once during installation; they are stored in your operating system's keychain and used only to log in to Garmin. If your account uses multi-factor authentication, Claude will ask you for the one-time code on first use. Requires Python __GARMIN_PY_MIN_PYTHON__+ on your machine and an internet connection on first launch.",
   "author": {
     "name": "Ching Kuo",
     "url": "https://github.com/ching-kuo"
@@ -51,7 +51,7 @@
   "compatibility": {
     "platforms": ["darwin", "win32", "linux"],
     "runtimes": {
-      "python": ">=3.10"
+      "python": ">=__GARMIN_PY_MIN_PYTHON__"
     }
   }
 }

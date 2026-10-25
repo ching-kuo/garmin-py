@@ -6,7 +6,7 @@ serializer and metric-registry layers share one canonical implementation.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from garmin_cli.units import to_hours, to_km, to_kmh, to_minutes
@@ -37,7 +37,7 @@ def _local_iso(value: Any) -> str | None:
     if not isinstance(value, (int, float)):
         return None
     return (
-        datetime.fromtimestamp(value / 1000, tz=timezone.utc)
+        datetime.fromtimestamp(value / 1000, tz=UTC)
         .replace(tzinfo=None)
         .isoformat()
     )

@@ -19,6 +19,7 @@ from pathlib import Path
 
 # Replaced with the real release version by scripts/build_mcpb.py.
 VERSION = "__GARMIN_PY_VERSION__"
+MIN_PYTHON = "__GARMIN_PY_MIN_PYTHON__"
 
 
 def _log(message: str) -> None:
@@ -92,9 +93,10 @@ def main() -> int:
             "install the .mcpb it produces instead."
         )
         return 1
-    if sys.version_info < (3, 10):  # noqa: UP036 -- runs on any system Python to explain the requirement
+    # Runs on any system Python so it can explain the requirement.
+    if sys.version_info < tuple(int(part) for part in MIN_PYTHON.split(".")):
         _log(
-            "garmin-py needs Python 3.10 or newer; found "
+            f"garmin-py needs Python {MIN_PYTHON} or newer; found "
             f"{sys.version.split()[0]}. Install Python from https://www.python.org/downloads/ "
             "and restart Claude Desktop."
         )

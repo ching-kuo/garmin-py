@@ -11,7 +11,7 @@ Extract health, activity, workout, and performance data from Garmin Connect.
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.12+
 - Install: `pip install garmin-py` (or `pip install .` from a repo checkout)
 - Authentication: run `garmin-cli login`, or use a saved session at `~/.garminconnect`, or set env vars `GARMIN_EMAIL` / `GARMIN_PASSWORD`
 

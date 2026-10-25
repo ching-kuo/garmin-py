@@ -1,38 +1,26 @@
 """Typed MCP response schemas for the stable, locally-owned result shapes."""
 
-from typing import Any
-
-# pydantic rejects ``typing.TypedDict`` on Python < 3.12, so the
-# typing_extensions variant keeps schema generation working on 3.10/3.11.
-# Optional keys use ``total=False`` bases instead of ``NotRequired`` because
-# the MCP SDK resolves TypedDict fields with stdlib ``typing.get_type_hints``,
-# which on 3.10 cannot strip the typing_extensions ``NotRequired`` backport
-# and pydantic then rejects the leaked qualifier (PydanticForbiddenQualifier).
-# Revert to ``NotRequired`` once Python 3.10 support is dropped.
-from typing_extensions import TypedDict
+from typing import Any, NotRequired, TypedDict
 
 
-# Optional keys must also be nullable: the MCP SDK dumps the generated output
-# model without exclude_none, so omitted optional keys reach the wire as null
-# and strict clients reject them unless the schema permits null.
-class _EnvelopeOptional(TypedDict, total=False):
-    total: int | None
-    truncated: bool | None
-    next_offset: int | None
-
-
-class Envelope(_EnvelopeOptional):
+class Envelope(TypedDict):
     """Common response envelope used by list and row-oriented tools."""
 
     count: int
     rows: list[dict[str, Any]]
+    # Optional keys must also be nullable: the MCP SDK dumps the generated output
+    # model without exclude_none, so omitted optional keys reach the wire as null
+    # and strict clients reject them unless the schema permits null.
+    total: NotRequired[int | None]
+    truncated: NotRequired[bool | None]
+    next_offset: NotRequired[int | None]
 
 
-class ActivityGetEnvelope(Envelope, total=False):
+class ActivityGetEnvelope(Envelope):
     """Activity response with optional multisport and capability metadata."""
 
-    children: list[dict[str, Any]] | None
-    unavailable: list[dict[str, Any]] | None
+    children: NotRequired[list[dict[str, Any]] | None]
+    unavailable: NotRequired[list[dict[str, Any]] | None]
 
 
 class ActivityDetailMetricsEnvelope(Envelope):

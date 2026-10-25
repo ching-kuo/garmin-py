@@ -113,10 +113,10 @@ def _retry_loop(
 ) -> Any:
     """Execute *call* with retry on 429/5xx.
 
-    The python-garminconnect backend sends each API call on a fresh plain
-    ``requests.Session`` with no urllib3 ``Retry`` mounted, so this loop is
-    the only retry layer for reads and writes alike (verified against
-    garminconnect 0.3.2 ``Client._run_request``).
+    The python-garminconnect backend sends API calls on a shared
+    ``requests.Session`` whose adapter mounts no urllib3 ``Retry``, so this
+    loop is the only retry layer for reads and writes alike (verified against
+    garminconnect 0.3.5 ``Client._run_request``).
 
     Args:
         call: Zero-arg callable that performs the API request.

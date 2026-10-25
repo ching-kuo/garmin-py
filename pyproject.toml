@@ -9,22 +9,21 @@ description = "CLI tool for extracting health and activity data from Garmin Conn
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
-    "garminconnect==0.3.2",
+    "garminconnect==0.3.5",
     "click>=8.0",
     "tabulate>=0.9",
     "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
-mcp = ["mcp[cli]>=2.0.0,<3"]
+mcp = ["mcp[cli]>=2.2.0,<3"]
 dev = [
-    "pytest>=9.0",
+    "pytest>=9.0.3",
     "pytest-mock>=3.15",
     "ruff>=0.4",
-    "mypy>=1.8",
-    "tomli>=2.0; python_version < '3.11'",
+    "mypy>=1.12",
 ]
 
 [project.urls]
@@ -48,7 +47,7 @@ markers = [
 ]
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py312"
 line-length = 130
 
 [tool.ruff.lint]

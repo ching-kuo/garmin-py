@@ -71,7 +71,7 @@ def get_body_battery_range(start: date, end: date) -> list[Any]:
     """Fetch body battery for a date range in a single ranged call.
 
     Garmin removed the per-day ``/wellness/bodyBattery/{date}`` endpoint
-    (404 as of 2026-07); ``reports/daily`` is the path garminconnect 0.3.2
+    (404 as of 2026-07); ``reports/daily`` is the path garminconnect 0.3.5
     itself uses and returns one item per day.
     """
     result = _request(
@@ -120,7 +120,7 @@ def get_training_readiness_range(start: date, end: date) -> list[Any]:
 def get_training_status(day: date) -> Any:
     # The old /training-info-service/.../training-status/{date} path 404s
     # (verified live 2026-07-07); the aggregated metrics-service path is what
-    # garminconnect 0.3.2 itself uses and carries status + acute/chronic load
+    # garminconnect 0.3.5 itself uses and carries status + acute/chronic load
     # + load balance + ACWR in one payload.
     return _request(
         f"/metrics-service/metrics/trainingstatus/aggregated/{day.isoformat()}"
