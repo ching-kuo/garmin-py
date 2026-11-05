@@ -150,6 +150,18 @@ def _normalize_target(step: dict[str, Any]) -> dict[str, Any] | None:
     return target
 
 
+def _repeat_count(step: dict[str, Any]) -> Any:
+    """Return a repeat group's iteration count as an ``int`` when possible.
+
+    Garmin returns ``endConditionValue`` as a float (``4.0``) on reads, so
+    prefer ``numberOfIterations`` and normalize integral floats.
+    """
+    count = _coalesce(step.get("numberOfIterations"), step.get("endConditionValue"))
+    if isinstance(count, float) and count.is_integer():
+        return int(count)
+    return count
+
+
 def _normalize_workout_step(step: dict[str, Any]) -> dict[str, Any]:
     """Normalize one Garmin step while retaining every original field.
 
@@ -179,7 +191,7 @@ def _normalize_workout_step(step: dict[str, Any]) -> dict[str, Any]:
         "step_type": step_type,
         "duration": {"type": duration_type, "value": duration_value},
         "target": target,
-        "repeat_count": duration_value if step_type == "repeat" else None,
+        "repeat_count": _repeat_count(step) if step_type == "repeat" else None,
         "steps": nested_steps,
         "raw": copy.deepcopy(step),
         # Compatibility keys retained for consumers of the original flattened

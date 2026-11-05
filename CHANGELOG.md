@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- `workout create`/`update` with a `repeat` step no longer fail with `INVALID_INPUT`. Garmin rejects repeat groups without `stepType` and `numberOfIterations` and expects `stepOrder` to run sequentially through repeat children (with a shared `childStepId`); the builder now emits all three, matching what Garmin Connect's own editor sends.
+- `workout get` no longer reports `invalid_repeat_count` for repeat groups read back from Garmin, which returns the iteration count as a float (`4.0`). The count is now read from `numberOfIterations`, so such workouts expose a `write_projection` again.
+
 ## [2.12.0] - 2026-10-26
 
 ### Changed
