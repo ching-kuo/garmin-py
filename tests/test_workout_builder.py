@@ -228,6 +228,58 @@ class TestBuildGarminPayload:
         assert ec["conditionTypeKey"] == "iterations"
         assert step["endConditionValue"] == 4
 
+    def test_repeat_step_has_fields_garmin_requires(self) -> None:
+        workout = _running_workout(steps=[
+            {
+                "type": "repeat",
+                "count": 4,
+                "steps": [
+                    {"type": "interval", "duration": {"type": "time", "value": 240}},
+                    {"type": "recovery", "duration": {"type": "time", "value": 120}},
+                ],
+            }
+        ])
+        payload = build_garmin_payload(workout)
+        step = payload["workoutSegments"][0]["workoutSteps"][0]
+        assert step["stepType"] == {"stepTypeId": 6, "stepTypeKey": "repeat"}
+        assert step["numberOfIterations"] == 4
+        assert step["smartRepeat"] is False
+        assert step["skipLastRestStep"] is False
+
+    def test_step_order_is_sequential_across_repeat_children(self) -> None:
+        workout = _running_workout(steps=[
+            {"type": "warmup", "duration": {"type": "time", "value": 600}},
+            {
+                "type": "repeat",
+                "count": 4,
+                "steps": [
+                    {"type": "interval", "duration": {"type": "time", "value": 240}},
+                    {"type": "recovery", "duration": {"type": "time", "value": 120}},
+                ],
+            },
+            {"type": "cooldown", "duration": {"type": "time", "value": 600}},
+        ])
+        steps = build_garmin_payload(workout)["workoutSegments"][0]["workoutSteps"]
+        repeat = steps[1]
+        assert [s["stepOrder"] for s in steps] == [1, 2, 5]
+        assert [c["stepOrder"] for c in repeat["workoutSteps"]] == [3, 4]
+        assert repeat["childStepId"] == 1
+        assert [c["childStepId"] for c in repeat["workoutSteps"]] == [1, 1]
+        assert "childStepId" not in steps[0]
+        assert "childStepId" not in steps[2]
+
+    def test_each_repeat_group_gets_its_own_child_step_id(self) -> None:
+        group = {
+            "type": "repeat",
+            "count": 2,
+            "steps": [{"type": "interval", "duration": {"type": "time", "value": 60}}],
+        }
+        workout = _running_workout(steps=[group, copy.deepcopy(group)])
+        steps = build_garmin_payload(workout)["workoutSegments"][0]["workoutSteps"]
+        assert [s["stepOrder"] for s in steps] == [1, 3]
+        assert [s["childStepId"] for s in steps] == [1, 2]
+        assert steps[1]["workoutSteps"][0]["childStepId"] == 2
+
     def test_default_target_when_absent(self) -> None:
         workout = _running_workout(steps=[
             {"type": "interval", "duration": {"type": "time", "value": 300}}

@@ -115,9 +115,19 @@ def _build_step(step: dict, order: int) -> dict:
         nested_steps = [
             _build_step(nested, i + 1) for i, nested in enumerate(step.get("steps", []))
         ]
+        # Garmin's workout-service rejects a repeat group that lacks
+        # ``stepType`` and ``numberOfIterations`` (HTTP 400), even though the
+        # iteration count is also carried in ``endConditionValue``.
         return {
             "type": "RepeatGroupDTO",
             "stepOrder": order,
+            "stepType": {
+                "stepTypeId": STEP_TYPES["repeat"],
+                "stepTypeKey": "repeat",
+            },
+            "numberOfIterations": step["count"],
+            "smartRepeat": False,
+            "skipLastRestStep": False,
             "endCondition": {
                 "conditionTypeId": END_CONDITIONS["iterations"],
                 "conditionTypeKey": "iterations",
@@ -172,11 +182,34 @@ def _build_sport_type(sport_key: str) -> dict:
     }
 
 
+def _assign_step_order(steps: list[dict]) -> None:
+    """Number steps the way Garmin Connect does.
+
+    ``stepOrder`` runs sequentially across the whole segment, including the
+    children of repeat groups (warmup=1, repeat=2, its children 3 and 4,
+    cooldown=5). Each repeat group gets a ``childStepId`` that its children
+    share. Garmin rejects a repeat whose children restart numbering at 1.
+    """
+    order = 0
+    group_id = 0
+    for step in steps:
+        order += 1
+        step["stepOrder"] = order
+        if step.get("type") == "RepeatGroupDTO":
+            group_id += 1
+            step["childStepId"] = group_id
+            for child in step["workoutSteps"]:
+                order += 1
+                child["stepOrder"] = order
+                child["childStepId"] = group_id
+
+
 def _build_segments(steps: list[dict], sport_type: dict) -> list[dict]:
     """Build workoutSegments list from simplified steps and a sport_type dict."""
     workout_steps = [
         _build_step(step, i + 1) for i, step in enumerate(steps)
     ]
+    _assign_step_order(workout_steps)
     return [
         {
             "segmentOrder": 1,

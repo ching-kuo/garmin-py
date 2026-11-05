@@ -441,6 +441,70 @@ class TestSerializeWorkoutDetailStructure:
         assert row["write_compatible"] is True
         assert row["write_projection"]["steps"][0]["count"] == 3
 
+    def test_repeat_count_read_back_from_garmin_floats(self) -> None:
+        # Garmin's GET returns numeric fields as floats (endConditionValue 4.0).
+        raw = {
+            "workoutId": 9,
+            "workoutName": "4x4",
+            "sportType": {"sportTypeKey": "running"},
+            "workoutSegments": [{
+                "segmentOrder": 1,
+                "sportType": {"sportTypeKey": "running"},
+                "workoutSteps": [{
+                    "type": "RepeatGroupDTO",
+                    "stepOrder": 1,
+                    "stepType": {"stepTypeId": 6, "stepTypeKey": "repeat"},
+                    "numberOfIterations": 4,
+                    "endCondition": {"conditionTypeKey": "iterations"},
+                    "endConditionValue": 4.0,
+                    "workoutSteps": [{
+                        "type": "ExecutableStepDTO",
+                        "stepOrder": 2,
+                        "stepType": {"stepTypeKey": "interval"},
+                        "endCondition": {"conditionTypeKey": "time"},
+                        "endConditionValue": 240.0,
+                        "targetType": {"workoutTargetTypeKey": "no.target"},
+                    }],
+                }],
+            }],
+        }
+
+        row = serialize_workout_detail(raw)[0]
+
+        assert row["segments"][0]["steps"][0]["repeat_count"] == 4
+        assert row["write_compatible"] is True
+        assert row["write_incompatibilities"] == []
+        assert row["write_projection"]["steps"][0]["count"] == 4
+
+    def test_repeat_count_falls_back_to_integral_end_condition_value(self) -> None:
+        raw = {
+            "workoutId": 10,
+            "workoutName": "3x1",
+            "sportType": {"sportTypeKey": "running"},
+            "workoutSegments": [{
+                "segmentOrder": 1,
+                "sportType": {"sportTypeKey": "running"},
+                "workoutSteps": [{
+                    "type": "RepeatGroupDTO",
+                    "stepOrder": 1,
+                    "endCondition": {"conditionTypeKey": "iterations"},
+                    "endConditionValue": 3.0,
+                    "workoutSteps": [{
+                        "type": "ExecutableStepDTO",
+                        "stepOrder": 2,
+                        "stepType": {"stepTypeKey": "interval"},
+                        "endCondition": {"conditionTypeKey": "time"},
+                        "endConditionValue": 60,
+                        "targetType": {"workoutTargetTypeKey": "no.target"},
+                    }],
+                }],
+            }],
+        }
+
+        row = serialize_workout_detail(raw)[0]
+
+        assert row["write_projection"]["steps"][0]["count"] == 3
+
     def test_supported_builder_shape_has_a_write_projection(self) -> None:
         raw = {
             "workoutId": 8,
