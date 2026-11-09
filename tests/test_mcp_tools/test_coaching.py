@@ -84,3 +84,22 @@ class TestCoachSnapshot:
         _call(server, "coach_snapshot", {"date": "2026-07-15"})
 
         steps.assert_called_once_with(Date(2026, 6, 18), Date(2026, 7, 15))
+
+
+def test_coach_snapshot_default_date_is_resolved_after_auth(mocker: Any) -> None:
+    """The profile timezone is only known once a session exists."""
+    order: list[str] = []
+    mocker.patch(
+        "garmin_cli.mcp_tools._shared.ensure_authenticated",
+        side_effect=lambda config: order.append("auth"),
+    )
+    mocker.patch(
+        "garmin_cli.mcp_tools.coaching.today",
+        side_effect=lambda: order.append("today") or Date(2030, 1, 2),
+    )
+    collect = mocker.patch("garmin_cli.mcp_tools.coaching.collect_snapshot", return_value={})
+
+    _call(create_mcp_server(_config()), "coach_snapshot", {})
+
+    assert order == ["auth", "today"]
+    assert collect.call_args.args[0] == Date(2030, 1, 2)

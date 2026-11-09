@@ -38,16 +38,19 @@ def get_weight(start: date, end: date) -> Any:
     )
 
 
-def get_daily_summary(day: date) -> Any:
-    result = _request(
-        "/usersummary-service/usersummary/daily/",
-        params={"calendarDate": day.isoformat()},
-    )
-    return result if result is not None else {}
-
-
 def get_daily_summary_range(start: date, end: date) -> list[Any]:
-    return _collect_daily_range(get_daily_summary, start, end)
+    """Fetch daily summaries for a range in one call (v2 ``dailysummaries``).
+
+    Replaces a per-day fan-out over ``usersummary/daily``; verified live on
+    2026-11-09 to return all 90 days of a 90-day span in a single response.
+    Items use the nested v2 shape (``movement``/``calories``/...).
+    """
+    result = _request(
+        "/usersummary-service/v2/dailysummaries",
+        params={"startDate": start.isoformat(), "endDate": end.isoformat()},
+    )
+    data = result.get("data") if isinstance(result, dict) else None
+    return data if isinstance(data, list) else []
 
 
 def _get_stats_range(stat: str, start: date, end: date) -> list[Any]:

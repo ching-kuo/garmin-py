@@ -121,7 +121,7 @@ garmin-cli --json health status --date 2026-03-11
 garmin-cli --json health steps --days 7
 
 # Daily summary -- fields: date, total_steps, distance_km, calories, floors, moderate_intensity_minutes, vigorous_intensity_minutes, resting_hr
-# Note: one API call per day — large ranges may be slow
+# Note: one request for the whole range
 garmin-cli --json health daily-summary --days 7
 
 # Intensity minutes -- fields: date, moderate_value, vigorous_value, weekly_goal
@@ -447,6 +447,25 @@ garmin-cli --json performance endurance-score --days 7
 # Note: one API call per day — large ranges may be slow
 garmin-cli --json performance hill-score --days 7
 
+# FTP history -- fields: date, sport, ftp_watts (--sport cycling|running, default cycling)
+garmin-cli --json performance ftp-history --days 30
+
+# Heat/altitude acclimation -- fields: date, heat_acclimation_pct, heat_trend,
+# altitude_acclimation (meters), altitude_trend, current_altitude
+garmin-cli --json performance acclimation --days 7
+
+# Cycling ability -- fields: date, aerobic_endurance, aerobic_capacity, anaerobic_capacity,
+# profile_type, aerobic_endurance_feedback, aerobic_capacity_feedback, anaerobic_capacity_feedback
+garmin-cli --json performance cycling-ability --days 7
+
+# Power curve (best average power per duration) -- fields: duration_s, power_w, activity_id,
+# activity_date (--sport cycling|rowing; Garmin rejects running)
+garmin-cli --json performance power-curve --days 90
+
+# Fastest splits per standard distance -- fields: distance_m, time_s, activity_id, activity_date
+# (--sport running|cycling, --bests 1-10 efforts per distance)
+garmin-cli --json performance fastest-splits --days 90 --bests 3
+
 # Personal records (all-time PRs) -- fields: type_id, label, value, activity_type,
 # date, activity_id, activity_name. Labels: fastest_1km_s...fastest_marathon_s,
 # longest_run_m, longest_ride_m, total_ascent_m, max_avg_power_20min_w,
@@ -583,7 +602,7 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `health_sleep` | `start_date`, `end_date` | `{count, rows}` |
 | `health_hrv` | `start_date`, `end_date` | `{count, rows}` |
 | `health_weight` | `start_date`, `end_date` | `{count, rows}` |
-| `health_daily_summary` | `start_date`, `end_date` | `{count, rows}` — steps, floors, intensity minutes, calories, resting HR (one API call per day) |
+| `health_daily_summary` | `start_date`, `end_date` | `{count, rows}` — steps, floors, intensity minutes, calories, resting HR (one request for the whole range) |
 | `health_steps` | `start_date`, `end_date` | `{count, rows}` — steps, distance, step goal (native range API) |
 | `health_intensity_minutes` | `start_date`, `end_date` | `{count, rows}` — moderate/vigorous minutes, weekly goal (native range API) |
 | `health_body_battery` | `start_date`, `end_date` | `{count, rows}` — `date`, `start_level`, `end_level`, `max_level` (intraday peak); single ranged API call |
@@ -601,13 +620,13 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `activity_detail_metrics` | `activity_id`, `metrics?`, `max_samples?` | `{count, rows, samples_total, samples_returned, stride}` — deterministic whole-stream stride sample keyed by metric key. `max_samples` defaults to 0 (auto: sample cap sized to the column count under a ~2400-cell budget, clamped to 100..1000) or an explicit 100..5000. Rows are timestamp-aligned, so fetch all needed channels in one call; lower `max_samples` rather than splitting channels across calls. Pass `metrics` as a comma-separated key list (from `activity_metrics_describe`) to reduce columns |
 | `workout_list` | `limit?` | `{count, rows}` |
 | `workout_get` | `workout_id` | `{count, rows}` |
-| `workout_calendar` | `start_date`, `end_date` | `{count, rows}` — scheduled workouts plus races/events. Rows retain compatibility `id` and add `workout_id` for template/activity joins plus `workout_schedule_id` for unscheduling. |
+| `workout_calendar` | `start_date`, `end_date` | `{count, rows}` — scheduled workouts plus races/events. Rows retain compatibility `id` and add `workout_id` for template/activity joins plus `workout_schedule_id` for unscheduling. Includes Garmin Coach (adaptive plan) sessions that Garmin's calendar pages omit. |
 | `workout_create` | `workout`, `dry_run?` | `{count, rows}` — `ok: true, action: "created", workout_id` on success; `ok: true, dry_run: true, wire_payload, validation_report` on dry-run; `ok: false, error_code: "INVALID_INPUT", errors` on validation failure. Dry-run skips all Garmin contact. |
 | `workout_schedule` | `workout_id`, `date` | `{count, rows}` — `ok: true, action: "scheduled", workout_id, workout_schedule_id, date`. **Destructive.** |
 | `workout_update` | `workout_id`, `workout`, `dry_run?` | `{count, rows}` — `ok: true, action: "updated", workout_id` on success; dry-run returns the merged wire payload (one Garmin read, no write). Merge semantics preserve `workoutId`/`ownerId`/`createdDate`/`atpPlanId`. **Destructive.** |
 | `workout_delete` | `workout_id` | `{count, rows}` — `ok: true, action: "deleted", workout_id`. **Destructive.** |
 | `workout_unschedule` | `schedule_id` | `{count, rows}` — `ok: true, action: "unscheduled", schedule_id`. Removes a calendar entry (the workout template is preserved); `schedule_id` is the `workout_schedule_id` returned by `workout_schedule`, not the workout id. **Destructive.** |
-| `coach_snapshot` | `date?`, `baseline_days?`, `recent_daily_days?`, `include_extended_daily_baselines?`, `sports?` | Bounded recovery baselines, activity-derived weekly load, current Garmin training status, upcoming plan (today plus six days), wellness rows (readiness, SpO2, steps, weight), execution, data quality, and request provenance. Default cost is 30 Garmin calls, which is also the hard cap. A terminal 429 preserves fetched sections with `complete=false`, `aborted=true`. **Read-only.** |
+| `coach_snapshot` | `date?`, `baseline_days?`, `recent_daily_days?`, `include_extended_daily_baselines?`, `sports?` | Bounded recovery baselines, activity-derived weekly load, current Garmin training status, upcoming plan (today plus six days), wellness rows (readiness, SpO2, steps, weight), execution, data quality, and request provenance. `date` defaults to today in the athlete's Garmin profile timezone. Default cost is 31 Garmin calls, which is also the hard cap. A terminal 429 preserves fetched sections with `complete=false`, `aborted=true`. **Read-only.** |
 | `training_plan_reconcile` | `start_date`, `end_date`, `detail?`, `max_activities?` | Planned-versus-actual entries with exact/inferred/ambiguous match state and request provenance. Range max 28 days; activity cap max 100. `detail="targets"` compares HR, pace, power, and cadence for matched running/cycling activities using zones/laps first and at most 10 streams per call (1000 samples each) only when needed; per-target coverage and quality distinguish missing sensors as `insufficient_data`. **Read-only.** |
 | `training_plan_preview` | `plan` | Strict validation (one entry per date, canonical YYYY-MM-DD) plus a live, normalized `create_template`/`schedule`/`keep`/`move`/`replace`/`unschedule` diff; conflicts report `source_schedule_changed` or `destination_occupied`. Already-applied moves and removals preview as `keep`/`no_op`. Performs no write. **Read-only.** |
 | `training_plan_apply` | `plan` | Revalidates and rereads live state, writes destinations first, removes sources last, and reports per-operation state plus `complete`, `no_op`, `compensated`, `partial`, or `unknown`. Compensation only touches identifiers returned by this call's own writes. No `confirm` parameter exists; client approval must precede invocation. **Destructive.** |
@@ -624,11 +643,16 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `performance_vo2max` | `date?` | `{count, rows}` |
 | `performance_zones` | *(none)* | `{count, rows}` |
 | `performance_personal_records` | *(none)* | `{count, rows}` — all-time PRs with human-readable `label` (null for unmapped typeIds) |
+| `performance_ftp_history` | `start_date`, `end_date`, `sport?` (`cycling`\|`running`) | `{count, rows}` — daily `date`, `sport`, `ftp_watts` |
+| `performance_acclimation` | `start_date`, `end_date` | `{count, rows}` — daily heat acclimation %, acclimated altitude (m), trend labels, current altitude |
+| `performance_cycling_ability` | `start_date`, `end_date` | `{count, rows}` — daily aerobic endurance / aerobic capacity / anaerobic capacity scores, `profile_type`, and Garmin feedback keys |
+| `performance_power_curve` | `start_date`, `end_date`, `sport?` (`cycling`\|`rowing`) | `{count, rows}` — `duration_s`, `power_w`, and the `activity_id`/`activity_date` that set it |
+| `performance_fastest_splits` | `start_date`, `end_date`, `sport?` (`running`\|`cycling`), `bests_per_distance?` (1-10) | `{count, rows}` — `distance_m`, `time_s`, `activity_id`, `activity_date` |
 | `device_list` | *(none)* | `{count, rows}` — registered devices with type and last sync |
 | `login_status` | *(none)* | `{authenticated, garmin_home}` |
 | `server_doctor` | `fast?` | `{count, rows}` — non-raising Python, config, token-store, session, and MCP write-surface diagnostics. `fast=true` skips the network probe. **Read-only.** |
 | `submit_mfa_code` | `mfa_code` | `{authenticated, garmin_home}` — completes a login that failed with `MFA_REQUIRED`; ask the user for the one-time code Garmin sent them. Codes are single-use: on failure, retry the original tool call to trigger a fresh code |
-| `report_snapshot` | `kind` (`morning`\|`evening`\|`weekly`), `date?` | `{kind, date_range, sections, unavailable?}` — one composite call that fans out the day's (or week's) reads server-side. `sections` maps section name → rows (same shapes as the per-domain tools). Sections with no data are empty and listed in `unavailable` with a `reason` (`not_found`\|`no_data`). `date` (YYYY-MM-DD) defaults to today; `weekly` covers the anchor day and the six prior days. |
+| `report_snapshot` | `kind` (`morning`\|`evening`\|`weekly`), `date?` | `{kind, date_range, sections, unavailable?}` — one composite call that fans out the day's (or week's) reads server-side. `sections` maps section name → rows (same shapes as the per-domain tools). Sections with no data are empty and listed in `unavailable` with a `reason` (`not_found`\|`no_data`). `date` (YYYY-MM-DD) defaults to today in the athlete's Garmin profile timezone (not the server host's); `weekly` covers the anchor day and the six prior days. |
 
 Dates use `YYYY-MM-DD` format. Max primitive date range: 90 days. Garmin failures surface as MCP ToolError text containing a JSON object with `error_code`, `category`, `message`, `recovery_hint`, and `retry_after_seconds` so clients can branch without parsing prose. The retry delay is populated for `RATE_LIMITED` and `null` otherwise.
 
@@ -652,7 +676,7 @@ Because the section set is fixed, a report can never silently drop a metric: an 
 
 `date_range` reports the anchor day (or the 7-day window for `weekly`). The `evening` `planned_tomorrow` section deliberately holds the day *after* the anchor and so falls outside `date_range` — it is a forward-looking section, not part of the reported window.
 
-Latency note: `weekly` (and the `daily-summary`/`endurance-score`/`hill-score` reads generally) fan out one upstream request per day; snapshot sections and per-day requests now run on bounded thread pools (`GARMIN_CLI_FETCH_CONCURRENCY`, default `4`), so a weekly snapshot takes a few seconds instead of 10-20s. `GARMIN_CLI_DAILY_CALL_DELAY` (seconds, default `0.5`) still throttles how fast per-day requests are submitted — tune it down if your MCP client times out, up (or set concurrency to `1`) to be gentler on Garmin's rate limits.
+Latency note: `weekly` (and the `endurance-score`/`hill-score` reads generally) fan out one upstream request per day; snapshot sections and per-day requests now run on bounded thread pools (`GARMIN_CLI_FETCH_CONCURRENCY`, default `4`), so a weekly snapshot takes a few seconds instead of 10-20s. `GARMIN_CLI_DAILY_CALL_DELAY` (seconds, default `0.5`) still throttles how fast per-day requests are submitted — tune it down if your MCP client times out, up (or set concurrency to `1`) to be gentler on Garmin's rate limits.
 
 `activity_get(detail=true)` may carry an `unavailable[]` array (omitted when empty) annotating registry-known metrics with `not_applicable_to_sport` (the metric isn't meaningful for the sport) or `absent_in_response` (the metric applies but the upstream payload didn't include it). Multisport parents union per-child manifests with a 0-based `leg_index` attached. `activity_laps`, `activity_hr_zones`, and `activity_metrics_describe` do not carry the manifest in this release; use `activity_get(detail=true)` for sport-applicability checks.
 

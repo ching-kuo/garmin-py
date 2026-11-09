@@ -37,6 +37,9 @@ class _FakeClient:
     def _refresh_session(self) -> None:  # wrapped by backend._serialize_refresh
         pass
 
+    def get_api_headers(self) -> dict[str, str]:  # wrapped by backend._serialize_refresh
+        return {}
+
     def dump(self, path: str) -> None:
         self.dump_calls.append(path)
         directory = Path(path)
@@ -206,27 +209,16 @@ class TestSave:
         assert stat.S_IMODE(token_file.stat().st_mode) == 0o600
 
 
-class TestConnectApi:
-    def test_put_returns_none_for_204(self) -> None:
-        fake = SimpleNamespace(client=_FakeClient())
-        backend._backend = fake  # type: ignore[assignment]
-
-        result = backend.connectapi(
-            "/workout-service/workout/12345",
-            method="PUT",
-            json={"workoutId": 12345},
-        )
-
-        assert result is None
-
-
-def test_raw_fallback_registry_tracks_update_paths() -> None:
-    capabilities = {entry["capability"] for entry in backend.get_raw_fallback_registry()}
-    assert capabilities == {"workout_update"}
-
-
 class TestTypedWriteWrappers:
     """The new typed wrappers delegate to the upstream client verbatim."""
+
+    def test_update_workout_delegates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = MagicMock()
+        monkeypatch.setattr(backend, "_backend", client)
+
+        backend.update_workout(12345, {"workoutName": "Tempo"})
+
+        client.update_workout.assert_called_once_with(12345, {"workoutName": "Tempo"})
 
     def test_set_activity_name_delegates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = MagicMock()
@@ -474,36 +466,91 @@ class TestSerializeRefresh:
         def _garmin_cli_refresh_generation(self, value: int) -> None:
             self._generation = value
 
+        def get_api_headers(self) -> dict[str, str]:
+            return {}
+
+        def _run_request(self, method: str, path: str, **kwargs: Any) -> None:
+            return None
+
         def _refresh_session(self) -> None:
             self.refresh_calls += 1
             self.entered.set()
             assert self.release.wait(timeout=10)
 
-    def test_waiting_thread_skips_refresh_after_one_completes(self) -> None:
-        inner = self._RefreshInner()
+    class _UpstreamInner:
+        """Mimics garminconnect 0.3.20: a 401 refreshes under ``_token_lock``."""
+
+        def __init__(self, threads: int, before_headers: Any = None) -> None:
+            self._token_lock = threading.RLock()
+            self._all_got_401 = threading.Barrier(threads)
+            self._before_headers = before_headers
+            self.refresh_calls = 0
+
+        def get_api_headers(self) -> dict[str, str]:
+            return {}
+
+        def _run_request(self, method: str, path: str, **kwargs: Any) -> str:
+            if self._before_headers is not None:
+                self._before_headers()
+            self.get_api_headers()  # the token actually sent
+            self._all_got_401.wait(timeout=10)
+            with self._token_lock:
+                self._refresh_session()
+            return "ok"
+
+        def _refresh_session(self) -> None:
+            self.refresh_calls += 1
+
+    def test_concurrent_401s_refresh_once_under_upstream_token_lock(self) -> None:
+        inner = self._UpstreamInner(threads=4)
         backend._serialize_refresh(SimpleNamespace(client=inner))
 
-        first = threading.Thread(target=inner._refresh_session, name="first")
-        first.start()
-        assert inner.entered.wait(timeout=10)  # first holds the lock, mid-refresh
-
-        second = threading.Thread(target=inner._refresh_session, name="second")
-        second.start()
-        # Wait until the second thread captured its generation snapshot, so it
-        # is deterministically queued behind the in-flight refresh.
-        for _ in range(1000):
-            if "second" in inner.generation_reads:
-                break
-            first.join(timeout=0.01)
-        assert "second" in inner.generation_reads
-
-        inner.release.set()
-        first.join(timeout=10)
-        second.join(timeout=10)
-        assert not first.is_alive() and not second.is_alive()
+        threads = [threading.Thread(target=inner._run_request, args=("GET", "/x")) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
 
         assert inner.refresh_calls == 1
-        assert inner._generation == 1
+
+    def test_401_on_a_token_refreshed_before_send_still_refreshes(self) -> None:
+        """A request that waited out another thread's refresh sends the new
+        token; if that token is rejected too, it must refresh again."""
+        holder: dict[str, Any] = {}
+
+        def other_thread_refreshes_first() -> None:
+            other = threading.Thread(target=holder["inner"]._refresh_session)
+            other.start()
+            other.join(timeout=10)
+
+        inner = self._UpstreamInner(threads=1, before_headers=other_thread_refreshes_first)
+        holder["inner"] = inner
+        backend._serialize_refresh(SimpleNamespace(client=inner))
+
+        inner._run_request("GET", "/x")
+
+        assert inner.refresh_calls == 2
+
+    def test_stale_request_snapshot_does_not_suppress_a_later_direct_refresh(self) -> None:
+        inner = self._UpstreamInner(threads=1)
+        backend._serialize_refresh(SimpleNamespace(client=inner))
+
+        inner._run_request("GET", "/x")  # refresh #1 inside a request
+        inner._refresh_session()  # direct call, e.g. upstream login path
+
+        assert inner.refresh_calls == 2
+
+    def test_direct_refresh_leaves_no_snapshot_behind(self) -> None:
+        inner = self._UpstreamInner(threads=1)
+        backend._serialize_refresh(SimpleNamespace(client=inner))
+
+        inner._refresh_session()  # direct call on this thread
+        other = threading.Thread(target=inner._refresh_session)
+        other.start()
+        other.join(timeout=10)
+        inner._refresh_session()  # must not compare against a stale snapshot
+
+        assert inner.refresh_calls == 3
 
     def test_sequential_refreshes_both_run(self) -> None:
         inner = self._RefreshInner()
@@ -515,3 +562,37 @@ class TestSerializeRefresh:
         inner._refresh_session()
         assert inner.refresh_calls == 2
         assert inner._generation == 2
+
+
+class TestProfileToday:
+    """``profile_today`` follows the Garmin profile timezone, best effort."""
+
+    def test_none_without_an_active_session(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(backend, "_backend", None)
+        assert backend.profile_today() is None
+
+    def test_uses_the_profile_timezone(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        client = MagicMock()
+        # UTC+14: differs from the host date for most of every UTC day.
+        client.get_user_timezone.return_value = "Pacific/Kiritimati"
+        monkeypatch.setattr(backend, "_backend", client)
+
+        assert backend.profile_today() == datetime.now(ZoneInfo("Pacific/Kiritimati")).date()
+
+    @pytest.mark.parametrize("timezone", [None, "", "Not/AZone"])
+    def test_none_when_timezone_unknown_or_invalid(
+        self, monkeypatch: pytest.MonkeyPatch, timezone: Any
+    ) -> None:
+        client = MagicMock()
+        client.get_user_timezone.return_value = timezone
+        monkeypatch.setattr(backend, "_backend", client)
+        assert backend.profile_today() is None
+
+    def test_none_when_timezone_lookup_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = MagicMock()
+        client.get_user_timezone.side_effect = RuntimeError("network down")
+        monkeypatch.setattr(backend, "_backend", client)
+        assert backend.profile_today() is None

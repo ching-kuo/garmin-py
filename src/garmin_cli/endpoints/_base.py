@@ -116,7 +116,7 @@ def _retry_loop(
     The python-garminconnect backend sends API calls on a shared
     ``requests.Session`` whose adapter mounts no urllib3 ``Retry``, so this
     loop is the only retry layer for reads and writes alike (verified against
-    garminconnect 0.3.5 ``Client._run_request``).
+    garminconnect 0.3.20 ``Client._run_request``).
 
     Args:
         call: Zero-arg callable that performs the API request.
@@ -151,24 +151,6 @@ def _retry_loop(
                 ) from exc
 
             raise
-
-
-def _make_write_request(
-    connectapi_fn: Callable[..., Any],
-    method: str,
-    url: str,
-    *,
-    json: dict[str, Any] | None = None,
-) -> Any:
-    """Execute a write operation (POST/PUT/DELETE) via connectapi_fn with retry on 429/5xx."""
-    return _retry_loop(
-        lambda: connectapi_fn(url, method=method, json=json),
-        immediate_errors={
-            **_AUTH_NOT_FOUND_ERRORS,
-            400: ("Invalid input.", "INVALID_INPUT"),
-            409: ("Invalid input.", "INVALID_INPUT"),
-        },
-    )
 
 
 def _make_request(
@@ -208,7 +190,7 @@ def _make_typed_write(typed_method: Callable[..., Any], *args: Any, **kwargs: An
     """Execute a typed backend-adapter write method with retry on 429/5xx.
 
     Same as :func:`_make_typed_request` but with the write-verb immediate-fail
-    map (400/409 -> INVALID_INPUT), matching :func:`_make_write_request`, so a
+    map (400/409 -> INVALID_INPUT), so a
     Garmin payload rejection or conflict surfaces as a classified
     ``GarminCliError`` instead of escaping the retry loop raw.
     """

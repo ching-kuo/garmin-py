@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from garmin_cli import backend as garth
+from garmin_cli.date_utils import today
 from garmin_cli.endpoints._base import _make_request, _make_typed_request
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.units import (
@@ -32,7 +33,7 @@ def get_personal_records() -> Any:
 
 def get_ftp(sport: str) -> Any:
     result = _request(
-        f"/biometric-service/biometric/powerToWeight/latest/{date.today().isoformat()}/",
+        f"/biometric-service/biometric/powerToWeight/latest/{today().isoformat()}/",
         params={"sport": sport.title()},
     )
     return result if result is not None else []
@@ -46,7 +47,7 @@ def get_vo2max(measurement_date: date) -> Any:
 
 
 def get_latest_vo2max(days_back: int = 30) -> Any:
-    end = date.today()
+    end = today()
     start = end - timedelta(days=days_back)
     result = _request(
         f"/metrics-service/metrics/maxmet/daily/{start.isoformat()}/{end.isoformat()}"

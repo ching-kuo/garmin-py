@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from concurrent.futures import Future
-from datetime import date as Date
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
@@ -11,6 +10,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
 
 from garmin_cli.config import CliConfig
+from garmin_cli.date_utils import today
 from garmin_cli.endpoints._base import _bounded_thread_pool, _cancel_futures_on_error
 from garmin_cli.endpoints.activities import (
     get_activity,
@@ -69,11 +69,11 @@ def register_coaching_tools(mcp: MCPServer, config: CliConfig) -> None:
 
         Baselines use prior calendar days only. The default 9-day daily window
         leaves slack over the 7-sample baseline minimum for days without data.
-        Default requests are bounded to 30 Garmin calls; a terminal rate limit
+        Default requests are bounded to 31 Garmin calls; a terminal rate limit
         preserves completed sections and returns ``complete=false`` and
         ``aborted=true``.
         """
-        as_of = _parse_date(date, "date") if date is not None else Date.today()
+        as_of = _parse_date(date, "date") if date is not None else None
         try:
             budget = validate_snapshot_inputs(baseline_days, recent_daily_days, include_extended_daily_baselines, sports)
         except ValueError as exc:
@@ -81,7 +81,7 @@ def register_coaching_tools(mcp: MCPServer, config: CliConfig) -> None:
         return _authenticated(
             config,
             lambda: collect_snapshot(
-                as_of,
+                as_of if as_of is not None else today(),
                 baseline_days,
                 recent_daily_days,
                 include_extended_daily_baselines,
@@ -115,6 +115,7 @@ def register_coaching_tools(mcp: MCPServer, config: CliConfig) -> None:
             raise ToolError("max_activities must be between 1 and 100")
 
         def produce() -> dict[str, Any]:
+            plan_today = today()
             calendar_raw = get_calendar_range(start, end)
             calendar = serialize_calendar_workout({"calendarItems": calendar_raw})
             list_raw = list_activities(max_activities, 0, None, None, start, end)
@@ -164,6 +165,7 @@ def register_coaching_tools(mcp: MCPServer, config: CliConfig) -> None:
                         detail_requests=len(activity_ids),
                         max_activities=max_activities,
                         truncated=len(summaries) >= max_activities,
+                        today=plan_today,
                     )
                     matched = [
                         row
@@ -280,6 +282,7 @@ def register_coaching_tools(mcp: MCPServer, config: CliConfig) -> None:
                 detail_requests=len(activity_ids),
                 max_activities=max_activities,
                 truncated=len(summaries) >= max_activities,
+                today=plan_today,
                 target_comparisons=target_comparisons,
                 stream_requests=stream_requests,
                 sample_budget=TARGET_SAMPLE_BUDGET,

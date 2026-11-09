@@ -7,7 +7,7 @@ from typing import Any
 import click
 import pytest
 
-from garmin_cli.date_utils import resolve_date_range
+from garmin_cli.date_utils import resolve_date_range, today
 
 
 TODAY = date.today()
@@ -242,3 +242,13 @@ class TestResolveDateConflicts:
 # Return type
 # ---------------------------------------------------------------------------
 
+
+
+class TestToday:
+    def test_prefers_the_garmin_profile_date(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.backend.profile_today", return_value=date(2030, 1, 2))
+        assert today() == date(2030, 1, 2)
+
+    def test_falls_back_to_the_host_date(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.backend.profile_today", return_value=None)
+        assert today() == date.today()

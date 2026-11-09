@@ -86,7 +86,9 @@ _CALENDAR_WORKOUT_TABLE = FieldTable(
         FieldEntry("workout_id", (("workoutId",),)),
         FieldEntry("workout_schedule_id", (("workoutScheduleId",), ("id",))),
         FieldEntry("name", (("title",),)),
-        FieldEntry("type", (("workoutTypeKey",),)),
+        # Live calendar workout items carry only ``sportTypeKey`` (verified
+        # 2026-11-09); ``workoutTypeKey`` is kept for older payloads.
+        FieldEntry("type", (("workoutTypeKey",), ("sportTypeKey",))),
         FieldEntry("duration_min", (("durationInSeconds",),), _minutes),
         FieldEntry("description", (("note",),)),
         FieldEntry("item_type", (("itemType",),)),

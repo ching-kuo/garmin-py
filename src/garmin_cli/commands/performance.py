@@ -9,8 +9,17 @@ from garmin_cli.auth import ensure_authenticated
 from garmin_cli.commands._options import date_range_options, render_date_range
 from garmin_cli.date_utils import CLICK_DATE_TYPE
 from garmin_cli.endpoints.metrics import (
+    FASTEST_SPLITS_SPORTS,
+    FTP_HISTORY_SPORTS,
+    MAX_FASTEST_SPLITS_BESTS,
+    POWER_CURVE_SPORTS,
+    get_acclimation_range,
+    get_cycling_ability_range,
     get_endurance_score_range,
+    get_fastest_splits,
+    get_ftp_history,
     get_hill_score_range,
+    get_power_curve,
     get_race_predictions,
 )
 from garmin_cli.endpoints.performance import (
@@ -37,6 +46,18 @@ from garmin_cli.serializers import (
     serialize_thresholds,
     serialize_vo2max,
     serialize_zones,
+)
+from garmin_cli.serializers.trends import (
+    COLUMNS_ACCLIMATION,
+    COLUMNS_CYCLING_ABILITY,
+    COLUMNS_FASTEST_SPLITS,
+    COLUMNS_FTP_HISTORY,
+    COLUMNS_POWER_CURVE,
+    serialize_acclimation,
+    serialize_cycling_ability,
+    serialize_fastest_splits,
+    serialize_ftp_history,
+    serialize_power_curve,
 )
 from garmin_cli.services.performance import fetch_vo2max
 
@@ -149,6 +170,140 @@ def hill_score_cmd(
         get_hill_score_range,
         serialize_hill_score,
         COLUMNS_HILL_SCORE,
+        value_date,
+        days,
+        date_from,
+        date_to,
+    )
+
+
+@performance.command("ftp-history")
+@click.option("--sport", type=click.Choice(FTP_HISTORY_SPORTS), default="cycling", show_default=True)
+@date_range_options()
+@click.pass_context
+def ftp_history_cmd(
+    ctx: click.Context,
+    sport: str,
+    value_date: datetime | None,
+    days: int | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
+) -> None:
+    """Get daily functional threshold power (FTP) for a date range."""
+    render_date_range(
+        ctx,
+        "performance ftp-history",
+        lambda start, end: get_ftp_history(start, end, sport),
+        serialize_ftp_history,
+        COLUMNS_FTP_HISTORY,
+        value_date,
+        days,
+        date_from,
+        date_to,
+    )
+
+
+@performance.command("acclimation")
+@date_range_options()
+@click.pass_context
+def acclimation_cmd(
+    ctx: click.Context,
+    value_date: datetime | None,
+    days: int | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
+) -> None:
+    """Get daily heat and altitude acclimation for a date range."""
+    render_date_range(
+        ctx,
+        "performance acclimation",
+        get_acclimation_range,
+        serialize_acclimation,
+        COLUMNS_ACCLIMATION,
+        value_date,
+        days,
+        date_from,
+        date_to,
+    )
+
+
+@performance.command("cycling-ability")
+@date_range_options()
+@click.pass_context
+def cycling_ability_cmd(
+    ctx: click.Context,
+    value_date: datetime | None,
+    days: int | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
+) -> None:
+    """Get daily cycling ability scores for a date range."""
+    render_date_range(
+        ctx,
+        "performance cycling-ability",
+        get_cycling_ability_range,
+        serialize_cycling_ability,
+        COLUMNS_CYCLING_ABILITY,
+        value_date,
+        days,
+        date_from,
+        date_to,
+    )
+
+
+@performance.command("power-curve")
+@click.option("--sport", type=click.Choice(POWER_CURVE_SPORTS), default="cycling", show_default=True)
+@date_range_options()
+@click.pass_context
+def power_curve_cmd(
+    ctx: click.Context,
+    sport: str,
+    value_date: datetime | None,
+    days: int | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
+) -> None:
+    """Get best average power per duration across activities in a date range."""
+    render_date_range(
+        ctx,
+        "performance power-curve",
+        lambda start, end: get_power_curve(start, end, sport),
+        serialize_power_curve,
+        COLUMNS_POWER_CURVE,
+        value_date,
+        days,
+        date_from,
+        date_to,
+    )
+
+
+@performance.command("fastest-splits")
+@click.option("--sport", type=click.Choice(FASTEST_SPLITS_SPORTS), default="running", show_default=True)
+@click.option(
+    "--bests",
+    type=click.IntRange(1, MAX_FASTEST_SPLITS_BESTS),
+    default=1,
+    show_default=True,
+    help="Fastest efforts to return per distance.",
+)
+@date_range_options()
+@click.pass_context
+def fastest_splits_cmd(
+    ctx: click.Context,
+    sport: str,
+    bests: int,
+    value_date: datetime | None,
+    days: int | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
+) -> None:
+    """Get fastest times per standard distance across activities in a date range."""
+    render_date_range(
+        ctx,
+        "performance fastest-splits",
+        lambda start, end: get_fastest_splits(start, end, sport, bests),
+        serialize_fastest_splits,
+        COLUMNS_FASTEST_SPLITS,
         value_date,
         days,
         date_from,

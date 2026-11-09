@@ -15,6 +15,7 @@ from mcp.server.mcpserver.exceptions import ResourceError
 from garmin_cli import __version__
 from garmin_cli.auth import _get_probe_ttl, _probe_cache_hit, probe_session_status
 from garmin_cli.config import CliConfig
+from garmin_cli.date_utils import today
 from garmin_cli.endpoints._base import _resolve_retry_delays
 from garmin_cli.endpoints.activities import list_activities
 from garmin_cli.endpoints.health import get_sleep
@@ -136,7 +137,7 @@ def _build_profile_snapshot(config: CliConfig) -> dict[str, Any]:
     if state != "authenticated":
         return {"auth_state": state, "auth": auth, "data": None}
 
-    as_of = date.today()
+    as_of = today()
     unavailable: list[dict[str, str]] = []
 
     def fetch(section: str, call: Any, serialize: Any) -> list[dict[str, Any]]:

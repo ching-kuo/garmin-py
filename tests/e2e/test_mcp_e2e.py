@@ -149,6 +149,24 @@ def test_performance_hill_score_mcp(mcp_server_live, rate_limiter, single_day_ra
 
 
 @pytest.mark.e2e
+@pytest.mark.parametrize(
+    ("tool", "keys"),
+    [
+        ("performance_ftp_history", ["date", "sport", "ftp_watts"]),
+        ("performance_acclimation", ["date", "heat_acclimation_pct", "altitude_acclimation"]),
+        ("performance_cycling_ability", ["date", "aerobic_endurance", "profile_type"]),
+        ("performance_power_curve", ["duration_s", "power_w", "activity_id"]),
+        ("performance_fastest_splits", ["distance_m", "time_s", "activity_id"]),
+    ],
+)
+def test_performance_trend_tools_mcp(mcp_server_live, rate_limiter, recent_range, tool, keys):
+    parsed = _call_tool_json(mcp_server_live, rate_limiter, tool, recent_range)
+    assert_mcp_envelope_ok(parsed)
+    if parsed["rows"]:
+        assert_row_has_keys(parsed["rows"][0], keys)
+
+
+@pytest.mark.e2e
 def test_device_list_mcp(mcp_server_live, rate_limiter):
     parsed = _call_tool_json(mcp_server_live, rate_limiter, "device_list", {})
     assert_mcp_envelope_ok(parsed)

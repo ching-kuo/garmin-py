@@ -18,10 +18,11 @@ def _daily_rows(field: str, as_of: date, values: list[int]) -> list[dict[str, ob
 class TestCoachSnapshotRequestBudget:
     def test_default_budget_is_within_cap(self) -> None:
         # 9-day daily window: two missing-day slack over the 7-sample minimum.
-        assert coach_snapshot_request_budget(28, 9, False) == 30
+        # Calendar costs two requests (weekly page + workoutScheduleByPeriod).
+        assert coach_snapshot_request_budget(28, 9, False) == 31
 
     def test_extended_daily_baselines_charge_the_full_window(self) -> None:
-        assert coach_snapshot_request_budget(28, 7, True) == 68
+        assert coach_snapshot_request_budget(28, 7, True) == 69
 
 
 class TestCoachSnapshotAggregation:

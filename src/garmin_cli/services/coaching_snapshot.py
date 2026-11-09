@@ -37,9 +37,15 @@ from garmin_cli.serializers import (
     serialize_training_status,
     serialize_weight,
 )
-from garmin_cli.services.coaching import build_coach_snapshot, coach_snapshot_request_budget
+from garmin_cli.services.coaching import (
+    CALENDAR_REQUESTS,
+    build_coach_snapshot,
+    coach_snapshot_request_budget,
+)
 
-MAX_SNAPSHOT_REQUESTS = 30
+# 31 keeps the default window (28-day baselines, 9 recent days) inside the
+# cap after the calendar grew a second request for adaptive-plan sessions.
+MAX_SNAPSHOT_REQUESTS = 31
 
 
 def _snapshot_error(section: str, exc: GarminCliError) -> dict[str, Any]:
@@ -168,12 +174,14 @@ def collect_snapshot(
     fetch("spo2", lambda: get_spo2(as_of), serialize_spo2)
     fetch("training_status", lambda: get_training_status(as_of), serialize_training_status)
     # Seven dates (today plus six): the weekly calendar walk steps 7 days from
-    # its start, so this window costs exactly one request; an 8th date would
-    # trigger a second week and blow the documented budget.
+    # its start, so this window costs one calendar page plus the by-period
+    # schedule lookup; an 8th date would trigger a second week and blow the
+    # documented budget.
     fetch(
         "calendar",
         lambda: get_calendar_range(as_of, as_of + timedelta(days=6)),
         lambda raw: serialize_calendar_workout({"calendarItems": raw}),
+        cost=CALENDAR_REQUESTS,
     )
     return build_coach_snapshot(
         as_of=as_of,

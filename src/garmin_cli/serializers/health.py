@@ -188,15 +188,16 @@ _DAILY_SUMMARY_TABLE = FieldTable(
     name="daily_summary",
     columns=COLUMNS_DAILY_SUMMARY,
     entries=(
+        # Nested v2 ``dailysummaries`` shape (verified live 2026-11-09).
         FieldEntry("date", (("calendarDate",),)),
-        FieldEntry("total_steps", (("totalSteps",),)),
-        FieldEntry("distance_km", (("totalDistanceMeters",),), _km),
-        FieldEntry("active_kilocalories", (("activeKilocalories",),)),
-        FieldEntry("floors_ascended", (("floorsAscended",),)),
-        FieldEntry("floors_descended", (("floorsDescended",),)),
-        FieldEntry("moderate_intensity_minutes", (("moderateIntensityMinutes",),)),
-        FieldEntry("vigorous_intensity_minutes", (("vigorousIntensityMinutes",),)),
-        FieldEntry("resting_heart_rate", (("restingHeartRate",),)),
+        FieldEntry("total_steps", (("movement", "steps", "value"),)),
+        FieldEntry("distance_km", (("movement", "steps", "distanceInMeters"),), _km),
+        FieldEntry("active_kilocalories", (("calories", "burnedActive"),)),
+        FieldEntry("floors_ascended", (("movement", "floorsAscended", "value"),)),
+        FieldEntry("floors_descended", (("movement", "floorsDescended", "value"),)),
+        FieldEntry("moderate_intensity_minutes", (("intensityMinutes", "moderate"),)),
+        FieldEntry("vigorous_intensity_minutes", (("intensityMinutes", "vigorous"),)),
+        FieldEntry("resting_heart_rate", (("heartRate", "restingValue"),)),
     ),
 )
 

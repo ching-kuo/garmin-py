@@ -17,6 +17,7 @@ from mcp_types import ToolAnnotations
 
 from garmin_cli.auth import complete_mfa_login, probe_session_status
 from garmin_cli.config import CliConfig
+from garmin_cli.date_utils import today
 from garmin_cli.endpoints.activities import list_activities
 from garmin_cli.endpoints.devices import get_devices
 from garmin_cli.endpoints.health import (
@@ -58,13 +59,46 @@ from garmin_cli.serializers import (
     serialize_training_readiness,
 )
 
-# Alias so report_snapshot, whose user-facing parameter is named ``date``, can
-# still reach ``date.today()`` without the parameter shadowing the class.
-date_cls = date
-
-
 def _calendar_rows(raw: Any) -> list[dict[str, Any]]:
     return serialize_calendar_workout({"calendarItems": raw})
+
+
+def _report_specs(kind: str, anchor: date) -> tuple[date, list[ReportSection]]:
+    """Return the report window start and its section fetchers for ``kind``."""
+    if kind == "morning":
+        window_from = anchor
+        specs: list[ReportSection] = [
+            ("sleep", lambda: get_sleep(anchor, anchor), serialize_sleep),
+            ("hrv", lambda: get_hrv(anchor, anchor), serialize_hrv),
+            ("readiness", lambda: get_training_readiness_range(anchor, anchor), serialize_training_readiness),
+            ("body_battery", lambda: get_body_battery_range(anchor, anchor), serialize_body_battery),
+            ("planned_today", lambda: get_calendar_range(anchor, anchor), _calendar_rows),
+        ]
+    elif kind == "evening":
+        window_from = anchor
+        tomorrow = anchor + timedelta(days=1)
+        specs = [
+            ("steps", lambda: get_steps_range(anchor, anchor), serialize_steps),
+            ("intensity_minutes", lambda: get_intensity_minutes_range(anchor, anchor), serialize_intensity_minutes),
+            ("stress", lambda: get_stress_range(anchor, anchor), serialize_stress),
+            ("body_battery", lambda: get_body_battery_range(anchor, anchor), serialize_body_battery),
+            ("activities_today", lambda: list_activities(20, 0, None, None, anchor, anchor), serialize_activity_summary),
+            ("planned_tomorrow", lambda: get_calendar_range(tomorrow, tomorrow), _calendar_rows),
+        ]
+    else:  # weekly
+        window_from = anchor - timedelta(days=6)
+        specs = [
+            ("sleep", lambda: get_sleep(window_from, anchor), serialize_sleep),
+            ("hrv", lambda: get_hrv(window_from, anchor), serialize_hrv),
+            ("stress", lambda: get_stress_range(window_from, anchor), serialize_stress),
+            ("steps", lambda: get_steps_range(window_from, anchor), serialize_steps),
+            ("resting_hr", lambda: get_resting_hr_range(window_from, anchor), serialize_resting_hr),
+            ("body_battery", lambda: get_body_battery_range(window_from, anchor), serialize_body_battery),
+            ("activities", lambda: list_activities(50, 0, None, None, window_from, anchor), serialize_activity_summary),
+            ("endurance_score", lambda: get_endurance_score_range(window_from, anchor), serialize_endurance_score),
+            ("race_predictions", get_race_predictions, serialize_race_predictions),
+        ]
+    return window_from, specs
 
 
 def register_misc_tools(mcp: MCPServer, config: CliConfig) -> None:
@@ -126,44 +160,12 @@ def register_misc_tools(mcp: MCPServer, config: CliConfig) -> None:
         """
         if kind not in ("morning", "evening", "weekly"):
             raise ToolError(f"kind must be one of: morning, evening, weekly (got '{kind}')")
-        anchor = _parse_date(date, "date") if date is not None else date_cls.today()
-
-        if kind == "morning":
-            window_from = anchor
-            specs: list[ReportSection] = [
-                ("sleep", lambda: get_sleep(anchor, anchor), serialize_sleep),
-                ("hrv", lambda: get_hrv(anchor, anchor), serialize_hrv),
-                ("readiness", lambda: get_training_readiness_range(anchor, anchor), serialize_training_readiness),
-                ("body_battery", lambda: get_body_battery_range(anchor, anchor), serialize_body_battery),
-                ("planned_today", lambda: get_calendar_range(anchor, anchor), _calendar_rows),
-            ]
-        elif kind == "evening":
-            window_from = anchor
-            tomorrow = anchor + timedelta(days=1)
-            specs = [
-                ("steps", lambda: get_steps_range(anchor, anchor), serialize_steps),
-                ("intensity_minutes", lambda: get_intensity_minutes_range(anchor, anchor), serialize_intensity_minutes),
-                ("stress", lambda: get_stress_range(anchor, anchor), serialize_stress),
-                ("body_battery", lambda: get_body_battery_range(anchor, anchor), serialize_body_battery),
-                ("activities_today", lambda: list_activities(20, 0, None, None, anchor, anchor), serialize_activity_summary),
-                ("planned_tomorrow", lambda: get_calendar_range(tomorrow, tomorrow), _calendar_rows),
-            ]
-        else:  # weekly
-            window_from = anchor - timedelta(days=6)
-            start = window_from
-            specs = [
-                ("sleep", lambda: get_sleep(start, anchor), serialize_sleep),
-                ("hrv", lambda: get_hrv(start, anchor), serialize_hrv),
-                ("stress", lambda: get_stress_range(start, anchor), serialize_stress),
-                ("steps", lambda: get_steps_range(start, anchor), serialize_steps),
-                ("resting_hr", lambda: get_resting_hr_range(start, anchor), serialize_resting_hr),
-                ("body_battery", lambda: get_body_battery_range(start, anchor), serialize_body_battery),
-                ("activities", lambda: list_activities(50, 0, None, None, start, anchor), serialize_activity_summary),
-                ("endurance_score", lambda: get_endurance_score_range(start, anchor), serialize_endurance_score),
-                ("race_predictions", get_race_predictions, serialize_race_predictions),
-            ]
+        parsed = _parse_date(date, "date") if date is not None else None
 
         def produce() -> dict[str, Any]:
+            # Default "today" after auth so it follows the profile timezone.
+            anchor = parsed if parsed is not None else today()
+            window_from, specs = _report_specs(kind, anchor)
             sections, unavailable = _collect_report_sections(specs)
             result: dict[str, Any] = {
                 "kind": kind,

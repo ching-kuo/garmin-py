@@ -306,10 +306,7 @@ def daily_summary(
     date_from: datetime | None,
     date_to: datetime | None,
 ) -> None:
-    """Get daily summary data (steps, distance, calories, floors, intensity minutes, resting HR).
-
-    Note: large date ranges may be slow — one API call is made per day.
-    """
+    """Get daily summary data (steps, distance, calories, floors, intensity minutes, resting HR)."""
     render_date_range(
         ctx,
         "health daily-summary",

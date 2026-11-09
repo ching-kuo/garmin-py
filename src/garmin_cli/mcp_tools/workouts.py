@@ -290,9 +290,6 @@ def register_workout_tools(mcp: MCPServer, config: CliConfig) -> None:
                     },
                 }])
 
-            # update_workout routes through _write_request(capability="workout_update"),
-            # i.e. the governed raw fallback. R9 in the plan defers migration off
-            # RAW_FALLBACKS until python-garminconnect exposes a typed helper.
             update_workout(workout_id, merged)
             audit.success()
             return _write_envelope([{

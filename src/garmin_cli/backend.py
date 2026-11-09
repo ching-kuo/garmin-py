@@ -6,8 +6,9 @@ import os
 import threading
 import types
 from dataclasses import dataclass
-from datetime import date
-from typing import Any
+from datetime import date, datetime
+from typing import Any, cast
+from zoneinfo import ZoneInfo
 
 from garminconnect import Garmin
 
@@ -56,54 +57,62 @@ def _apply_timeout(garmin: Garmin) -> None:
     inner_client._run_request = types.MethodType(_patched_run_request, inner_client)  # type: ignore[method-assign]
 
 
-# Process-wide: under parallel fan-out several worker threads can hit the
-# token-expiry window (or a 401) simultaneously. Upstream _refresh_session
-# mutates token state and rewrites the tokenstore non-atomically, so
-# concurrent refreshes can corrupt the store or burn a rotated (single-use)
-# refresh token.
+# Process-wide: under parallel fan-out several worker threads can hit a 401
+# simultaneously. Since 0.3.10 upstream serializes refreshes under its
+# per-client _token_lock (an RLock taken before this one, so no lock-order
+# inversion), but it still runs one refresh per 401'd thread back to back,
+# which can burn a rotated (single-use) refresh token. The request-start
+# generation guard below collapses those into one refresh.
 _refresh_lock: threading.Lock = threading.Lock()
 
 
 def _serialize_refresh(garmin: Garmin) -> None:
     """Wrap *garmin.client._refresh_session* so only one refresh runs at a time.
 
-    A thread queued behind an in-flight refresh skips its own refresh when it
-    observes a refresh already completed while it waited for the lock.  A
-    generation counter (not token identity) detects this so the guard also
+    A thread skips its refresh when a refresh completed after it built the
+    auth headers of its rejected request: the 401 answered a token that has
+    already been replaced, and upstream re-sends with fresh headers. A
+    generation counter (not token identity) detects this, so the guard also
     covers legacy jwt_web sessions, whose refresh never touches ``di_token``.
+
+    The snapshot is taken in ``get_api_headers`` (the token actually sent),
+    not when the refresh starts: upstream (0.3.10+) already serializes
+    refreshes under its ``_token_lock``, so a queued thread would otherwise
+    always see an advanced generation. It is scoped to ``_run_request`` so a
+    refresh called outside a request (upstream login paths) is never skipped.
     """
     inner_client = garmin.client
     original_refresh = inner_client._refresh_session.__func__  # type: ignore[attr-defined]
-    inner_client._garmin_cli_refresh_generation = 0
+    original_run_request = inner_client._run_request
+    original_headers = inner_client.get_api_headers
+    sent = threading.local()
+    inner_client._garmin_cli_refresh_generation = 0  # type: ignore[attr-defined]
+
+    def _tracked_run_request(self: Any, method: str, path: str, **kwargs: Any) -> Any:
+        try:
+            return original_run_request(method, path, **kwargs)
+        finally:
+            sent.__dict__.pop("generation", None)
+
+    def _tracked_headers(self: Any) -> Any:
+        sent.generation = self._garmin_cli_refresh_generation
+        return original_headers()
 
     def _locked_refresh(self: Any) -> None:
-        seen = self._garmin_cli_refresh_generation
         with _refresh_lock:
-            if self._garmin_cli_refresh_generation != seen:
+            current = self._garmin_cli_refresh_generation
+            if getattr(sent, "generation", current) != current:
                 return
             original_refresh(self)
-            self._garmin_cli_refresh_generation = seen + 1
+            self._garmin_cli_refresh_generation = current + 1
 
+    inner_client._run_request = types.MethodType(_tracked_run_request, inner_client)  # type: ignore[method-assign]
+    inner_client.get_api_headers = types.MethodType(_tracked_headers, inner_client)  # type: ignore[method-assign]
     inner_client._refresh_session = types.MethodType(_locked_refresh, inner_client)  # type: ignore[method-assign]
 
 
-RAW_FALLBACKS: tuple[dict[str, str], ...] = (
-    {
-        "capability": "workout_update",
-        "why": "Upstream provides no typed workout update helper.",
-        "transport": "Garmin.client.put('connectapi', '/workout-service/workout/{id}', json=payload)",
-        "tests": "tests/test_endpoints/test_workouts_write.py, tests/test_backend.py",
-        "removal_condition": "Use an upstream typed update method once python-garminconnect exposes one.",
-    },
-)
-
 _backend: Garmin | None = None
 _garth_home: str | None = None
-
-
-def get_raw_fallback_registry() -> list[dict[str, str]]:
-    """Return the governed raw-fallback table for this backend."""
-    return [dict(entry) for entry in RAW_FALLBACKS]
 
 
 def _require_backend() -> Garmin:
@@ -118,6 +127,28 @@ def _set_backend(client: Garmin, garth_home: str | None = None) -> None:
     with _backend_lock:
         _backend = client
         _garth_home = garth_home
+
+
+def profile_today() -> date | None:
+    """Today in the Garmin profile timezone, or None when it is unknown.
+
+    Best effort: None without an active session, when the profile has no
+    valid timezone, or when the lookup fails. Upstream caches the lookup per
+    client, and clients are rebuilt on auth-probe cache misses, so a failed
+    lookup or a changed profile timezone is picked up by the next client.
+    """
+    with _backend_lock:
+        client = _backend
+    if client is None:
+        return None
+    try:
+        timezone = client.get_user_timezone()
+        if not isinstance(timezone, str) or not timezone:
+            return None
+        return datetime.now(ZoneInfo(timezone)).date()
+    except Exception as exc:  # never block a read on the timezone lookup
+        logger.debug("Garmin profile timezone unavailable: %s", type(exc).__name__)
+        return None
 
 
 def _normalize_home(path: str | None = None) -> str | None:
@@ -225,46 +256,13 @@ def save(garth_home: str) -> None:
     logger.debug("Garmin session saved to %s", garth_home)
 
 
-def connectapi(
-    path: str,
-    method: str = "GET",
-    *,
-    capability: str | None = None,
-    params: dict[str, Any] | None = None,
-    json: dict[str, Any] | list[Any] | None = None,
-    **kwargs: Any,
-) -> Any:
-    """Compatibility wrapper matching the old `garth.connectapi` surface."""
+def connectapi(path: str, *, params: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+    """GET *path* on the Garmin Connect API (the old ``garth.connectapi`` surface).
+
+    Writes go through the typed upstream helpers below.
+    """
     client = _require_backend()
-    method = method.upper()
-
-    if method == "GET":
-        return client.connectapi(path, params=params, **kwargs)
-
-    capability_name = capability or f"{method.lower()}:{path}"
-    logger.debug(
-        "Raw fallback used for capability=%s method=%s path=%s",
-        capability_name,
-        method,
-        path,
-    )
-    if method == "POST":
-        request_fn = client.client.post
-    elif method == "PUT":
-        request_fn = client.client.put
-    elif method == "DELETE":
-        request_fn = client.client.delete
-    else:
-        raise ValueError(f"Unsupported Garmin API method: {method}")
-
-    response = request_fn("connectapi", path, params=params, json=json, **kwargs)
-    if response is None:
-        return None
-    if hasattr(response, "status_code") and response.status_code == 204:
-        return None
-    if hasattr(response, "json"):
-        return response.json()
-    return response
+    return client.connectapi(path, params=params, **kwargs)
 
 
 def list_workouts(limit: int) -> list[dict[str, Any]]:
@@ -285,6 +283,12 @@ def create_workout(payload: dict[str, Any]) -> dict[str, Any]:
     return client.upload_workout(payload)
 
 
+def update_workout(workout_id: int | str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Use the typed upstream workout update helper (PUT, keeps the workout id)."""
+    client = _require_backend()
+    return client.update_workout(workout_id, payload)
+
+
 def delete_workout(workout_id: int | str) -> Any:
     """Use the typed upstream workout delete helper."""
     client = _require_backend()
@@ -301,7 +305,8 @@ def schedule_workout(workout_id: int | str, schedule_date: date | str) -> dict[s
 def get_activity_types() -> list[dict[str, Any]]:
     """Use the typed upstream activity-types helper (sport typeKey/typeId table)."""
     client = _require_backend()
-    return client.get_activity_types()
+    # Upstream annotates dict; the endpoint actually returns a list.
+    return cast(list[dict[str, Any]], client.get_activity_types())
 
 
 def set_activity_name(activity_id: int | str, name: str) -> Any:
@@ -330,19 +335,19 @@ def unschedule_workout(scheduled_workout_id: int | str) -> Any:
 def get_activity_typed_splits(activity_id: int | str) -> Any:
     """Use the typed upstream typed-splits helper (per-pool-length swim data)."""
     client = _require_backend()
-    return client.get_activity_typed_splits(activity_id)
+    return client.get_activity_typed_splits(str(activity_id))
 
 
 def get_activity_details(activity_id: int | str) -> Any:
     """Use the typed upstream activity-details helper (metric stream + descriptors)."""
     client = _require_backend()
-    return client.get_activity_details(activity_id)
+    return client.get_activity_details(str(activity_id))
 
 
 def get_activity_hr_in_timezones(activity_id: int | str) -> Any:
     """Use the typed upstream HR-time-in-zone helper."""
     client = _require_backend()
-    return client.get_activity_hr_in_timezones(activity_id)
+    return client.get_activity_hr_in_timezones(str(activity_id))
 
 
 def download_activity(activity_id: int | str, dl_fmt: Any) -> bytes:

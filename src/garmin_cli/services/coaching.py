@@ -15,6 +15,11 @@ from typing import Any
 _MIN_BASELINE_SAMPLES = 7
 
 
+# Calendar requests per snapshot: one weekly calendar page plus the
+# workoutScheduleByPeriod lookup that catches adaptive-plan sessions.
+CALENDAR_REQUESTS = 2
+
+
 def coach_snapshot_request_budget(
     baseline_days: int,
     recent_daily_days: int,
@@ -22,12 +27,14 @@ def coach_snapshot_request_budget(
 ) -> int:
     """Return the number of Garmin requests in a non-paginated snapshot.
 
-    Five range endpoints, one activity list, readiness, SpO2, training status,
-    and calendar are single requests. Resting HR and stress are daily endpoints
-    and therefore account for two requests per prior-day window plus current.
+    Five range endpoints, one activity list, readiness, SpO2, and training
+    status are single requests; the calendar is two (one weekly page plus
+    ``workoutScheduleByPeriod`` for adaptive-plan sessions). Resting HR and
+    stress are daily endpoints and therefore account for two requests per
+    prior-day window plus current.
     """
     daily_days = baseline_days if include_extended_daily_baselines else recent_daily_days
-    return 10 + 2 * (daily_days + 1)
+    return 9 + CALENDAR_REQUESTS + 2 * (daily_days + 1)
 
 
 def _row_date(row: dict[str, Any]) -> date | None:

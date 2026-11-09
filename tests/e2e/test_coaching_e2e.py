@@ -15,6 +15,7 @@ pytest.importorskip("mcp", reason="mcp extra not installed")
 
 from garmin_cli.config import CliConfig
 from garmin_cli.mcp_server import create_mcp_server
+from garmin_cli.services.coaching_snapshot import MAX_SNAPSHOT_REQUESTS
 from tests.e2e.test_mcp_e2e import _call_tool_json
 
 pytestmark = pytest.mark.e2e
@@ -59,7 +60,7 @@ def test_coach_snapshot_live_defaults(mcp_server_live, rate_limiter):
         assert snapshot["unavailable"], "incomplete snapshot with no unavailable sections"
 
     provenance = snapshot["provenance"]
-    assert provenance["estimated_requests"] <= 30
+    assert provenance["estimated_requests"] <= MAX_SNAPSHOT_REQUESTS
     assert 0 < provenance["completed_requests"] <= provenance["estimated_requests"]
 
     baseline = snapshot["baseline"]

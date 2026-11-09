@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import date
 from typing import Any
 
 import click
 
 from garmin_cli.auth import ensure_authenticated
+from garmin_cli.date_utils import today
 from garmin_cli.output import echo_json, render_output
 from garmin_cli.services.coaching_snapshot import collect_snapshot, validate_snapshot_inputs
 
@@ -38,8 +38,8 @@ def snapshot_cmd(
         budget = validate_snapshot_inputs(baseline_days, recent_daily_days, include_extended_daily_baselines, sport_list)
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
-    snapshot_date = as_of.date() if as_of is not None else date.today()
     ensure_authenticated(ctx.obj["config"])
+    snapshot_date = as_of.date() if as_of is not None else today()
     result = collect_snapshot(
         snapshot_date,
         baseline_days,

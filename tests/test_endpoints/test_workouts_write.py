@@ -88,13 +88,16 @@ class TestCreateWorkout:
 
 class TestUpdateWorkout:
 
-    def test_returns_none_for_204(self, mocker: Any) -> None:
+    def test_delegates_to_typed_upstream_helper(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.connectapi.return_value = None
+        mock_garth.update_workout.return_value = {"workoutId": 12345}
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
 
         result = update_workout(12345, _SAMPLE_EXISTING)
+
         assert result is None
+        mock_garth.update_workout.assert_called_once_with(12345, _SAMPLE_EXISTING)
+        mock_garth.connectapi.assert_not_called()
 
     def test_invalid_workout_id_raises_invalid_input(self, mocker: Any) -> None:
         mock_garth = MagicMock()
@@ -103,10 +106,11 @@ class TestUpdateWorkout:
         with pytest.raises(GarminCliError) as exc_info:
             update_workout("not-a-number", _SAMPLE_EXISTING)
         assert exc_info.value.error_code == "INVALID_INPUT"
+        mock_garth.update_workout.assert_not_called()
 
     def test_404_raises_not_found(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.connectapi.side_effect = _http_error(404)
+        mock_garth.update_workout.side_effect = _http_error(404)
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
 
         with pytest.raises(GarminCliError) as exc_info:
@@ -115,7 +119,7 @@ class TestUpdateWorkout:
 
     def test_403_raises_auth_failed(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.connectapi.side_effect = _http_error(403)
+        mock_garth.update_workout.side_effect = _http_error(403)
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
 
         with pytest.raises(GarminCliError) as exc_info:

@@ -11,6 +11,18 @@ _MAX_DAYS = 90
 CLICK_DATE_TYPE = click.DateTime(formats=["%Y-%m-%d"])
 
 
+def today() -> date:
+    """Today in the Garmin profile timezone when a session is active.
+
+    Falls back to the host date before login or when the profile timezone is
+    unknown. Call it after authenticating so a host running in another
+    timezone (e.g. a UTC server) does not ask for the wrong day.
+    """
+    from garmin_cli import backend  # lazy: keeps garminconnect off the CLI startup path
+
+    return backend.profile_today() or date.today()
+
+
 def resolve_click_dates(
     value_date: datetime | None,
     days: int | None,

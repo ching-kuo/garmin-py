@@ -12,6 +12,7 @@ pytest.importorskip("mcp", reason="mcp extra not installed")
 from garmin_cli.endpoints import health as health_endpoints  # noqa: E402
 from garmin_cli.exceptions import GarminCliError  # noqa: E402
 from garmin_cli.mcp_server import create_mcp_server  # noqa: E402
+from garmin_cli.serializers import serialize_daily_summary  # noqa: E402
 from tests.helpers import make_http_error as _http_error  # noqa: E402
 from tests.test_mcp_tools.support import _call, _config  # noqa: E402
 
@@ -19,38 +20,46 @@ from tests.test_mcp_tools.support import _call, _config  # noqa: E402
 class TestHealthEndpoints:
     """Verify new health endpoint helpers call Garmin APIs correctly."""
 
-    def test_get_daily_summary(self, mocker: Any) -> None:
+    def test_get_daily_summary_range_is_one_v2_call(self, mocker: Any) -> None:
         mock_request = mocker.patch(
             "garmin_cli.endpoints.health._request",
-            return_value={"calendarDate": "2026-01-01", "totalSteps": 12345},
+            return_value={"data": [{"calendarDate": "2026-01-01"}, {"calendarDate": "2026-01-02"}]},
         )
-        result = health_endpoints.get_daily_summary(date(2026, 1, 1))
-        assert result["totalSteps"] == 12345
+        result = health_endpoints.get_daily_summary_range(date(2026, 1, 1), date(2026, 1, 2))
+        assert [row["calendarDate"] for row in result] == ["2026-01-01", "2026-01-02"]
         mock_request.assert_called_once_with(
-            "/usersummary-service/usersummary/daily/",
-            params={"calendarDate": "2026-01-01"},
+            "/usersummary-service/v2/dailysummaries",
+            params={"startDate": "2026-01-01", "endDate": "2026-01-02"},
         )
 
-    def test_get_daily_summary_coalesces_none(self, mocker: Any) -> None:
+    def test_get_daily_summary_range_coalesces_missing_data(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.endpoints.health._request", return_value=None)
-        result = health_endpoints.get_daily_summary(date(2026, 1, 1))
-        assert result == {}
+        assert health_endpoints.get_daily_summary_range(date(2026, 1, 1), date(2026, 1, 1)) == []
 
-    def test_get_daily_summary_range(self, mocker: Any) -> None:
-        mock_collect = mocker.patch(
-            "garmin_cli.endpoints.health._collect_daily_range",
-            return_value=[{"calendarDate": "2026-01-01"}],
-        )
-        result = health_endpoints.get_daily_summary_range(
-            date(2026, 1, 1),
-            date(2026, 1, 3),
-        )
-        assert result == [{"calendarDate": "2026-01-01"}]
-        mock_collect.assert_called_once_with(
-            health_endpoints.get_daily_summary,
-            date(2026, 1, 1),
-            date(2026, 1, 3),
-        )
+    def test_serialize_daily_summary_maps_v2_nested_shape(self) -> None:
+        # Shape verified against the live v2 dailysummaries endpoint (2026-11-09).
+        item = {
+            "calendarDate": "2026-01-01",
+            "movement": {
+                "steps": {"goal": 10000, "value": 12345, "distanceInMeters": 9876.0},
+                "floorsAscended": {"goal": 10, "value": 12},
+                "floorsDescended": {"value": 11},
+            },
+            "calories": {"burnedResting": 1800, "burnedActive": 650, "burnedTotal": 2450},
+            "heartRate": {"minValue": 45, "maxValue": 160, "restingValue": 48},
+            "intensityMinutes": {"goal": 150, "moderate": 20, "vigorous": 30},
+        }
+        assert serialize_daily_summary([item]) == [{
+            "date": "2026-01-01",
+            "total_steps": 12345,
+            "distance_km": 9.876,
+            "active_kilocalories": 650,
+            "floors_ascended": 12,
+            "floors_descended": 11,
+            "moderate_intensity_minutes": 20,
+            "vigorous_intensity_minutes": 30,
+            "resting_heart_rate": 48,
+        }]
 
     def test_get_steps_range(self, mocker: Any) -> None:
         mocker.patch(
@@ -151,8 +160,7 @@ class TestHealthTools:
             return_value=[
                 {
                     "calendarDate": "2026-01-01",
-                    "totalSteps": 12345,
-                    "totalDistanceMeters": 7500,
+                    "movement": {"steps": {"value": 12345, "distanceInMeters": 7500}},
                 }
             ],
         )

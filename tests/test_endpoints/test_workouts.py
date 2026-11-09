@@ -13,6 +13,7 @@ from garmin_cli.endpoints.workouts import (
     list_workouts,
 )
 from garmin_cli.exceptions import GarminCliError
+from garmin_cli.serializers import serialize_calendar_workout
 from tests.helpers import make_http_error as _http_error
 
 
@@ -162,5 +163,107 @@ class TestGetCalendarRange:
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
 
         get_calendar_range(date(2026, 3, 11), date(2026, 3, 17))
-        call_str = str(mock_garth.connectapi.call_args)
+        call_str = str(mock_garth.connectapi.call_args_list[0])
         assert "/calendar-service/year/2026/month/2/day/11/start/1" in call_str
+
+
+def _by_period_entry(schedule_id: int, day: str, workout_id: int = 77) -> dict[str, Any]:
+    # Shape verified against the live workoutScheduleByPeriod endpoint (2026-11-09).
+    return {
+        "workoutScheduleId": schedule_id,
+        "calendarDate": day,
+        "workout": {
+            "workoutId": workout_id,
+            "workoutName": "Coach Base",
+            "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+            "trainingPlanId": None,
+            "atpPlanId": 5,
+        },
+    }
+
+
+class TestCalendarIncludesScheduledByPeriod:
+    """Adaptive (Garmin Coach) sessions only appear in workoutScheduleByPeriod."""
+
+    def _patch(self, mocker: Any, calendar_items: list[Any], by_period: Any) -> MagicMock:
+        mock_garth = MagicMock()
+
+        def connectapi(path: str, **kwargs: Any) -> Any:
+            if path.startswith("/workout-service/schedule/workoutScheduleByPeriod"):
+                if isinstance(by_period, Exception):
+                    raise by_period
+                return by_period
+            return {"calendarItems": calendar_items}
+
+        mock_garth.connectapi.side_effect = connectapi
+        mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
+        mocker.patch("time.sleep")
+        return mock_garth
+
+    def test_adds_schedule_missing_from_calendar_as_calendar_item(self, mocker: Any) -> None:
+        mock_garth = self._patch(mocker, [], [_by_period_entry(9001, "2026-03-12")])
+
+        result = get_calendar_range(date(2026, 3, 11), date(2026, 3, 17))
+
+        assert result == [{
+            "id": 9001,
+            "itemType": "workout",
+            "date": "2026-03-12",
+            "workoutId": 77,
+            "title": "Coach Base",
+            "sportTypeKey": "running",
+            "trainingPlanId": None,
+            "atpPlanId": 5,
+        }]
+        mock_garth.connectapi.assert_any_call(
+            "/workout-service/schedule/workoutScheduleByPeriod",
+            params={"startDate": "2026-03-11", "endDate": "2026-03-17"},
+        )
+        row = serialize_calendar_workout({"calendarItems": result})[0]
+        assert (row["workout_schedule_id"], row["workout_id"], row["name"]) == (9001, 77, "Coach Base")
+
+    def test_skips_schedules_already_on_the_calendar(self, mocker: Any) -> None:
+        on_calendar = {"id": 9001, "itemType": "workout", "date": "2026-03-12", "workoutId": 77, "title": "Base"}
+        self._patch(mocker, [on_calendar], [_by_period_entry(9001, "2026-03-12")])
+
+        assert get_calendar_range(date(2026, 3, 11), date(2026, 3, 17)) == [on_calendar]
+
+    def test_merged_items_are_date_ordered_and_range_filtered(self, mocker: Any) -> None:
+        on_calendar = {"id": 1, "itemType": "workout", "date": "2026-03-14", "workoutId": 2, "title": "Later"}
+        by_period = [_by_period_entry(9001, "2026-03-12"), _by_period_entry(9002, "2026-03-30")]
+        self._patch(mocker, [on_calendar], by_period)
+
+        result = get_calendar_range(date(2026, 3, 11), date(2026, 3, 17))
+
+        assert [item["id"] for item in result] == [9001, 1]
+
+    @pytest.mark.parametrize("status", [404, 403, 500])
+    def test_by_period_failure_keeps_calendar_items(self, mocker: Any, status: int) -> None:
+        on_calendar = {"id": 1, "itemType": "workout", "date": "2026-03-14", "workoutId": 2, "title": "Run"}
+        self._patch(mocker, [on_calendar], _http_error(status))
+
+        assert get_calendar_range(date(2026, 3, 11), date(2026, 3, 17)) == [on_calendar]
+
+    def test_by_period_server_error_fails_fast(self, mocker: Any) -> None:
+        self._patch(mocker, [], _http_error(503))
+        sleep = mocker.patch("time.sleep")
+
+        assert get_calendar_range(date(2026, 3, 11), date(2026, 3, 17)) == []
+        sleep.assert_not_called()
+
+    def test_by_period_transport_failure_keeps_calendar_items(self, mocker: Any) -> None:
+        on_calendar = {"id": 1, "itemType": "workout", "date": "2026-03-14", "workoutId": 2, "title": "Run"}
+        self._patch(mocker, [on_calendar], TimeoutError("read timed out"))
+
+        assert get_calendar_range(date(2026, 3, 11), date(2026, 3, 17)) == [on_calendar]
+
+    def test_live_calendar_sport_key_fills_type(self) -> None:
+        live_item = {"id": 5, "itemType": "workout", "date": "2026-03-14", "workoutId": 2, "sportTypeKey": "running"}
+        assert serialize_calendar_workout({"calendarItems": [live_item]})[0]["type"] == "running"
+
+    def test_by_period_rate_limit_still_fails_the_calendar(self, mocker: Any) -> None:
+        self._patch(mocker, [], _http_error(429))
+
+        with pytest.raises(GarminCliError) as exc_info:
+            get_calendar_range(date(2026, 3, 11), date(2026, 3, 17))
+        assert exc_info.value.error_code == "RATE_LIMITED"

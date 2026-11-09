@@ -53,14 +53,14 @@ class TestNewSerializers:
         result = garmin_serializers.serialize_daily_summary(
             {
                 "calendarDate": "2026-01-01",
-                "totalSteps": 12345,
-                "totalDistanceMeters": 7500,
-                "activeKilocalories": 500,
-                "floorsAscended": 10,
-                "floorsDescended": 8,
-                "moderateIntensityMinutes": 30,
-                "vigorousIntensityMinutes": 12,
-                "restingHeartRate": 48,
+                "movement": {
+                    "steps": {"value": 12345, "distanceInMeters": 7500},
+                    "floorsAscended": {"value": 10},
+                    "floorsDescended": {"value": 8},
+                },
+                "calories": {"burnedActive": 500},
+                "intensityMinutes": {"moderate": 30, "vigorous": 12},
+                "heartRate": {"restingValue": 48},
             }
         )
         assert result == [
@@ -495,14 +495,16 @@ class TestReportSnapshot:
             _call(self._server(), "report_snapshot", {"kind": "morning", "date": "2026-06-12"})
 
     def test_defaults_to_today_when_date_omitted(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
-
-        class _FixedDate(date):
-            @classmethod
-            def today(cls) -> date:
-                return date(2026, 6, 12)
-
-        mocker.patch("garmin_cli.mcp_tools.misc.date_cls", _FixedDate)
+        order: list[str] = []
+        mocker.patch(
+            "garmin_cli.mcp_tools._shared.ensure_authenticated",
+            side_effect=lambda config: order.append("auth"),
+        )
+        # Profile-timezone "today" is only known after auth.
+        mocker.patch(
+            "garmin_cli.mcp_tools.misc.today",
+            side_effect=lambda: order.append("today") or date(2026, 6, 12),
+        )
         mocker.patch("garmin_cli.mcp_tools.misc.get_sleep", return_value=[])
         mocker.patch("garmin_cli.mcp_tools.misc.get_hrv", return_value={"hrvSummaries": []})
         mocker.patch("garmin_cli.mcp_tools.misc.get_training_readiness_range", return_value=[])
@@ -511,3 +513,4 @@ class TestReportSnapshot:
 
         result = _call(self._server(), "report_snapshot", {"kind": "morning"})
         assert result["date_range"] == {"from": "2026-06-12", "to": "2026-06-12"}
+        assert order == ["auth", "today"]

@@ -88,7 +88,7 @@ garmin-cli health sleep --days 1
 | `GARMIN_CLI_HTTP_TIMEOUT` | `30` | HTTP request timeout in seconds (float); invalid or non-positive values fall back to `30` |
 | `GARMIN_CLI_RETRY_DELAYS` | `2,4,8` | Comma-separated retry delay sequence in seconds (e.g. `1,2,4`); invalid values fall back to `2,4,8` |
 | `GARMIN_CLI_AUTH_PROBE_TTL` | `600` | Seconds to cache a successful auth probe in the MCP server (float); `0` disables caching and probes on every call |
-| `GARMIN_CLI_DAILY_CALL_DELAY` | `0.5` | Delay in seconds (float) between request submissions for endpoints that fan out one request per day (e.g. `daily-summary`); invalid or negative values fall back to `0.5` |
+| `GARMIN_CLI_DAILY_CALL_DELAY` | `0.5` | Delay in seconds (float) between request submissions for endpoints that fan out one request per day (e.g. `endurance-score`); invalid or negative values fall back to `0.5` |
 | `GARMIN_CLI_FETCH_CONCURRENCY` | `4` | Worker cap for concurrent fan-out fetches (per-day ranges, report snapshot sections, multisport children); invalid or non-positive values fall back to `4` |
 
 ### Custom session directory
@@ -169,7 +169,7 @@ garmin-cli health daily-summary    [--date DATE | --from DATE --to DATE | --days
 garmin-cli health intensity-minutes [--date DATE | --from DATE --to DATE | --days N]
 ```
 
-`health daily-summary` makes one API call per day — large date ranges may be slow.
+`health daily-summary` fetches the whole range in one request.
 
 `health status` returns Garmin's full training-load picture for the day: training status, acute/chronic load, acute:chronic workload ratio (ACWR), the chronic-load "tunnel", monthly load-focus buckets with their targets, and load-balance status.
 
@@ -180,9 +180,9 @@ garmin-cli --json coach snapshot [--date DATE] [--baseline-days N] [--recent-dai
                                   [--include-extended-daily-baselines] [--sport TYPE]...
 ```
 
-The default snapshot uses the 28 prior days for ranged signals and activities, nine prior days plus the current date for daily resting-HR and stress calls (leaving slack over the seven-sample baseline minimum for days without data), and at most 30 upstream requests. Baseline medians exclude the current date and require seven valid samples; the resting-HR and stress signals report the shorter daily window they were actually fetched over. Missing and stale values remain explicit in `data_quality`; the server returns neutral facts and does not assign a proprietary readiness score or decide whether a workout is safe.
+The default snapshot uses the 28 prior days for ranged signals and activities, nine prior days plus the current date for daily resting-HR and stress calls (leaving slack over the seven-sample baseline minimum for days without data), and at most 31 upstream requests (the calendar costs two: one weekly page plus the by-period schedule lookup that catches Garmin Coach sessions). Baseline medians exclude the current date and require seven valid samples; the resting-HR and stress signals report the shorter daily window they were actually fetched over. Missing and stale values remain explicit in `data_quality`; the server returns neutral facts and does not assign a proprietary readiness score or decide whether a workout is safe.
 
-Extended daily baselines are rejected if their estimated cost exceeds the 30-request cap. A terminal rate limit stops further Garmin calls while preserving completed sections with `complete: false` and `aborted: true`.
+Extended daily baselines are rejected if their estimated cost exceeds the 31-request cap. A terminal rate limit stops further Garmin calls while preserving completed sections with `complete: false` and `aborted: true`.
 
 ### Activities
 
@@ -272,7 +272,14 @@ garmin-cli performance race-predictions
 garmin-cli performance endurance-score [--date DATE | --from DATE --to DATE | --days N]
 garmin-cli performance hill-score      [--date DATE | --from DATE --to DATE | --days N]
 garmin-cli performance personal-records
+garmin-cli performance ftp-history     [--sport cycling|running] [--date DATE | --from DATE --to DATE | --days N]
+garmin-cli performance acclimation     [--date DATE | --from DATE --to DATE | --days N]
+garmin-cli performance cycling-ability [--date DATE | --from DATE --to DATE | --days N]
+garmin-cli performance power-curve     [--sport cycling|rowing] [--date DATE | --from DATE --to DATE | --days N]
+garmin-cli performance fastest-splits  [--sport running|cycling] [--bests N] [--date DATE | --from DATE --to DATE | --days N]
 ```
+
+`ftp-history` returns daily FTP (`ftp_watts`); `acclimation` returns daily heat acclimation percentage and acclimated altitude with Garmin's trend labels; `cycling-ability` returns Garmin's daily aerobic endurance, aerobic capacity, and anaerobic capacity scores with the rider profile type; `power-curve` returns the best average power per duration (`duration_s`, `power_w`) and the activity that set it (Garmin supports cycling and rowing only); `fastest-splits` returns the fastest times per standard distance (running: 1 km, 1 mi, 5 km, 10 km, half marathon), up to `--bests` (1-10) efforts per distance. Each is one request for the whole range.
 
 `performance endurance-score` and `performance hill-score` make one API call per day — large date ranges may be slow.
 
@@ -290,7 +297,7 @@ Recent fixes normalized several JSON payloads for agent-safe output:
 
 - `performance vo2max` returns `date`, `vo2max`, `sport`
 - `performance zones` returns `sport`, `lt_hr_bpm`, `lt_pace`
-- `workout calendar` includes compatibility `id` plus explicit `workout_id` and `workout_schedule_id`
+- `workout calendar` includes compatibility `id` plus explicit `workout_id` and `workout_schedule_id`, and also lists Garmin Coach (adaptive plan) sessions that Garmin's calendar pages omit
 - `workout get` includes recursive `segments`, compatibility `steps`/`steps_summary`, and a `write_projection` only when the workout fits the simplified write schema
 - `health hrv` reads `lastNightAvg` and still falls back to legacy `lastNight`
 
@@ -360,7 +367,7 @@ garmin-cli --json activity list --limit 5
 
 ## MCP Server
 
-The MCP server exposes primitive health, activity, workout, performance, and device tools plus AI-coaching orchestration tools. `coach_snapshot` returns a bounded evidence packet, `training_plan_reconcile` compares the calendar with detailed activities, and `training_plan_preview` provides a no-write diff before the destructive `training_plan_apply` or `training_plan_reschedule` tools. Existing workout and activity write tools remain available. See [SKILL.md](SKILL.md) for complete contracts and limits.
+The MCP server exposes primitive health, activity, workout, performance, and device tools plus AI-coaching orchestration tools. `coach_snapshot` returns a bounded evidence packet, `training_plan_reconcile` compares the calendar with detailed activities, and `training_plan_preview` provides a no-write diff before the destructive `training_plan_apply` or `training_plan_reschedule` tools. Existing workout and activity write tools remain available. Tools that default a date to "today" (`coach_snapshot`, `report_snapshot`) use the athlete's Garmin profile timezone, so a server running in UTC still asks for the athlete's day. See [SKILL.md](SKILL.md) for complete contracts and limits.
 
 ### Synthetic Claude coaching workflow
 

@@ -1,5 +1,37 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `performance ftp-history` / `performance_ftp_history`: daily functional threshold power (FTP) for cycling or running.
+- `performance acclimation` / `performance_acclimation`: daily heat acclimation percentage, acclimated altitude, and Garmin's trend labels.
+- `performance cycling-ability` / `performance_cycling_ability`: daily aerobic endurance, aerobic capacity, and anaerobic capacity scores with the rider profile type.
+- `performance power-curve` / `performance_power_curve`: best average power per duration across activities (cycling or rowing; Garmin rejects running).
+- `performance fastest-splits` / `performance_fastest_splits`: fastest times per standard distance (running or cycling), 1-10 efforts per distance.
+- `workout calendar` and every calendar-backed surface (`coach_snapshot`, `report_snapshot`, `training_plan_*`) now also list Garmin Coach (adaptive plan) sessions, which Garmin's calendar pages can omit. They come from `workoutScheduleByPeriod`, deduplicated by schedule id, so `workout_schedule_id` still unschedules them.
+
+### Changed
+
+- Bump `garminconnect` 0.3.5 -> 0.3.20. Picks up upstream security hardening (symlink-safe atomic token writes, input validation on identifier-bearing URLs, JWT `alg: none` rejection, no response bodies in debug logs), the restored mobile login (no more 429 fallback to slower login strategies), and HTTP 427 login blocks reported as rate limits. Upstream 404s now raise `GarminConnectNotFoundError`, a subclass of the connection error garmin-py already classifies by status code.
+- `health daily-summary` / `health_daily_summary` fetch the whole range in one request (v2 `dailysummaries`) instead of one request per day. Floors are now whole numbers (Garmin's v2 payload rounds them; the old endpoint returned fractions such as `238.42`).
+- Default "today" dates in `coach_snapshot`, `report_snapshot`, `training_plan_reconcile`, the athlete-profile resource, `coach snapshot`, and the latest VO2 max / power-to-weight lookups follow the athlete's Garmin profile timezone once a session is active, so a server running in UTC no longer asks for yesterday every evening. CLI date options still resolve against the host date because they are parsed before login.
+- `coach_snapshot` costs 31 Garmin requests by default (was 30) because the calendar adds the adaptive-plan lookup; the hard cap rose to 31 so the default window is unchanged.
+- Workout updates use the typed upstream `update_workout` helper instead of a raw PUT. The request is the same.
+
+### Fixed
+
+- Calendar workout rows (`workout calendar`, `workout_calendar`, and the calendar inside `coach_snapshot`/`report_snapshot`/`training_plan_*`) now report the sport in `type`. Live calendar items carry it as `sportTypeKey`, not the `workoutTypeKey` the serializer read, so `type` was always null; `training_plan_reconcile`'s date-and-sport fallback can now match a completed activity whose type equals the planned sport (for example `running`).
+- Concurrent 401s refresh the Garmin session once again. garminconnect 0.3.10+ serializes refreshes under its own lock, which made garmin-py's coalescing guard see an already-advanced generation and refresh once per thread; the guard now snapshots the generation when each request's auth headers are built, so a 401 is answered by exactly one refresh per token.
+
+### Removed
+
+- The raw write transport (`backend.connectapi` POST/PUT/DELETE, `_make_write_request`) and the raw-fallback registry (`backend.RAW_FALLBACKS`, `get_raw_fallback_registry`), which had no callers once workout updates became typed. `backend.connectapi` is now GET-only.
+
+### CI
+
+- Dependabot version updates enabled for pip and GitHub Actions (weekly, minor/patch grouped).
+
 ## [2.12.0] - 2026-10-26
 
 ### Changed
