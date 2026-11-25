@@ -17,9 +17,9 @@ Extract health, activity, workout, and performance data from Garmin Connect.
 
 ## Agent Usage
 
-Always use `--json` for machine-readable output; it works before or after the subcommand (`garmin-cli health sleep --days 7 --json`). The tool returns a JSON envelope on stdout with exit code 0 (success) or 1 (error).
+Always use `--json` for machine-readable output; it works before or after the subcommand (`garmin-cli health sleep --days 7 --json`). The tool returns a JSON envelope on stdout with exit code 0 (success) or 1 (error). Exception: `plan preview`, `plan apply`, `plan reschedule`, and `doctor` exit 1 with an `ok: true` envelope when their result is not complete (`data[0].complete` is false for the plan commands; a failed check for `doctor`), so check `ok` and `complete`, not only the exit code.
 
-Destructive commands (`activity delete`, `workout delete`, `workout unschedule`) never prompt under `--json` or without a terminal: pass `--confirm` (alias `--yes`/`-y`) or they fail with `INVALID_INPUT`.
+Destructive commands (`activity delete`, `workout delete`, `workout unschedule`, `plan apply`, `plan reschedule`) never prompt under `--json` or without a terminal: pass `--confirm` (alias `--yes`/`-y`) or they fail with `INVALID_INPUT`. `plan apply -` (plan on stdin) always needs `--confirm` unless `--dry-run`.
 
 ### Success envelope
 
@@ -281,6 +281,27 @@ garmin-cli --json workout send 12345678901 --device 3412345678 --confirm
 `workout schedule` output fields: `workout_schedule_id, date, status` (`status` is `scheduled`, or `no_op` when that workout is already on the date; a date holding a different workout fails with `INVALID_INPUT` unless `--allow-multiple`; logged activities on the date are ignored; `workout_schedule_id` is null when Garmin returns no id and the date cannot be re-read)
 
 `workout send` output fields: `workout_id, workout_name, device_id, display_name, status` (`sent`, or `dry_run`). The workout is read first (missing: `NOT_FOUND`, dry-run included); a device qualifies when `workout_capable` and its flag for the workout's sport is not false (a run never goes to an Edge). An unregistered device is `NOT_FOUND`, an ambiguous or unqualified one `INVALID_INPUT`. A send is never retried after a 5xx or timeout, since each accepted send queues another copy; that error says the workout may already be queued, so check the device before resending.
+
+### Training plans
+
+The CLI side of the MCP training-plan tools (same code; `--json` `data[0]` is the tool's result object, see the `training_plan_*` rows of the MCP tool table below).
+
+```bash
+# Live diff of a plan file (the training_plan_preview `plan` object, JSON or YAML; '-' = stdin). No writes.
+garmin-cli --json plan preview plan.json
+
+# Apply it (Garmin writes). --dry-run equals plan preview; --confirm (--yes/-y) is required with --json,
+# without a terminal, or with the plan on stdin ('-') unless --dry-run.
+garmin-cli --json plan apply plan.yaml --confirm
+
+# Move one schedule; refused with a conflict if it is no longer on --expected-date or the new date is taken
+garmin-cli --json plan reschedule --schedule-id 987654 --new-date 2026-07-12 --expected-date 2026-07-10 --confirm
+
+# Planned vs actual (default: last 7 days; max 28 days; --detail targets adds target comparisons)
+garmin-cli --json plan reconcile --from 2026-07-01 --to 2026-07-14 [--detail targets] [--max-activities N]
+```
+
+An invalid plan is `INVALID_INPUT` before any Garmin call. `plan preview` prints `complete`, `operations`, `errors`, `conflicts`, and `summary`; `plan apply` and `plan reschedule` print `complete`, `outcome`, `operations`, `errors`, and `conflicts` (table: operations, then conflicts and errors). All three exit 1 with the `ok: true` envelope when `complete` is false; CSV is `INVALID_INPUT` for them. `plan reconcile` table/CSV fields: `date, state, planned, workout_id, activity_id, sport, match, targets`.
 
 ---
 

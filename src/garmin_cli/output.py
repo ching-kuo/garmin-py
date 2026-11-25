@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 import sys
 from datetime import date
 from typing import Any, Optional
@@ -111,11 +112,18 @@ def render_output(
     echo_table(data, columns)
 
 
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
 def _format_cell(value: Any) -> str:
-    """Convert a cell value to a display string (for table output)."""
+    """Convert a cell value to a display string (for table output).
+
+    C0/C1 control characters other than tab and newline are shown as
+    ``\\xNN`` so Garmin or plan text cannot drive the terminal.
+    """
     if value is None:
         return ""
-    return str(value)
+    return _CONTROL_CHARS.sub(lambda match: f"\\x{ord(match.group()):02x}", str(value))
 
 
 def render_capability_footnote(

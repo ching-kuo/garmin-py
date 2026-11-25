@@ -35,7 +35,7 @@ def resolve_after_login[T](resolve: Callable[[], T], login: Callable[[], None]) 
     return resolve()
 
 
-def date_range_options(*, include_ahead: bool = False) -> Callable[[F], F]:
+def date_range_options(*, include_ahead: bool = False, max_days: int = 90) -> Callable[[F], F]:
     """Decorator factory that stacks the standard date-range Click options.
 
     Stacks (in declaration order, so Click presents them top-to-bottom):
@@ -47,6 +47,8 @@ def date_range_options(*, include_ahead: bool = False) -> Callable[[F], F]:
 
     The decorated function must accept the corresponding keyword arguments:
         value_date, days, [ahead,] date_from, date_to
+
+    *max_days* only sets the help text; pass the same cap to ``resolve_click_dates``.
     """
 
     def decorator(fn: F) -> F:
@@ -62,10 +64,10 @@ def date_range_options(*, include_ahead: bool = False) -> Callable[[F], F]:
         )(fn)
         if include_ahead:
             fn = click.option(
-                "--ahead", type=int, help="The next N days starting today (1-90)."
+                "--ahead", type=int, help=f"The next N days starting today (1-{max_days})."
             )(fn)
         fn = click.option(
-            "--days", type=int, help="The last N days ending today (1-90)."
+            "--days", type=int, help=f"The last N days ending today (1-{max_days})."
         )(fn)
         fn = click.option(
             "--date", "value_date", type=CLICK_DATE_TYPE, default=None,
@@ -81,6 +83,14 @@ def limit_option[Fn: Callable[..., Any]](fn: Fn) -> Fn:
     return click.option(
         "--limit", type=int, default=20, show_default=True,
         help=f"Maximum number of results (1-{MAX_LIMIT}).",
+    )(fn)
+
+
+def input_format_option[Fn: Callable[..., Any]](fn: Fn) -> Fn:
+    """The shared ``--input-format`` option for JSON/YAML file or stdin input."""
+    return click.option(
+        "--input-format", type=click.Choice(["json", "yaml"]), default=None,
+        help="Input format (default: .yaml/.yml FILE extension, else JSON).",
     )(fn)
 
 

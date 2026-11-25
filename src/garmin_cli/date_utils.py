@@ -29,6 +29,8 @@ def resolve_click_dates(
     ahead: int | None,
     date_from: datetime | None,
     date_to: datetime | None,
+    default_days: int = 1,
+    max_days: int = _MAX_DAYS,
 ) -> tuple[date, date]:
     """Convert Click DateTime values to a (start, end) date range.
 
@@ -41,6 +43,8 @@ def resolve_click_dates(
         to_date=date_to.date() if date_to else None,
         days=days,
         ahead=ahead,
+        default_days=default_days,
+        max_days=max_days,
     )
 
 
@@ -51,6 +55,7 @@ def resolve_date_range(
     days: Optional[int],
     ahead: Optional[int],
     default_days: int = 1,
+    max_days: int = _MAX_DAYS,
 ) -> tuple[date, date]:
     """Resolve CLI date arguments into a (start, end) tuple (both inclusive).
 
@@ -61,6 +66,7 @@ def resolve_date_range(
         days: Past N days (--days). End is always today.
         ahead: Future N days (--ahead). Start is always today.
         default_days: Days back to use when no option is specified.
+        max_days: Longest range accepted (days, inclusive).
 
     Returns:
         (start_date, end_date) inclusive tuple.
@@ -94,9 +100,9 @@ def resolve_date_range(
                 f"--from date ({from_date}) must be on or before --to date ({to_date})"
             )
         span = (to_date - from_date).days + 1
-        if span > _MAX_DAYS:
+        if span > max_days:
             raise click.UsageError(
-                f"Date range cannot exceed {_MAX_DAYS} days "
+                f"Date range cannot exceed {max_days} days "
                 f"(got {span} days from {from_date} to {to_date})"
             )
         return (from_date, to_date)
@@ -107,9 +113,9 @@ def resolve_date_range(
     if days is not None:
         if days <= 0:
             raise click.UsageError("--days must be a positive integer")
-        if days > _MAX_DAYS:
+        if days > max_days:
             raise click.UsageError(
-                f"Date range cannot exceed {_MAX_DAYS} days (got --days {days})"
+                f"Date range cannot exceed {max_days} days (got --days {days})"
             )
         current = today()
         return (current - timedelta(days=days - 1), current)
@@ -117,9 +123,9 @@ def resolve_date_range(
     if ahead is not None:
         if ahead <= 0:
             raise click.UsageError("--ahead must be a positive integer")
-        if ahead > _MAX_DAYS:
+        if ahead > max_days:
             raise click.UsageError(
-                f"Date range cannot exceed {_MAX_DAYS} days (got --ahead {ahead})"
+                f"Date range cannot exceed {max_days} days (got --ahead {ahead})"
             )
         current = today()
         return (current, current + timedelta(days=ahead - 1))

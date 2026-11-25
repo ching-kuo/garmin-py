@@ -13,6 +13,7 @@ from garmin_cli.commands._options import (
     confirm_option,
     date_range_options,
     ensure_can_confirm,
+    input_format_option,
     limit_option,
     reject_csv,
     require_confirmation,
@@ -59,10 +60,6 @@ _dry_run_option = click.option(
 )
 _stdin_option = click.option(
     "--stdin", "use_stdin", is_flag=True, default=False, help="Read the workout from stdin instead of FILE."
-)
-_input_format_option = click.option(
-    "--input-format", type=click.Choice(["json", "yaml"]), default=None,
-    help="Input format (default: .yaml/.yml FILE extension, else JSON).",
 )
 _DRY_RUN_CSV = "--dry-run prints a nested payload that CSV cannot hold; use --json."
 
@@ -137,7 +134,7 @@ def calendar_cmd(
 @workout.command("create")
 @click.argument("file_path", required=False, metavar="[FILE]")
 @_stdin_option
-@_input_format_option
+@input_format_option
 @_dry_run_option
 @click.pass_context
 def create_cmd(
@@ -170,7 +167,7 @@ def create_cmd(
 @click.argument("workout_id")
 @click.argument("file_path", required=False, metavar="[FILE]")
 @_stdin_option
-@_input_format_option
+@input_format_option
 @_dry_run_option
 @click.pass_context
 def update_cmd(

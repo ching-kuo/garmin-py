@@ -312,6 +312,13 @@ class TestFormatCell:
     def test_numeric_value(self) -> None:
         assert _format_cell(42) == "42"
 
+    def test_control_characters_are_escaped(self) -> None:
+        # Terminal escapes in Garmin or plan text must not rewrite the screen.
+        assert _format_cell("a\x1b[2Kb\rc\x9bd\x7f") == "a\\x1b[2Kb\\x0dc\\x9bd\\x7f"
+
+    def test_tab_and_newline_kept(self) -> None:
+        assert _format_cell("a\tb\nc") == "a\tb\nc"
+
 
 # ---------------------------------------------------------------------------
 # render_capability_footnote (U11)

@@ -143,7 +143,7 @@ garmin-cli health sleep --days 7 --json       # same
 garmin-cli --format csv health sleep --days 7 # CSV
 ```
 
-CSV output is always a single table. Output that does not fit one table rejects `--format csv` with `INVALID_INPUT`: `coach snapshot`, `workout create --dry-run` / `workout update --dry-run`, and `activity get --laps` (use `activity laps`); `login`, `login status`, and `login logout` print a one-row table. Text cells starting with `=`, `+`, `-`, `@`, tab, or carriage return are prefixed with a tab so spreadsheets do not run them as formulas; numbers (including negatives) are written as-is.
+CSV output is always a single table. Output that does not fit one table rejects `--format csv` with `INVALID_INPUT`: `coach snapshot`, `plan preview` / `plan apply` / `plan reschedule`, `workout create --dry-run` / `workout update --dry-run`, and `activity get --laps` (use `activity laps`); `login`, `login status`, and `login logout` print a one-row table. Text cells starting with `=`, `+`, `-`, `@`, tab, or carriage return are prefixed with a tab so spreadsheets do not run them as formulas; numbers (including negatives) are written as-is.
 
 **JSON envelope structure:**
 
@@ -170,7 +170,7 @@ CSV output is always a single table. Output that does not fit one table rejects 
 }
 ```
 
-Exit code is `0` on success and `1` on error; an interrupted command (Ctrl-C, or end of input at a prompt) exits `130` with `INTERRUPTED`.
+Exit code is `0` on success and `1` on error. `plan preview`, `plan apply`, `plan reschedule`, and `doctor` also exit `1` with an `ok: true` envelope when their result is not complete (`data[0].complete` false; a failed `doctor` check), so scripts must check `complete` too. An interrupted command (Ctrl-C, or end of input at a prompt) exits `130` with `INTERRUPTED`.
 
 Destructive commands (`activity delete`, `workout delete`, `workout unschedule`) validate the id, then ask for confirmation on stderr. Any answer but `y`/`yes` prints `Aborted.` and exits 1 (`INVALID_INPUT`). Under `--json`, or when stdin is not a terminal, they never prompt: pass `--confirm` (alias `--yes`/`-y`), otherwise they fail with `INVALID_INPUT`.
 
@@ -292,6 +292,19 @@ garmin-cli workout send WORKOUT_ID [--device DEVICE_ID] [--dry-run] [--confirm] 
 `--dry-run` validates the input and prints the Garmin payload without saving (`--json`: `data[0]` has `dry_run: true` and `wire_payload`). `workout create --dry-run` needs no login; `workout update --dry-run` still reads the existing workout to merge it. `workout schedule` reports the new entry as `workout_schedule_id`; when the workout is already on that date it reports status `no_op` without writing, and a date holding a different workout is refused with `INVALID_INPUT` unless you pass `--allow-multiple` (logged activities on the date do not count). The id may be empty when Garmin returns none and the date cannot be re-read; `workout calendar` shows it later.
 
 YAML input is supported out of the box. See [SKILL.md](SKILL.md) for the full workout JSON schema reference and step/target types.
+
+### Training plans
+
+The CLI side of the MCP `training_plan_*` tools; they run the same code and `--json` returns the same result object as `data[0]`.
+
+```bash
+garmin-cli plan preview    FILE [--input-format json|yaml]   # FILE '-' reads stdin; no writes
+garmin-cli plan apply      FILE [--dry-run] [--confirm]      # --dry-run equals plan preview
+garmin-cli plan reschedule --schedule-id ID --new-date DATE --expected-date DATE [--confirm]
+garmin-cli plan reconcile  [--date DATE | --from DATE --to DATE | --days N] [--detail summary|targets] [--max-activities N]
+```
+
+FILE is the plan object of MCP `training_plan_preview` (see [SKILL.md](SKILL.md)) as JSON or YAML; an invalid plan fails with `INVALID_INPUT` before any Garmin call. `plan apply` and `plan reschedule` ask for confirmation at a terminal; under `--json` or without a terminal they need `--confirm` (`--yes`/`-y`) and fail before logging in otherwise, and `plan apply -` (plan on stdin) always needs `--confirm` unless `--dry-run`. Apply rechecks the live calendar, is a no-op when reapplied, and rolls back this run's writes after a failure; table output lists each operation with its state, then any conflicts and errors. `plan preview`, `plan apply`, and `plan reschedule` print the result and exit 1 (with an `ok: true` envelope under `--json`) when it is not `complete` (conflicts, a rollback, or an unknown write state); `--format csv` is `INVALID_INPUT` for them. `plan reconcile` defaults to the last 7 days (at most 28, `--max-activities` 1-100); table and CSV show one row per planned workout or unplanned activity (with a stderr warning naming `--max-activities` when that many activities were examined, so later ones may be missing), `--json` the full result with data quality and provenance.
 
 ### Performance
 

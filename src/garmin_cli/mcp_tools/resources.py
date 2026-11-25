@@ -32,7 +32,7 @@ from garmin_cli.mcp_tools.activities import (
     _MAX_SAMPLES,
     _activity_get_result,
 )
-from garmin_cli.mcp_tools.coaching import (
+from garmin_cli.services.plan_reconcile import (
     RECONCILE_MAX_ACTIVITIES,
     RECONCILE_MAX_DAYS,
     TARGET_SAMPLE_BUDGET,

@@ -16,18 +16,18 @@ from tests.test_mcp_tools.support import _call, _config  # noqa: E402
 def test_reconciliation_fetches_detail_for_every_examined_activity(mocker: Any) -> None:
     mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
     mocker.patch(
-        "garmin_cli.mcp_tools.coaching.get_calendar_range",
+        "garmin_cli.services.plan_reconcile.get_calendar_range",
         return_value=[{"date": "2026-07-10", "workoutId": 10, "workoutTypeKey": "running"}],
     )
     mocker.patch(
-        "garmin_cli.mcp_tools.coaching.list_activities",
+        "garmin_cli.services.plan_reconcile.list_activities",
         return_value=[
             {"activityId": 1, "startTimeLocal": "2026-07-10T08:00:00", "activityType": {"typeKey": "running"}},
             {"activityId": 2, "startTimeLocal": "2026-07-10T09:00:00", "activityType": {"typeKey": "running"}},
         ],
     )
     detail = mocker.patch(
-        "garmin_cli.mcp_tools.coaching.get_activity",
+        "garmin_cli.services.plan_reconcile.get_activity",
         side_effect=[
             {"activityId": 1, "startTimeLocal": "2026-07-10T08:00:00", "activityType": {"typeKey": "running"}, "metadataDTO": {"associatedWorkoutId": 10}},
             {"activityId": 2, "startTimeLocal": "2026-07-10T09:00:00", "activityType": {"typeKey": "running"}, "metadataDTO": {}},
@@ -53,7 +53,7 @@ def test_targets_mode_fetches_bounded_stream_only_when_laps_cannot_answer(
 ) -> None:
     mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
     mocker.patch(
-        "garmin_cli.mcp_tools.coaching.get_calendar_range",
+        "garmin_cli.services.plan_reconcile.get_calendar_range",
         return_value=[
             {
                 "date": "2026-07-10",
@@ -63,7 +63,7 @@ def test_targets_mode_fetches_bounded_stream_only_when_laps_cannot_answer(
         ],
     )
     mocker.patch(
-        "garmin_cli.mcp_tools.coaching.list_activities",
+        "garmin_cli.services.plan_reconcile.list_activities",
         return_value=[{
             "activityId": 1,
             "startTimeLocal": "2026-07-10T08:00:00",
@@ -71,7 +71,7 @@ def test_targets_mode_fetches_bounded_stream_only_when_laps_cannot_answer(
         }],
     )
     mocker.patch(
-        "garmin_cli.mcp_tools.coaching.get_activity",
+        "garmin_cli.services.plan_reconcile.get_activity",
         return_value={
             "activityId": 1,
             "startTimeLocal": "2026-07-10T08:00:00",
@@ -80,7 +80,7 @@ def test_targets_mode_fetches_bounded_stream_only_when_laps_cannot_answer(
         },
     )
     mocker.patch(
-        "garmin_cli.mcp_tools.coaching.get_workout",
+        "garmin_cli.services.plan_reconcile.get_workout",
         return_value={
             "workoutId": 10,
             "workoutName": "Pace",
@@ -100,13 +100,13 @@ def test_targets_mode_fetches_bounded_stream_only_when_laps_cannot_answer(
             }],
         },
     )
-    mocker.patch("garmin_cli.mcp_tools.coaching.get_activity_splits", return_value={})
+    mocker.patch("garmin_cli.services.plan_reconcile.get_activity_splits", return_value={})
     mocker.patch(
-        "garmin_cli.mcp_tools.coaching.get_activity_hr_in_timezones",
+        "garmin_cli.services.plan_reconcile.get_activity_hr_in_timezones",
         return_value=[],
     )
     stream = mocker.patch(
-        "garmin_cli.mcp_tools.coaching.get_activity_details",
+        "garmin_cli.services.plan_reconcile.get_activity_details",
         return_value={
             "metricDescriptors": [{
                 "key": "directSpeed",
@@ -145,7 +145,7 @@ def _power_zone_reconcile(
     """Run targets-mode reconcile over (date, activity typeKey, workout sport, zone) rides."""
     mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
     mocker.patch(
-        "garmin_cli.mcp_tools.coaching.get_calendar_range",
+        "garmin_cli.services.plan_reconcile.get_calendar_range",
         return_value=[
             {"date": day, "workoutId": 10 + index, "workoutTypeKey": sport}
             for index, (day, _type, sport, _zone) in enumerate(rides)
@@ -180,14 +180,14 @@ def _power_zone_reconcile(
         }
         for index, (_day, _type, sport, zone) in enumerate(rides)
     }
-    mocker.patch("garmin_cli.mcp_tools.coaching.list_activities", return_value=list(activities.values()))
-    mocker.patch("garmin_cli.mcp_tools.coaching.get_activity", side_effect=activities.__getitem__)
-    mocker.patch("garmin_cli.mcp_tools.coaching.get_workout", side_effect=workouts.__getitem__)
-    mocker.patch("garmin_cli.mcp_tools.coaching.get_activity_splits", return_value={})
-    mocker.patch("garmin_cli.mcp_tools.coaching.get_activity_hr_in_timezones", return_value=[])
-    zones = mocker.patch("garmin_cli.mcp_tools.coaching.get_power_zones", side_effect=power_zones)
+    mocker.patch("garmin_cli.services.plan_reconcile.list_activities", return_value=list(activities.values()))
+    mocker.patch("garmin_cli.services.plan_reconcile.get_activity", side_effect=activities.__getitem__)
+    mocker.patch("garmin_cli.services.plan_reconcile.get_workout", side_effect=workouts.__getitem__)
+    mocker.patch("garmin_cli.services.plan_reconcile.get_activity_splits", return_value={})
+    mocker.patch("garmin_cli.services.plan_reconcile.get_activity_hr_in_timezones", return_value=[])
+    zones = mocker.patch("garmin_cli.services.plan_reconcile.get_power_zones", side_effect=power_zones)
     stream = mocker.patch(
-        "garmin_cli.mcp_tools.coaching.get_activity_details",
+        "garmin_cli.services.plan_reconcile.get_activity_details",
         return_value={
             "metricDescriptors": [{"key": "directPower", "metricsIndex": 0, "unit": {"key": "watt"}}],
             "activityDetailMetrics": [{"metrics": [220.0]}, {"metrics": [246.0]}, {"metrics": [400.0]}],
@@ -258,10 +258,10 @@ def test_targets_mode_reports_stream_limit_without_fetching_samples(
     mocker: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("garmin_cli.mcp_tools.coaching.TARGET_STREAM_LIMIT", 0)
+    monkeypatch.setattr("garmin_cli.services.plan_reconcile.TARGET_STREAM_LIMIT", 0)
     mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
     mocker.patch(
-        "garmin_cli.mcp_tools.coaching.get_calendar_range",
+        "garmin_cli.services.plan_reconcile.get_calendar_range",
         return_value=[{
             "date": "2026-07-10",
             "workoutId": 10,
@@ -269,7 +269,7 @@ def test_targets_mode_reports_stream_limit_without_fetching_samples(
         }],
     )
     mocker.patch(
-        "garmin_cli.mcp_tools.coaching.list_activities",
+        "garmin_cli.services.plan_reconcile.list_activities",
         return_value=[{
             "activityId": 1,
             "startTimeLocal": "2026-07-10T08:00:00",
@@ -277,7 +277,7 @@ def test_targets_mode_reports_stream_limit_without_fetching_samples(
         }],
     )
     mocker.patch(
-        "garmin_cli.mcp_tools.coaching.get_activity",
+        "garmin_cli.services.plan_reconcile.get_activity",
         return_value={
             "activityId": 1,
             "startTimeLocal": "2026-07-10T08:00:00",
@@ -286,7 +286,7 @@ def test_targets_mode_reports_stream_limit_without_fetching_samples(
         },
     )
     mocker.patch(
-        "garmin_cli.mcp_tools.coaching.get_workout",
+        "garmin_cli.services.plan_reconcile.get_workout",
         return_value={
             "workoutId": 10,
             "workoutName": "Pace",
@@ -305,12 +305,12 @@ def test_targets_mode_reports_stream_limit_without_fetching_samples(
             }],
         },
     )
-    mocker.patch("garmin_cli.mcp_tools.coaching.get_activity_splits", return_value={})
+    mocker.patch("garmin_cli.services.plan_reconcile.get_activity_splits", return_value={})
     mocker.patch(
-        "garmin_cli.mcp_tools.coaching.get_activity_hr_in_timezones",
+        "garmin_cli.services.plan_reconcile.get_activity_hr_in_timezones",
         return_value=[],
     )
-    stream = mocker.patch("garmin_cli.mcp_tools.coaching.get_activity_details")
+    stream = mocker.patch("garmin_cli.services.plan_reconcile.get_activity_details")
     server = create_mcp_server(_config())
 
     result = _call(

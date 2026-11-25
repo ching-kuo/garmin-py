@@ -53,6 +53,7 @@
 
 ### Added
 
+- `garmin-cli plan preview|apply|reschedule|reconcile`: CLI versions of the MCP `training_plan_preview`, `training_plan_apply`, `training_plan_reschedule`, and `training_plan_reconcile` tools, running the same code; plans are read from a JSON or YAML file or stdin, writes ask for confirmation (or `--confirm`), `plan apply --dry-run` previews, and an incomplete result exits 1.
 - Training readiness rows (`health readiness`, MCP `health_readiness`, the morning report, and `coach_snapshot` wellness rows) add `latest_score` and `latest_level`, the day's newest recalculation, so afternoon changes after a workout are visible next to the morning `score` / `level`.
 
 - `workout schedule --allow-multiple` and MCP `workout_schedule(allow_multiple=true)` schedule a workout on a date that already holds a different one (Garmin allows several per day).
@@ -91,6 +92,7 @@
 
 ### Security
 
+- Table output shows control characters (other than tab and newline) in cell text as `\xNN`, so terminal escape sequences in Garmin or plan text are not run by the terminal; JSON and CSV values are unchanged.
 - JSON error envelopes no longer echo option values in `command` (for example `login --password <secret>` reported the password); only known command names are reported, and a subcommand only when it directly follows its group.
 - MCP `activity_download` rejects `..`, symlinked path components, and paths outside the file root, checks the root and target directory before signing in, creates files with `O_EXCL | O_NOFOLLOW` (0600) and removes a partial file if the write fails, overwrites atomically, and is now annotated `destructive_hint=True`.
 - MCP `activity_upload` returns one generic `File not available under GARMIN_MCP_FILE_ROOT` error for missing, outside-root, symlinked, or non-file paths, so it no longer reveals which host paths exist.
