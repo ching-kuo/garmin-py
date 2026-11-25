@@ -416,9 +416,6 @@ class TestValidateWorkoutInput:
 def test_live_verified_end_condition_ids() -> None:
     assert END_CONDITIONS["time"] == 2
     assert END_CONDITIONS["distance"] == 3
-    assert END_CONDITIONS["calories"] == 4
-    assert END_CONDITIONS["power"] == 5
-    assert END_CONDITIONS["heart.rate"] == 6
     assert END_CONDITIONS["iterations"] == 7
 
 

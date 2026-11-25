@@ -1,9 +1,8 @@
 """Serializer helpers for Garmin Connect payloads.
 
-This package replaces the former monolithic ``serializers.py`` module. The
-public surface is unchanged: every name that ``serializers.py`` exposed is
-re-exported here so existing ``from garmin_cli.serializers import ...`` lines
-keep working. Implementations live in domain modules mirroring
+This package re-exports the serializers and ``COLUMNS_*`` constants callers
+import as ``from garmin_cli.serializers import ...``. Implementations live in
+domain modules mirroring
 ``garmin_cli.endpoints`` (:mod:`~garmin_cli.serializers.health`,
 :mod:`~garmin_cli.serializers.activities`,
 :mod:`~garmin_cli.serializers.workouts`,
@@ -13,39 +12,14 @@ keep working. Implementations live in domain modules mirroring
 """
 from __future__ import annotations
 
-# Re-exported for back-compat: ``columns_for_sport`` was importable from
-# ``garmin_cli.serializers`` (commands/activities.py relies on this).
-from garmin_cli.metrics.registry import (
-    CYCLING_TYPE_KEYS,
-    LAP_SWIM_TYPE_KEYS,
-    REGISTRY,
-    RUNNING_TYPE_KEYS,
-)
-from garmin_cli.metrics.sport_profile import (
-    UNION_COLUMNS,
-    SportProfile,
-    columns_for_sport,
-    profile_for,
-)
-from garmin_cli.serializers._common import (
-    _coalesce,
-    _get_nested,
-    _hours,
-    _km,
-    _kmh,
-    _listify,
-    _minutes,
-    select_latest_dated_rows,
-)
+# Re-exported: commands/activities.py imports ``columns_for_sport`` from here.
+from garmin_cli.metrics.sport_profile import columns_for_sport
+from garmin_cli.serializers._common import select_latest_dated_rows
 from garmin_cli.serializers.activities import (
     COLUMNS_ACTIVITY_DELETE,
     COLUMNS_ACTIVITY_DETAIL,
     COLUMNS_ACTIVITY_DOWNLOAD,
     COLUMNS_ACTIVITY_HR_ZONES,
-    COLUMNS_ACTIVITY_LAPS_CYCLING,
-    COLUMNS_ACTIVITY_LAPS_RUN_BIKE,
-    COLUMNS_ACTIVITY_LAPS_RUNNING,
-    COLUMNS_ACTIVITY_LAPS_SWIM,
     COLUMNS_ACTIVITY_RENAME,
     COLUMNS_ACTIVITY_SET_TYPE,
     COLUMNS_ACTIVITY_SUMMARY,
@@ -132,15 +106,8 @@ from garmin_cli.serializers.workouts import (
 __all__ = (
     # --- Cross-domain helpers (_common) ---
     "select_latest_dated_rows",
-    # --- Re-exports from metrics (back-compat surface) ---
-    "CYCLING_TYPE_KEYS",
-    "LAP_SWIM_TYPE_KEYS",
-    "REGISTRY",
-    "RUNNING_TYPE_KEYS",
-    "SportProfile",
-    "UNION_COLUMNS",
+    # --- Re-export from metrics ---
     "columns_for_sport",
-    "profile_for",
     # --- Health domain ---
     "COLUMNS_SLEEP",
     "COLUMNS_HRV",
@@ -172,10 +139,6 @@ __all__ = (
     "COLUMNS_ACTIVITY_WEATHER",
     "COLUMNS_MULTISPORT_CHILDREN",
     "COLUMNS_ACTIVITY_HR_ZONES",
-    "COLUMNS_ACTIVITY_LAPS_RUN_BIKE",
-    "COLUMNS_ACTIVITY_LAPS_SWIM",
-    "COLUMNS_ACTIVITY_LAPS_CYCLING",
-    "COLUMNS_ACTIVITY_LAPS_RUNNING",
     "COLUMNS_METRICS_DESCRIPTORS",
     "COLUMNS_ACTIVITY_DOWNLOAD",
     "COLUMNS_ACTIVITY_UPLOAD",
@@ -227,12 +190,4 @@ __all__ = (
     # --- Devices domain ---
     "COLUMNS_DEVICE",
     "serialize_device",
-    # --- Private helpers preserved for back-compat attribute access ---
-    "_minutes",
-    "_hours",
-    "_km",
-    "_kmh",
-    "_get_nested",
-    "_coalesce",
-    "_listify",
 )

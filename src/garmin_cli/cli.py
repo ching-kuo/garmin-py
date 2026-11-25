@@ -14,7 +14,7 @@ from garmin_cli.exceptions import GarminCliError
 from garmin_cli.mcp_cli import mcp_server_cmd
 from garmin_cli.output import echo_json, make_error_envelope
 
-_GLOBAL_OPTIONS_WITH_VALUES = frozenset({"--format", "--garmin-home", "--garth-home"})
+_GLOBAL_OPTIONS_WITH_VALUES = frozenset({"--format", "--garmin-home"})
 
 # Subcommand groups load on first use so `garmin --version` / `--help` never
 # pay for the Garmin backend import chain (garminconnect -> requests ->
@@ -232,11 +232,10 @@ class SafeGroup(click.Group):
 )
 @click.option(
     "--garmin-home",
-    "--garth-home",
     "garmin_home",
     type=str,
     default=None,
-    help="Override Garmin session directory. --garth-home is deprecated.",
+    help="Override Garmin session directory.",
 )
 @click.pass_context
 def cli(ctx: click.Context, json_output: bool, output_format: str, garmin_home: str | None) -> None:

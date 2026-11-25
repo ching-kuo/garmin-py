@@ -9,7 +9,9 @@ from typing import Any
 
 import pytest
 
-pytest.importorskip("mcp", reason="mcp extra not installed")
+from tests.helpers import require_mcp
+
+require_mcp()
 
 from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402
 
@@ -444,6 +446,13 @@ class TestMcpActivityDownload:
         assert ann.idempotent_hint is None
 
 
+def _uploaded_copy(upload: Any, original: Path) -> Path:
+    """The private copy handed to Garmin: same name and bytes, never the original."""
+    sent = Path(upload.call_args.args[0])
+    assert sent != original and sent.name == original.name
+    return sent
+
+
 class TestMcpActivityUpload:
 
     def _upload(self, mocker: Any, file_path: str) -> tuple[dict[str, Any], Any]:
@@ -458,17 +467,23 @@ class TestMcpActivityUpload:
         f = tmp_path / "ride.fit"
         f.write_bytes(b"fit")
         mocker.patch(f"{_MODULE}.ensure_authenticated")
-        upload = mocker.patch(
-            f"{_MODULE}.upload_activity",
-            return_value={"detailedImportResult": {"successes": [{"internalId": 99}]}},
-        )
+        seen: dict[str, Any] = {}
+
+        def _upload(path: str) -> dict[str, Any]:
+            seen["bytes"] = Path(path).read_bytes()
+            seen["mode"] = stat.S_IMODE(Path(path).parent.stat().st_mode)
+            return {"detailedImportResult": {"successes": [{"internalId": 99}]}}
+
+        upload = mocker.patch(f"{_MODULE}.upload_activity", side_effect=_upload)
         log = mocker.patch(f"{_MODULE}._emit_write_log")
         server = create_mcp_server(_config())
 
         result = _call(server, "activity_upload", {"file_path": str(f)})
         row = result["rows"][0]
         assert row == {"ok": True, "action": "uploaded", "status": "uploaded", "activity_id": 99}
-        upload.assert_called_once_with(str(f))
+        sent = _uploaded_copy(upload, f)
+        assert seen == {"bytes": b"fit", "mode": 0o700}
+        assert not sent.exists()  # the private copy is always removed
         event = log.call_args.args[0]
         assert event.tool == "activity_upload"
         assert event.outcome == "success"
@@ -565,7 +580,25 @@ class TestMcpActivityUpload:
 
         _, upload = self._upload(mocker, "ride.fit")
 
-        upload.assert_called_once_with(str(tmp_path / "ride.fit"))
+        _uploaded_copy(upload, tmp_path / "ride.fit")
+
+    def test_symlink_swapped_in_after_the_check_is_not_followed(
+        self, mocker: Any, tmp_path: Path, monkeypatch: Any
+    ) -> None:
+        root = tmp_path / "root"
+        root.mkdir()
+        monkeypatch.setenv("GARMIN_MCP_FILE_ROOT", str(root))
+        secret = tmp_path / "secret.fit"
+        secret.write_bytes(b"secret")
+        swapped = root / "ride.fit"
+        swapped.symlink_to(secret)
+        # _confine saw a regular file; the symlink appeared before the open.
+        mocker.patch(f"{_MODULE}._confine", return_value=swapped)
+
+        row, upload = self._upload(mocker, "ride.fit")
+
+        assert row["errors"] == [_GENERIC_UPLOAD_ERROR]
+        upload.assert_not_called()
 
     def test_rejected_import_reports_rejected(self, mocker: Any, tmp_path: Path) -> None:
         f = tmp_path / "dup.fit"
@@ -588,7 +621,7 @@ class TestMcpActivityUpload:
         f = tmp_path / "ride.fit"
         f.write_bytes(b"fit")
         mocker.patch(f"{_MODULE}.ensure_authenticated")
-        mocker.patch(
+        upload = mocker.patch(
             f"{_MODULE}.upload_activity",
             side_effect=GarminCliError(error="Internal server error.", error_code="SERVER_ERROR"),
         )
@@ -599,3 +632,4 @@ class TestMcpActivityUpload:
             _call(server, "activity_upload", {"file_path": str(f)})
         event = log.call_args.args[0]
         assert event.outcome == "failed-upstream"
+        assert not _uploaded_copy(upload, f).exists()

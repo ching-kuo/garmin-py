@@ -48,7 +48,6 @@ class TestLoadConfig:
         monkeypatch.setenv("GARMIN_EMAIL", "env@test.com")
         monkeypatch.delenv("GARMIN_PASSWORD", raising=False)
         monkeypatch.delenv("GARMIN_HOME", raising=False)
-        monkeypatch.delenv("GARTH_HOME", raising=False)
         config = load_config()
         assert config.email == "env@test.com"
 
@@ -56,7 +55,6 @@ class TestLoadConfig:
         monkeypatch.setenv("GARMIN_PASSWORD", "envpass")
         monkeypatch.delenv("GARMIN_EMAIL", raising=False)
         monkeypatch.delenv("GARMIN_HOME", raising=False)
-        monkeypatch.delenv("GARTH_HOME", raising=False)
         config = load_config()
         assert config.password == "envpass"
 
@@ -64,29 +62,19 @@ class TestLoadConfig:
         monkeypatch.setenv("GARMIN_HOME", "/env/garmin")
         monkeypatch.delenv("GARMIN_EMAIL", raising=False)
         monkeypatch.delenv("GARMIN_PASSWORD", raising=False)
-        monkeypatch.delenv("GARTH_HOME", raising=False)
         config = load_config()
         assert config.garth_home == "/env/garmin"
 
-    def test_load_config_falls_back_to_garth_home_alias(self, monkeypatch: Any) -> None:
+    def test_load_config_ignores_removed_garth_home_env(self, monkeypatch: Any) -> None:
         monkeypatch.setenv("GARTH_HOME", "/env/garth")
         monkeypatch.delenv("GARMIN_HOME", raising=False)
-        monkeypatch.delenv("GARMIN_EMAIL", raising=False)
-        monkeypatch.delenv("GARMIN_PASSWORD", raising=False)
         config = load_config()
-        assert config.garth_home == "/env/garth"
-
-    def test_load_config_prefers_garmin_home_over_garth_home(self, monkeypatch: Any) -> None:
-        monkeypatch.setenv("GARMIN_HOME", "/env/garmin")
-        monkeypatch.setenv("GARTH_HOME", "/env/garth")
-        config = load_config()
-        assert config.garth_home == "/env/garmin"
+        assert config.garth_home == "~/.garminconnect"
 
     def test_load_config_defaults_when_no_env(self, monkeypatch: Any) -> None:
         monkeypatch.delenv("GARMIN_EMAIL", raising=False)
         monkeypatch.delenv("GARMIN_PASSWORD", raising=False)
         monkeypatch.delenv("GARMIN_HOME", raising=False)
-        monkeypatch.delenv("GARTH_HOME", raising=False)
         config = load_config()
         assert config.email is None
         assert config.password is None
@@ -105,7 +93,6 @@ class TestLoadConfig:
         monkeypatch.setenv("GARMIN_EMAIL", "")
         monkeypatch.delenv("GARMIN_PASSWORD", raising=False)
         monkeypatch.delenv("GARMIN_HOME", raising=False)
-        monkeypatch.delenv("GARTH_HOME", raising=False)
         config = load_config()
         # Empty string env var should be treated as None or empty — implementation decides
         assert config.email == "" or config.email is None

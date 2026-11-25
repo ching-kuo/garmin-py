@@ -102,6 +102,31 @@ class TestEnsureAuthenticatedNoCredentials:
         # First-run guidance leads with the interactive login, then env vars.
         message = exc_info.value.error
         assert message.index("garmin-cli login") < message.index("GARMIN_EMAIL")
+        assert "GARTH_HOME" not in message
+
+    @pytest.mark.parametrize(("garth_home_env", "hinted"), [("/old/garth", True), (None, False)])
+    def test_default_home_with_removed_garth_home_gets_a_hint(
+        self,
+        mocker: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        garth_home_env: str | None,
+        hinted: bool,
+    ) -> None:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        if garth_home_env is None:
+            monkeypatch.delenv("GARTH_HOME", raising=False)
+        else:
+            monkeypatch.setenv("GARTH_HOME", garth_home_env)
+        mock_garth = MagicMock()
+        mock_garth.resume.side_effect = FileNotFoundError("no session")
+        mocker.patch("garmin_cli.auth.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            ensure_authenticated(_make_config(garth_home="~/.garminconnect"))
+
+        assert exc_info.value.error_code == "AUTH_MISSING"
+        assert ("GARTH_HOME is no longer read; set GARMIN_HOME." in exc_info.value.error) is hinted
 
 
 

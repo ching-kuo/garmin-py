@@ -8,7 +8,9 @@ from typing import Any
 
 import pytest
 
-pytest.importorskip("mcp", reason="mcp extra not installed")
+from tests.helpers import require_mcp
+
+require_mcp()
 
 from garmin_cli import auth as auth_module  # noqa: E402
 from garmin_cli import login_backoff  # noqa: E402
@@ -172,6 +174,24 @@ def test_template_auth_error_keeps_json_error_contract(mocker: Any) -> None:
 
     payload = json.loads(str(exc_info.value))
     assert payload["error_code"] == "AUTH_MISSING"
+
+
+def test_template_auth_missing_names_the_removed_garth_home(
+    mocker: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GARTH_HOME", "/old/garth")
+    mocker.patch(
+        "garmin_cli.mcp_tools.resources._auth_state",
+        return_value=("unauthenticated", {"error_code": "AUTH_MISSING"}),
+    )
+    server = create_mcp_server(_config(garth_home="~/.garminconnect"))
+
+    with pytest.raises(Exception) as exc_info:
+        asyncio.run(server.read_resource("garmin://activity/123"))
+
+    payload = json.loads(str(exc_info.value))
+    assert payload["error_code"] == "AUTH_MISSING"
+    assert "GARTH_HOME is no longer read; set GARMIN_HOME." in payload["message"]
 
 
 def test_template_on_a_symlinked_home_gets_the_local_hint(tmp_path: Any) -> None:

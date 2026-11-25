@@ -12,6 +12,7 @@ from click.testing import CliRunner
 
 from garmin_cli.bearer_token import BEARER_ENV, BEARER_TOKEN_HINT, MIN_BEARER_TOKEN_LENGTH
 from garmin_cli.cli import cli
+from tests.helpers import require_mcp
 
 _VALID_TOKEN = "t" * MIN_BEARER_TOKEN_LENGTH
 
@@ -105,6 +106,7 @@ class TestMcpServerCommand:
     def test_mcp_server_passes_sse_run_options(
         self, mocker: Any, monkeypatch: Any
     ) -> None:
+        require_mcp()  # a bearer token builds the real mcp auth settings
         monkeypatch.setenv(BEARER_ENV, _VALID_TOKEN)
         fake_server, _ = _install_fake_mcp_module(mocker)
         runner = CliRunner(mix_stderr=False)
@@ -134,6 +136,7 @@ class TestMcpServerCommand:
     def test_mcp_server_passes_streamable_http_run_options(
         self, mocker: Any, monkeypatch: Any
     ) -> None:
+        require_mcp()  # a bearer token builds the real mcp auth settings
         monkeypatch.setenv(BEARER_ENV, _VALID_TOKEN)
         fake_server, _ = _install_fake_mcp_module(mocker)
         runner = CliRunner(mix_stderr=False)
@@ -214,7 +217,7 @@ class TestMcpServerCommand:
         fake_server.run.assert_not_called()
 
     @pytest.mark.parametrize("transport", ["sse", "streamable-http"])
-    def test_mount_path_rejected_in_mcp_v2(self, mocker: Any, transport: str) -> None:
+    def test_mount_path_option_removed(self, mocker: Any, transport: str) -> None:
         fake_server, _ = _install_fake_mcp_module(mocker)
         runner = CliRunner(mix_stderr=False)
 
@@ -227,16 +230,14 @@ class TestMcpServerCommand:
             ],
         )
 
-        assert result.exit_code == 1
-        combined = _combined_output(result).lower()
-        assert "--mount-path" in combined
-        assert "mcp v2" in combined
+        assert result.exit_code != 0
+        assert "no such option" in _combined_output(result).lower()
         fake_server.run.assert_not_called()
 
     def test_real_mcpserver_sse_transport_uses_supported_run_kwargs(
         self, mocker: Any, monkeypatch: Any
     ) -> None:
-        pytest.importorskip("mcp")
+        require_mcp()
         monkeypatch.setenv(BEARER_ENV, _VALID_TOKEN)
         from mcp.server.mcpserver import MCPServer
 
@@ -270,7 +271,7 @@ class TestMcpServerCommand:
     def test_real_mcpserver_streamable_http_uses_supported_run_kwargs(
         self, mocker: Any, monkeypatch: Any
     ) -> None:
-        pytest.importorskip("mcp")
+        require_mcp()
         monkeypatch.setenv(BEARER_ENV, _VALID_TOKEN)
         from mcp.server.mcpserver import MCPServer
 
@@ -366,7 +367,7 @@ class TestMcpServerLoopbackDefault:
     def test_loopback_enforces_bearer_token_when_set(
         self, mocker: Any, host: str | None, monkeypatch: Any
     ) -> None:
-        pytest.importorskip("mcp")
+        require_mcp()
         from garmin_cli.mcp_auth import StaticBearerTokenVerifier
 
         monkeypatch.setenv(BEARER_ENV, _VALID_TOKEN)
@@ -391,7 +392,7 @@ class TestMcpServerLoopbackDefault:
     def test_bind_host_is_normalized_once_for_run_and_auth(
         self, mocker: Any, monkeypatch: Any, host: str | None, bound: str, expected_url: str
     ) -> None:
-        pytest.importorskip("mcp")
+        require_mcp()
         monkeypatch.setenv(BEARER_ENV, _VALID_TOKEN)
         fake_server, captured = _install_fake_mcp_module(mocker)
         args = ["mcp-server", "--transport", "streamable-http"]
@@ -490,7 +491,7 @@ class TestMcpServerNonLoopbackAuth:
     def test_valid_token_wires_verifier_and_auth(
         self, mocker: Any, monkeypatch: Any
     ) -> None:
-        pytest.importorskip("mcp")
+        require_mcp()
         from mcp.server.auth.settings import AuthSettings
 
         from garmin_cli.mcp_auth import StaticBearerTokenVerifier
@@ -519,7 +520,7 @@ class TestMcpServerNonLoopbackAuth:
     def test_auth_settings_url_uses_supplied_port(
         self, mocker: Any, monkeypatch: Any
     ) -> None:
-        pytest.importorskip("mcp")
+        require_mcp()
         monkeypatch.setenv(BEARER_ENV, _VALID_TOKEN)
         fake_server, captured = _install_fake_mcp_module(mocker)
         runner = CliRunner(mix_stderr=False)
@@ -545,6 +546,7 @@ def test_bearer_token_not_logged(
     mocker: Any, monkeypatch: Any, capsys: Any
 ) -> None:
     """The canary bearer-token value must not appear in CLI output streams."""
+    require_mcp()  # the real auth path is what could log the token
     canary = "secret-canary-abc123-do-not-log-0123456789"
     monkeypatch.setenv(BEARER_ENV, canary)
     fake_server, _ = _install_fake_mcp_module(mocker)

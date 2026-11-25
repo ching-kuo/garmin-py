@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
 from click.testing import CliRunner
 
 from garmin_cli.cli import cli
@@ -52,118 +53,95 @@ class TestPerformancePersonalRecordsCommand:
 
 
 # ---------------------------------------------------------------------------
-# performance thresholds command
+# Single-call commands: shared envelope, auth-failure, and table behavior
 # ---------------------------------------------------------------------------
 
-class TestPerformanceThresholdsCommand:
+_RACE_PREDICTION_ROWS = [
+    {"race_type": "5K", "predicted_time_seconds": 1500, "distance_meters": 5000},
+    {"race_type": "10K", "predicted_time_seconds": 3200, "distance_meters": 10000},
+    {"race_type": "HalfMarathon", "predicted_time_seconds": 7200, "distance_meters": 21097},
+    {"race_type": "Marathon", "predicted_time_seconds": 15000, "distance_meters": 42195},
+]
 
-    def test_thresholds_exit_code_0(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.performance.get_all_thresholds",
-            return_value={"thresholds": []},
-        )
-        mocker.patch(
-            "garmin_cli.commands.performance.serialize_thresholds",
-            return_value=[],
-        )
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(cli, ["--json", "performance", "thresholds"])
-        assert result.exit_code == 0
 
-    def test_thresholds_json_ok_true(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.performance.get_all_thresholds",
-            return_value={"thresholds": [{"sport": "running"}]},
-        )
-        mocker.patch(
-            "garmin_cli.commands.performance.serialize_thresholds",
-            return_value=[{"sport": "running", "lt_hr_bpm": 168}],
-        )
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(cli, ["--json", "performance", "thresholds"])
-        parsed = json.loads(result.output)
-        assert parsed["ok"] is True
+@pytest.mark.parametrize(
+    ("command", "endpoint", "serializer", "rows"),
+    [
+        ("thresholds", "get_all_thresholds", "serialize_thresholds", []),
+        ("thresholds", "get_all_thresholds", "serialize_thresholds", [{"sport": "running"}, {"sport": "cycling"}]),
+        ("race-predictions", "get_race_predictions", "serialize_race_predictions", []),
+        ("race-predictions", "get_race_predictions", "serialize_race_predictions", _RACE_PREDICTION_ROWS),
+    ],
+)
+def test_single_call_command_json_envelope(
+    mocker: Any, command: str, endpoint: str, serializer: str, rows: list[dict[str, Any]]
+) -> None:
+    mock_auth = mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
+    mocker.patch(f"garmin_cli.commands.performance.{endpoint}", return_value={})
+    mocker.patch(f"garmin_cli.commands.performance.{serializer}", return_value=rows)
 
-    def test_thresholds_count_matches_data(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.performance.get_all_thresholds",
-            return_value={"thresholds": [{}, {}]},
-        )
-        mocker.patch(
-            "garmin_cli.commands.performance.serialize_thresholds",
-            return_value=[{"sport": "running"}, {"sport": "cycling"}],
-        )
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(cli, ["--json", "performance", "thresholds"])
-        parsed = json.loads(result.output)
-        assert parsed["count"] == 2
-        assert len(parsed["data"]) == 2
+    result = CliRunner(mix_stderr=False).invoke(cli, ["--json", "performance", command])
 
-    def test_thresholds_auth_failure_exit_1(self, mocker: Any) -> None:
-        from garmin_cli.exceptions import GarminCliError
+    assert result.exit_code == 0
+    mock_auth.assert_called_once()
+    parsed = json.loads(result.output)
+    assert parsed["ok"] is True
+    assert parsed["count"] == len(rows)
+    assert parsed["data"] == rows
+    assert parsed.get("date_range") is None
 
-        mocker.patch(
-            "garmin_cli.commands.performance.ensure_authenticated",
-            side_effect=GarminCliError(error="No creds", error_code="AUTH_MISSING"),
-        )
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(cli, ["performance", "thresholds"])
-        assert result.exit_code == 1
 
-    def test_thresholds_auth_failure_json_error(self, mocker: Any) -> None:
-        from garmin_cli.exceptions import GarminCliError
+@pytest.mark.parametrize("command", ["thresholds", "vo2max", "zones", "race-predictions"])
+@pytest.mark.parametrize("json_mode", [False, True], ids=("table", "json"))
+def test_single_call_command_auth_failure(mocker: Any, command: str, json_mode: bool) -> None:
+    from garmin_cli.exceptions import GarminCliError
 
-        mocker.patch(
-            "garmin_cli.commands.performance.ensure_authenticated",
-            side_effect=GarminCliError(error="No creds", error_code="AUTH_MISSING"),
-        )
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(cli, ["--json", "performance", "thresholds"])
+    mocker.patch(
+        "garmin_cli.commands.performance.ensure_authenticated",
+        side_effect=GarminCliError(error="No creds", error_code="AUTH_MISSING"),
+    )
+    args = ["--json"] if json_mode else []
+
+    result = CliRunner(mix_stderr=False).invoke(cli, [*args, "performance", command])
+
+    assert result.exit_code == 1
+    if json_mode:
         parsed = json.loads(result.output)
         assert parsed["ok"] is False
         assert parsed["error_code"] == "AUTH_MISSING"
 
-    def test_thresholds_empty_returns_exit_0(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.performance.get_all_thresholds",
-            return_value={"thresholds": []},
-        )
-        mocker.patch(
-            "garmin_cli.commands.performance.serialize_thresholds",
-            return_value=[],
-        )
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(cli, ["--json", "performance", "thresholds"])
-        assert result.exit_code == 0
-        parsed = json.loads(result.output)
-        assert parsed["count"] == 0
 
-    def test_thresholds_server_error_exit_1(self, mocker: Any) -> None:
-        from garmin_cli.exceptions import GarminCliError
+def test_race_predictions_table_output_not_json(mocker: Any) -> None:
+    mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
+    mocker.patch("garmin_cli.commands.performance.get_race_predictions", return_value={})
+    mocker.patch(
+        "garmin_cli.commands.performance.serialize_race_predictions",
+        return_value=[{"race_type": "5K", "predicted_time_seconds": 1500, "distance_meters": 5000}],
+    )
 
-        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.performance.get_all_thresholds",
-            side_effect=GarminCliError(error="Server error", error_code="SERVER_ERROR"),
-        )
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(cli, ["performance", "thresholds"])
-        assert result.exit_code == 1
+    result = CliRunner(mix_stderr=False).invoke(cli, ["performance", "race-predictions"])
 
-    def test_thresholds_server_error_json_envelope(self, mocker: Any) -> None:
-        from garmin_cli.exceptions import GarminCliError
+    assert result.exit_code == 0
+    assert "5K" in result.output
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(result.output)
 
-        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.performance.get_all_thresholds",
-            side_effect=GarminCliError(error="Server error", error_code="SERVER_ERROR"),
-        )
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(cli, ["--json", "performance", "thresholds"])
+
+@pytest.mark.parametrize("json_mode", [False, True], ids=("table", "json"))
+def test_thresholds_server_error(mocker: Any, json_mode: bool) -> None:
+    from garmin_cli.exceptions import GarminCliError
+
+    mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
+    mocker.patch(
+        "garmin_cli.commands.performance.get_all_thresholds",
+        side_effect=GarminCliError(error="Server error", error_code="SERVER_ERROR"),
+    )
+    args = ["--json"] if json_mode else []
+
+    result = CliRunner(mix_stderr=False).invoke(cli, [*args, "performance", "thresholds"])
+
+    assert result.exit_code == 1
+    if json_mode:
         parsed = json.loads(result.output)
         assert parsed["ok"] is False
         assert parsed["error_code"] == "SERVER_ERROR"
@@ -175,18 +153,6 @@ class TestPerformanceThresholdsCommand:
 
 class TestPerformanceVo2maxCommand:
 
-    def test_vo2max_exit_code_0(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.services.performance.get_vo2max",
-            return_value={"vo2MaxValue": 52.0},
-        )
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(
-            cli, ["--json", "performance", "vo2max", "--date", "2026-03-11"]
-        )
-        assert result.exit_code == 0
-
     def test_vo2max_json_envelope(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
         mocker.patch(
@@ -197,6 +163,7 @@ class TestPerformanceVo2maxCommand:
         result = runner.invoke(
             cli, ["--json", "performance", "vo2max", "--date", "2026-03-11"]
         )
+        assert result.exit_code == 0
         parsed = json.loads(result.output)
         assert parsed["ok"] is True
 
@@ -209,17 +176,6 @@ class TestPerformanceVo2maxCommand:
         runner = CliRunner(mix_stderr=False)
         runner.invoke(cli, ["--json", "performance", "vo2max"])
         mock_latest.assert_called_once_with()
-
-    def test_vo2max_auth_failure_exit_1(self, mocker: Any) -> None:
-        from garmin_cli.exceptions import GarminCliError
-
-        mocker.patch(
-            "garmin_cli.commands.performance.ensure_authenticated",
-            side_effect=GarminCliError(error="No creds", error_code="AUTH_MISSING"),
-        )
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(cli, ["performance", "vo2max"])
-        assert result.exit_code == 1
 
     def test_vo2max_table_output_handles_list_payload(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
@@ -273,16 +229,6 @@ class TestPerformanceVo2maxCommand:
 
 class TestPerformanceZonesCommand:
 
-    def test_zones_exit_code_0(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
-        mocker.patch(
-            "garmin_cli.commands.performance.get_lactate_threshold",
-            return_value={"lactateThresholdHeartRate": 168},
-        )
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(cli, ["--json", "performance", "zones"])
-        assert result.exit_code == 0
-
     def test_zones_json_ok(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
         mocker.patch(
@@ -291,19 +237,9 @@ class TestPerformanceZonesCommand:
         )
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["--json", "performance", "zones"])
+        assert result.exit_code == 0
         parsed = json.loads(result.output)
         assert parsed["ok"] is True
-
-    def test_zones_auth_failure_exit_1(self, mocker: Any) -> None:
-        from garmin_cli.exceptions import GarminCliError
-
-        mocker.patch(
-            "garmin_cli.commands.performance.ensure_authenticated",
-            side_effect=GarminCliError(error="No creds", error_code="AUTH_MISSING"),
-        )
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(cli, ["performance", "zones"])
-        assert result.exit_code == 1
 
     def test_zones_table_output_handles_list_payload(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
@@ -346,23 +282,15 @@ class TestGarminHomeFlag:
         config = call_args[0][0]
         assert config.garth_home == "/custom/garmin"
 
-    def test_garth_home_alias_still_passed_to_config(self, mocker: Any) -> None:
+    def test_removed_garth_home_option_is_rejected(self, mocker: Any) -> None:
         mock_auth = mocker.patch(
             "garmin_cli.commands.performance.ensure_authenticated"
         )
-        mocker.patch(
-            "garmin_cli.commands.performance.get_all_thresholds",
-            return_value={"thresholds": []},
-        )
-        mocker.patch(
-            "garmin_cli.commands.performance.serialize_thresholds",
-            return_value=[],
-        )
         runner = CliRunner(mix_stderr=False)
-        runner.invoke(
+        result = runner.invoke(
             cli,
             ["--garth-home", "/compat/garth", "performance", "thresholds"],
         )
-        assert mock_auth.called
-        config = mock_auth.call_args[0][0]
-        assert config.garth_home == "/compat/garth"
+        assert result.exit_code != 0
+        assert "no such option" in (result.output + result.stderr).lower()
+        assert not mock_auth.called

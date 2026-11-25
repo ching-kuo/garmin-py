@@ -17,7 +17,6 @@ from garminconnect import Garmin
 from garmin_cli._env import _env_float
 from garmin_cli.exceptions import TRANSIENT_KINDS, extract_status_code, failure_kind
 from garmin_cli.token_store import (
-    detect_legacy_tokens,
     ensure_secure_directory,
     has_tokenstore,
     secure_token_file,
@@ -279,23 +278,16 @@ def _refuse_symlinked_token_file(garth_home: str | Path) -> None:
 def resume(garth_home: str, *, read_only: bool = False) -> None:
     """Restore an authenticated client from the configured Garmin home.
 
-    ``read_only=True`` is for status surfaces: it never repairs permissions or
-    migrates legacy tokens. Both modes refuse symlinks (home path and token
-    file). The loaded client becomes the process backend either way, so later
-    calls use it and a token refresh is never split across two clients.
+    ``read_only=True`` is for status surfaces: it never repairs permissions.
+    Both modes refuse symlinks (home path and token file). The loaded client
+    becomes the process backend either way, so later calls use it and a token
+    refresh is never split across two clients.
     """
     if read_only:
         validate_garmin_home(garth_home)
     else:
         ensure_secure_directory(garth_home)
     _refuse_symlinked_token_file(garth_home)
-
-    if detect_legacy_tokens(garth_home) and not has_tokenstore(garth_home):
-        logger.debug(
-            "Legacy garth token files detected in %s; requiring a fresh login",
-            garth_home,
-        )
-        raise FileNotFoundError("Legacy garth session files are not resumable")
 
     if not has_tokenstore(garth_home):
         raise FileNotFoundError("No garmin_tokens.json found in the Garmin home directory")

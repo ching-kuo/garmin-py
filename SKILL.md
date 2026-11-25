@@ -70,7 +70,7 @@ garmin-cli --json doctor
 garmin-cli --json doctor --fast  # skip the authenticated network probe
 ```
 
-`doctor` checks Python, the garmin-py and garminconnect versions, configuration, token-store layout and permissions, the optional MCP install (mcp >=2.2.0,<3), the live session, and MCP write-surface binding. It returns one row per check with a per-check `recovery_hint`, and exits 1 if any check fails; paths are redacted and credentials are never included. With `GARMIN_EMAIL`/`GARMIN_PASSWORD` set, a missing token store or session is not a failure.
+`doctor` checks Python, the garmin-py and garminconnect versions, configuration, token-store layout and permissions, leftover pre-3.0 `GARTH_HOME` / `~/.garth` settings (informational), the optional MCP install (mcp >=2.2.0,<3), the live session, and MCP write-surface binding. It returns one row per check with a per-check `recovery_hint`, and exits 1 if any check fails; paths are redacted and credentials are never included. With `GARMIN_EMAIL`/`GARMIN_PASSWORD` set, a missing token store or session is not a failure.
 
 ### Date range options (health/performance range commands, activity list, workout calendar)
 
@@ -511,7 +511,7 @@ garmin-cli --json login status
 garmin-cli --json login logout
 ```
 
-Under `--json` or `--format csv`, or with a non-terminal stdin, `login` never prompts: missing credentials fail with `AUTH_MISSING`, and an MFA challenge without a code fails with `MFA_REQUIRED` (exit 1). Every login starts a new challenge, so `--mfa-code` only works for a code valid for it (authenticator app); for emailed or SMS codes, have the user run `garmin-cli login` in a terminal. `--password-stdin` with an empty line fails with `AUTH_MISSING`. `login logout` returns `{"logged_out": true|false, "legacy_token_removed": true|false}` (exit 0 when nothing existed); it refuses symlinks and, for the default home, also deletes a legacy `~/.garth/garmin_tokens.json`. Stop a running MCP server before logging out: it keeps its loaded session and may save refreshed tokens again. Login failures from network errors (`NETWORK_ERROR`) or Garmin 5xx (`SERVER_ERROR`) are not credential problems; retry later instead of asking for a new password.
+Under `--json` or `--format csv`, or with a non-terminal stdin, `login` never prompts: missing credentials fail with `AUTH_MISSING`, and an MFA challenge without a code fails with `MFA_REQUIRED` (exit 1). Every login starts a new challenge, so `--mfa-code` only works for a code valid for it (authenticator app); for emailed or SMS codes, have the user run `garmin-cli login` in a terminal. `--password-stdin` with an empty line fails with `AUTH_MISSING`. `login logout` returns `{"logged_out": true|false}` (exit 0 when nothing existed); it refuses symlinks. Stop a running MCP server before logging out: it keeps its loaded session and may save refreshed tokens again. Login failures from network errors (`NETWORK_ERROR`) or Garmin 5xx (`SERVER_ERROR`) are not credential problems; retry later instead of asking for a new password.
 
 `login status` returns `{"ok": true, ..., "data": [{"authenticated": true, "garmin_home": "..."}]}` when a session is present and `"authenticated": false` when it is missing or Garmin rejects it (exit `0` in both cases). When the session cannot be checked it exits `1` with an error envelope instead: `RATE_LIMITED`, `SERVER_ERROR`, or `NETWORK_ERROR` when Garmin throttles, fails, or is unreachable (the session may still be fine; retry later), and `AUTH_FAILED` when the Garmin home path is unusable.
 

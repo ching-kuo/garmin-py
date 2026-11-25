@@ -13,8 +13,8 @@ from mcp.server.mcpserver.exceptions import ResourceError
 
 from garmin_cli import __version__, login_backoff
 from garmin_cli.auth import _get_probe_ttl, _home_key, _probe_cache_hit, probe_session_status
-from garmin_cli.config import CliConfig
-from garmin_cli.date_utils import today
+from garmin_cli.config import GARTH_HOME_HINT, CliConfig, garth_home_ignored
+from garmin_cli.date_utils import _MAX_DAYS, today
 from garmin_cli.endpoints._base import _resolve_retry_delays, _validate_numeric_id
 from garmin_cli.endpoints.activities import list_activities
 from garmin_cli.endpoints.health import get_sleep
@@ -25,9 +25,19 @@ from garmin_cli.endpoints.performance import (
 from garmin_cli.endpoints.metrics import get_race_predictions
 from garmin_cli.error_contracts import ERROR_CODE_TABLE
 from garmin_cli.exceptions import TRANSIENT_ERROR_CODES, GarminCliError
-from garmin_cli.mcp_tools._shared import _envelope, _error_text, mcp_recovery_hint
-from garmin_cli.mcp_tools.activities import _AUTO_CELL_BUDGET, _activity_get_result
-from garmin_cli.mcp_tools.coaching import TARGET_SAMPLE_BUDGET, TARGET_STREAM_LIMIT
+from garmin_cli.mcp_tools._shared import _MAX_LIMIT, _envelope, _error_text, mcp_recovery_hint
+from garmin_cli.mcp_tools.activities import (
+    _AUTO_CELL_BUDGET,
+    _LAPS_ROW_CAP,
+    _MAX_SAMPLES,
+    _activity_get_result,
+)
+from garmin_cli.mcp_tools.coaching import (
+    RECONCILE_MAX_ACTIVITIES,
+    RECONCILE_MAX_DAYS,
+    TARGET_SAMPLE_BUDGET,
+    TARGET_STREAM_LIMIT,
+)
 from garmin_cli.token_store import token_file_identity
 from garmin_cli.serializers import (
     serialize_activity_summary,
@@ -261,6 +271,8 @@ def _require_resource_auth(config: CliConfig) -> None:
         message = "The Garmin session path is not usable"
     elif error_code == "AUTH_MISSING":
         message = "No usable saved session found"
+        if garth_home_ignored(config.garth_home):
+            message = f"{message}. {GARTH_HOME_HINT}"
     elif error_code in TRANSIENT_ERROR_CODES:
         message = "Could not check the Garmin session: Garmin throttled, failed, or was unreachable"
     else:
@@ -327,13 +339,13 @@ def register_resources(mcp: MCPServer, config: CliConfig) -> None:
                 },
             },
             "limits": {
-                "date_range_days": 90,
-                "activity_list_limit": 100,
-                "activity_laps_rows": 100,
+                "date_range_days": _MAX_DAYS,
+                "activity_list_limit": _MAX_LIMIT,
+                "activity_laps_rows": _LAPS_ROW_CAP,
                 "activity_detail_metrics_auto_cell_budget": _AUTO_CELL_BUDGET,
-                "activity_detail_metrics_max_samples": 5000,
-                "reconciliation_range_days": 28,
-                "reconciliation_max_activities": 100,
+                "activity_detail_metrics_max_samples": _MAX_SAMPLES,
+                "reconciliation_range_days": RECONCILE_MAX_DAYS,
+                "reconciliation_max_activities": RECONCILE_MAX_ACTIVITIES,
                 "reconciliation_target_streams_per_call": TARGET_STREAM_LIMIT,
                 "reconciliation_target_samples_per_stream": TARGET_SAMPLE_BUDGET,
             },

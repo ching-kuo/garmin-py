@@ -13,7 +13,7 @@ from garmin_cli import backend as garth
 from garmin_cli import login_backoff
 from garmin_cli._env import _env_float
 from garmin_cli.backend import PendingMFA
-from garmin_cli.config import CliConfig
+from garmin_cli.config import GARTH_HOME_HINT, CliConfig, garth_home_ignored
 from garmin_cli.exceptions import (
     TRANSIENT_ERROR_CODES,
     GarminCliError,
@@ -22,7 +22,7 @@ from garmin_cli.exceptions import (
     raise_unless_rejected,
     resume_error,
 )
-from garmin_cli.token_store import ensure_secure_directory, expand_garth_home, token_file_identity
+from garmin_cli.token_store import ensure_secure_directory, expand_garmin_home, token_file_identity
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class SessionProbeResult:
 
 def _home_key(path: str) -> str:
     """One spelling per Garmin home (no trailing slash) for every per-home cache."""
-    return str(expand_garth_home(path))
+    return str(expand_garmin_home(path))
 
 
 def _get_probe_ttl() -> float:
@@ -229,8 +229,8 @@ def probe_session_status(config: CliConfig) -> SessionProbeResult:
     """Resume and validate the saved session without ever raising.
 
     This is a read-only surface (doctor, login_status, resources): it reports
-    problems without repairing directory permissions or migrating legacy
-    tokens — those side effects belong to :func:`ensure_authenticated`.
+    problems without repairing directory permissions — that side effect
+    belongs to :func:`ensure_authenticated`.
 
     Error details are intentionally generic: callers may print this result and
     must not leak upstream response bodies, account identifiers, or tokens.
@@ -336,13 +336,13 @@ def ensure_authenticated(config: CliConfig) -> None:
             return
 
     if not config.email or not config.password:
-        raise GarminCliError(
-            error=(
-                "No saved Garmin session found. Run `garmin-cli login` to sign in, "
-                "or set GARMIN_EMAIL and GARMIN_PASSWORD."
-            ),
-            error_code="AUTH_MISSING",
+        message = (
+            "No saved Garmin session found. Run `garmin-cli login` to sign in, "
+            "or set GARMIN_EMAIL and GARMIN_PASSWORD."
         )
+        if garth_home_ignored(config.garth_home):
+            message = f"{message} {GARTH_HOME_HINT}"
+        raise GarminCliError(error=message, error_code="AUTH_MISSING")
 
     with _login_lock:
         # A peer logged this home in while we waited. Re-resume from what it

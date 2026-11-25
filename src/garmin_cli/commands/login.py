@@ -17,13 +17,7 @@ from garmin_cli.commands import _options
 from garmin_cli.commands._options import OutputGroup, output_options
 from garmin_cli.exceptions import GarminCliError, login_error
 from garmin_cli.output import render_output
-from garmin_cli.token_store import (
-    DEFAULT_GARMIN_HOME,
-    expand_garth_home,
-    legacy_tokenstore_path,
-    tokenstore_path,
-    validate_garmin_home,
-)
+from garmin_cli.token_store import tokenstore_path, validate_garmin_home
 
 _COLUMNS_SESSION = ("authenticated", "garmin_home")
 
@@ -173,8 +167,8 @@ def login_status(ctx: click.Context) -> None:
     garmin_home = os.path.expanduser(config.garth_home)
     output_format = config.output_format
 
-    # Read-only: validates the home and refuses symlinks, never chmods or
-    # migrates. Missing or rejected sessions are "not logged in"; throttles,
+    # Read-only: validates the home and refuses symlinks, never chmods.
+    # Missing or rejected sessions are "not logged in"; throttles,
     # 5xx, network and filesystem errors raise (exit 1). Pass the module-level
     # garth so tests can patch it here without also patching auth.garth.
     authenticated = resume_and_probe(garmin_home, garth, read_only=True)
@@ -219,25 +213,16 @@ def logout(ctx: click.Context) -> None:
     config = ctx.obj["config"]
     home = validate_garmin_home(config.garth_home)
     token_file = tokenstore_path(str(home))
-    deleted = [token_file] if _delete_token_file(token_file) else []
-    legacy_removed = False
-    # Migration copies ~/.garth's token into the default home on first use, so
-    # it must go too or the next command would silently resurrect the session.
-    # legacy_tokenstore_path() is None exactly when migration would ignore it.
-    legacy_token = legacy_tokenstore_path()
-    if home == expand_garth_home(DEFAULT_GARMIN_HOME) and legacy_token is not None:
-        legacy_removed = _delete_token_file(legacy_token)
-        if legacy_removed:
-            deleted.append(legacy_token)
+    logged_out = _delete_token_file(token_file)
 
     if config.output_format != "table":
         render_output(
             config.output_format,
             "login logout",
-            [{"logged_out": bool(deleted), "legacy_token_removed": legacy_removed}],
-            ("logged_out", "legacy_token_removed"),
+            [{"logged_out": logged_out}],
+            ("logged_out",),
         )
-    elif deleted:
-        click.echo("Logged out. Deleted: " + ", ".join(str(path) for path in deleted))
+    elif logged_out:
+        click.echo(f"Logged out. Deleted: {token_file}")
     else:
         click.echo(f"Not logged in. No token store found at: {token_file}")

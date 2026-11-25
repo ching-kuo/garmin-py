@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import tomllib
@@ -20,7 +21,9 @@ from garmin_cli.config import CliConfig
 from garmin_cli.doctor import (
     MCP_MAJOR_CEILING,
     MIN_MCP_VERSION,
+    CheckResult,
     check_config,
+    check_legacy_garth,
     check_mcp_extra,
     check_python_version,
     check_versions,
@@ -64,7 +67,7 @@ def test_missing_token_store_has_auth_missing_hint(tmp_path: Path) -> None:
     assert "garmin-cli login" in (token.recovery_hint or "")
 
 
-def test_legacy_token_layout_is_reported(tmp_path: Path) -> None:
+def test_legacy_garth_files_are_just_a_missing_token_store(tmp_path: Path) -> None:
     home = tmp_path / "garmin"
     _secure_home(home, token=False)
     (home / "oauth1_token.json").write_text("{}")
@@ -73,7 +76,93 @@ def test_legacy_token_layout_is_reported(tmp_path: Path) -> None:
     token = next(result for result in results if result.name == "token_store")
 
     assert token.ok is False
-    assert "Legacy" in token.detail
+    assert token.error_code == "AUTH_MISSING"
+    assert "No token store was found" in token.detail
+
+
+_UNUSED_LEGACY_NOTE = (
+    "~/.garth/garmin_tokens.json is not used (GARMIN_HOME points elsewhere); set GARMIN_HOME=~/.garth to use it."
+)
+
+
+def _legacy_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("GARTH_HOME", raising=False)
+    legacy = tmp_path / ".garth"
+    legacy.mkdir()
+    (legacy / "garmin_tokens.json").write_text("{}")
+    return legacy
+
+
+def test_legacy_garth_settings_are_noted_without_failing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _legacy_home(tmp_path, monkeypatch)
+    monkeypatch.setenv("GARTH_HOME", "/old/garth")
+
+    result = check_legacy_garth(CliConfig())
+
+    assert result.ok is True
+    assert result.detail == f"GARTH_HOME is no longer read; set GARMIN_HOME. {_UNUSED_LEGACY_NOTE}"
+
+
+def test_garth_home_note_only_applies_to_the_default_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("GARTH_HOME", "/old/garth")
+
+    result = check_legacy_garth(CliConfig(garth_home=str(tmp_path / "chosen")))
+
+    assert result == CheckResult("legacy_garth", True, "No legacy garth settings found.")
+
+
+@pytest.mark.parametrize("spelling", ["{home}/.garth/", "{home}/x/../.garth", "~/.garth"])
+def test_selected_legacy_home_in_any_spelling_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, spelling: str
+) -> None:
+    _legacy_home(tmp_path, monkeypatch)
+    (tmp_path / "x").mkdir()
+
+    result = check_legacy_garth(CliConfig(garth_home=spelling.format(home=tmp_path)))
+
+    assert result == CheckResult("legacy_garth", True, "No legacy garth settings found.")
+
+
+@pytest.mark.parametrize("link", ["dir", "file"])
+def test_symlinked_legacy_garth_is_ignored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, link: str
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("GARTH_HOME", raising=False)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "garmin_tokens.json").write_text("{}")
+    if link == "dir":
+        (tmp_path / ".garth").symlink_to(elsewhere)
+    else:
+        (tmp_path / ".garth").mkdir()
+        (tmp_path / ".garth" / "garmin_tokens.json").symlink_to(elsewhere / "garmin_tokens.json")
+
+    result = check_legacy_garth(CliConfig())
+
+    assert result.detail == "No legacy garth settings found."
+
+
+@pytest.mark.skipif(
+    os.name != "posix" or os.geteuid() == 0, reason="needs POSIX permissions as a non-root user"
+)
+def test_unreadable_legacy_garth_is_noted_without_failing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    legacy = _legacy_home(tmp_path, monkeypatch)
+    legacy.chmod(0o000)
+    try:
+        result = check_legacy_garth(CliConfig())
+    finally:
+        legacy.chmod(0o700)
+
+    assert result == CheckResult("legacy_garth", True, "Could not inspect ~/.garth.")
 
 
 def test_token_file_with_loose_mode_is_reported(tmp_path: Path) -> None:
@@ -374,6 +463,25 @@ def test_mcp_range_matches_pyproject() -> None:
     assert floor is not None and ceiling is not None
     assert tuple(int(part) for part in floor.group(1).split(".")) == MIN_MCP_VERSION
     assert int(ceiling.group(1)) == MCP_MAJOR_CEILING
+
+
+@pytest.mark.parametrize(
+    ("installed", "skips"),
+    [("2.3.0", False), ("2.1.9", True), ("3.0.0", True), (None, True)],
+)
+def test_require_mcp_skips_outside_the_pyproject_range(
+    mocker: Any, installed: str | None, skips: bool
+) -> None:
+    # The test-suite gate shares doctor's range, which the test above pins to pyproject.
+    from tests import helpers
+
+    mocker.patch("garmin_cli.doctor._installed_version", return_value=installed)
+    if skips:
+        with pytest.raises(pytest.skip.Exception) as exc_info:
+            helpers.require_mcp()
+        assert exc_info.value.allow_module_level
+    else:
+        helpers.require_mcp()
 
 
 def test_doctor_cli_healthy_fast_path_exits_zero(tmp_path: Path, mocker: Any) -> None:

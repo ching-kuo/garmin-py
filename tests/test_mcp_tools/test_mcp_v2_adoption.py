@@ -8,7 +8,9 @@ from typing import Any
 
 import pytest
 
-pytest.importorskip("mcp", reason="mcp extra not installed")
+from tests.helpers import require_mcp
+
+require_mcp()
 
 from garmin_cli.auth import SessionProbeResult  # noqa: E402
 from garmin_cli.mcp_server import (  # noqa: E402

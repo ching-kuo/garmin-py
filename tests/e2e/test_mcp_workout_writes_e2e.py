@@ -16,10 +16,12 @@ from typing import Any
 
 import pytest
 
-pytest.importorskip("mcp", reason="mcp extra not installed")
+from tests.helpers import require_mcp
 
-from garmin_cli.config import CliConfig
-from garmin_cli.mcp_server import create_mcp_server
+require_mcp()
+
+from garmin_cli.config import CliConfig  # noqa: E402
+from garmin_cli.mcp_server import create_mcp_server  # noqa: E402
 
 
 E2E_WORKOUT_NAME_PREFIX = "__e2e_workout_mcp_"

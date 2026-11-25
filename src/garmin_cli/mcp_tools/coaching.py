@@ -42,6 +42,8 @@ from garmin_cli.services.reconciliation_targets import (
 
 TARGET_SAMPLE_BUDGET = 1000
 TARGET_STREAM_LIMIT = 10
+RECONCILE_MAX_DAYS = 28
+RECONCILE_MAX_ACTIVITIES = 100
 
 
 def _optional_target_read(call: Any) -> Any:
@@ -111,10 +113,10 @@ def register_coaching_tools(mcp: MCPServer, config: CliConfig) -> None:
         end = _parse_date(end_date, "end_date")
         if start > end:
             raise ToolError("start_date must be on or before end_date")
-        if (end - start).days + 1 > 28:
-            raise ToolError("reconciliation date range cannot exceed 28 days")
-        if max_activities < 1 or max_activities > 100:
-            raise ToolError("max_activities must be between 1 and 100")
+        if (end - start).days + 1 > RECONCILE_MAX_DAYS:
+            raise ToolError(f"reconciliation date range cannot exceed {RECONCILE_MAX_DAYS} days")
+        if max_activities < 1 or max_activities > RECONCILE_MAX_ACTIVITIES:
+            raise ToolError(f"max_activities must be between 1 and {RECONCILE_MAX_ACTIVITIES}")
 
         def produce() -> dict[str, Any]:
             plan_today = today()

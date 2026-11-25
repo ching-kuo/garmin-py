@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from garmin_cli.metrics.registry import _walk
 from garmin_cli.units import to_hours, to_km, to_kmh, to_minutes
 
 
@@ -44,12 +45,7 @@ def _local_iso(value: Any) -> str | None:
 
 
 def _get_nested(value: dict[str, Any], *keys: str) -> Any:
-    current: Any = value
-    for key in keys:
-        if not isinstance(current, dict):
-            return None
-        current = current.get(key)
-    return current
+    return _walk(value, keys)
 
 
 def _coalesce(*values: Any) -> Any:

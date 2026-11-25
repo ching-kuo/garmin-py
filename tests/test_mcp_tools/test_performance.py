@@ -7,7 +7,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-pytest.importorskip("mcp", reason="mcp extra not installed")
+from tests.helpers import require_mcp
+
+require_mcp()
 
 from garmin_cli.endpoints import metrics as metrics_endpoints  # noqa: E402
 from garmin_cli.exceptions import GarminCliError  # noqa: E402

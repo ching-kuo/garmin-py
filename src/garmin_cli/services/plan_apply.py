@@ -321,16 +321,16 @@ def apply_training_plan(plan: dict[str, Any]) -> dict[str, Any]:
                 )
                 continue
             source_removals.append((removal["schedule_id"], source, {"schedule_id": str(removal["schedule_id"])}))
-        for index, (schedule_id, source, owner) in enumerate(source_removals):
-            if has_schedule(removed_sources, schedule_id):
-                continue
+        # Sources an entry already vacated are done; the last of the rest is the plan's final step.
+        pending = [removal for removal in source_removals if not has_schedule(removed_sources, removal[0])]
+        for index, (schedule_id, source, owner) in enumerate(pending):
             # The snapshot may be stale by now: delete only where the plan saw it.
             # A failed read raises, so nothing is deleted and compensation runs.
             day = date.fromisoformat(source["date"])
             if not has_schedule(calendar_rows(day, day, strict=True), schedule_id):
                 conflicts.append({**owner, "reason": "source_schedule_changed"})
                 raise GarminCliError("A source schedule moved before its removal.", "INVALID_INPUT")
-            remove_source(schedule_id, source, last=index == len(source_removals) - 1)
+            remove_source(schedule_id, source, last=index == len(pending) - 1)
         performed_write = any(operation.get("state") in {"applied", "verified"} for operation in operations)
         return write_result("complete" if performed_write else "no_op", operations, complete=True)
     except Exception as exc:

@@ -8,7 +8,7 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from garmin_cli.metrics import FieldEntry, FieldTable, validate_table_coverage
+from garmin_cli.metrics import FieldEntry, FieldTable
 from garmin_cli.serializers._common import (
     _coalesce,
     _get_nested,
@@ -25,21 +25,6 @@ from garmin_cli.workout_schema import (
     validate_workout_input,
 )
 
-COLUMNS_CALENDAR_WORKOUT = (
-    "date",
-    "id",
-    "workout_id",
-    "workout_schedule_id",
-    "name",
-    "type",
-    "duration_min",
-    "description",
-    "item_type",
-    "is_race",
-    "primary_event",
-    "event_time",
-    "location",
-)
 COLUMNS_WORKOUT = ("id", "name", "sport", "duration_min", "description")
 COLUMNS_WORKOUT_DETAIL = (
     "id",
@@ -79,8 +64,6 @@ def _normalize_workout_base(workout: dict[str, Any]) -> dict[str, Any]:
 # entries; itemType + the race/event flags let coaching consumers find target
 # races on the calendar.
 _CALENDAR_WORKOUT_TABLE = FieldTable(
-    name="calendar_workout",
-    columns=COLUMNS_CALENDAR_WORKOUT,
     entries=(
         FieldEntry("date", (("date",),)),
         FieldEntry("id", (("workoutId",), ("id",))),
@@ -100,6 +83,7 @@ _CALENDAR_WORKOUT_TABLE = FieldTable(
         FieldEntry("location", (("location",),)),
     ),
 )
+COLUMNS_CALENDAR_WORKOUT = _CALENDAR_WORKOUT_TABLE.columns
 
 
 def serialize_calendar_workout(raw: Any) -> list[dict[str, Any]]:
@@ -359,21 +343,3 @@ def serialize_workout_mutate(raw: Any, status: str) -> list[dict[str, Any]]:
     """Serialize a create/update response with a status field."""
     row = _normalize_workout_base(raw if isinstance(raw, dict) else {})
     return [{**row, "status": status}]
-
-
-# Import-time guard: the calendar serializer is table-backed; the workout
-# summary/detail/mutate serializers stay bespoke (shared _normalize_workout_base
-# plus structural step flattening) and are exempt.
-validate_table_coverage(
-    "workouts",
-    {
-        "COLUMNS_CALENDAR_WORKOUT": COLUMNS_CALENDAR_WORKOUT,
-        "COLUMNS_WORKOUT": COLUMNS_WORKOUT,
-        "COLUMNS_WORKOUT_DETAIL": COLUMNS_WORKOUT_DETAIL,
-        "COLUMNS_WORKOUT_MUTATE": COLUMNS_WORKOUT_MUTATE,
-    },
-    (_CALENDAR_WORKOUT_TABLE,),
-    exempt=frozenset(
-        {"COLUMNS_WORKOUT", "COLUMNS_WORKOUT_DETAIL", "COLUMNS_WORKOUT_MUTATE"}
-    ),
-)

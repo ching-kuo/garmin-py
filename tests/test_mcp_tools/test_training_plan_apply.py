@@ -6,7 +6,9 @@ from typing import Any
 
 import pytest
 
-pytest.importorskip("mcp", reason="mcp extra not installed")
+from tests.helpers import require_mcp
+
+require_mcp()
 
 from garmin_cli.exceptions import GarminCliError  # noqa: E402
 from garmin_cli.mcp_server import create_mcp_server  # noqa: E402
@@ -277,6 +279,24 @@ def test_apply_landed_final_source_delete_is_success(mocker: Any) -> None:
     assert (result["complete"], result["outcome"]) == (True, "complete"), result
     assert fake.by_date() == {"2026-07-10": [10]}
     assert not any(op["action"] == "restore_source" for op in result["operations"])
+
+
+def test_apply_landed_final_delete_after_an_early_vacate_is_success(mocker: Any) -> None:
+    # Tue -> Thu vacates Thu's occupant early (it moves on to Sat), so the last
+    # pending removal is Tue's source even though Thu's sorts after it.
+    fake = _FakeCalendar([("2026-07-07", 10, 1), ("2026-07-09", 20, 2)])
+    fake.unschedule_effects = ["ok", "fail_landed"]
+    fake.install(mocker)
+    plan = _plan()
+    plan["entries"] = [
+        {"entry_id": "tue-thu", "date": "2026-07-09", "workout_id": 10, "move_from_schedule_id": 1, "expected_source_date": "2026-07-07"},
+        {"entry_id": "thu-sat", "date": "2026-07-11", "workout_id": 20, "move_from_schedule_id": 2, "expected_source_date": "2026-07-09"},
+    ]
+
+    result = _apply(plan)
+
+    assert (result["complete"], result["outcome"]) == (True, "complete"), result
+    assert fake.by_date() == {"2026-07-09": [10], "2026-07-11": [20]}
 
 
 def test_apply_does_not_vacate_a_source_that_moved_onto_the_destination(mocker: Any) -> None:

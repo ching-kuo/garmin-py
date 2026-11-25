@@ -54,7 +54,7 @@ ERROR_CODE_TABLE: dict[str, dict[str, str]] = {
     },
 }
 
-UNKNOWN_ERROR_CONTRACT: dict[str, str] = {
+_UNKNOWN_ERROR_CONTRACT: dict[str, str] = {
     "category": "upstream",
     "recovery_hint": "Retry later. If the problem persists, check Garmin service status.",
 }
@@ -62,4 +62,4 @@ UNKNOWN_ERROR_CONTRACT: dict[str, str] = {
 
 def error_contract(error_code: str) -> dict[str, str]:
     """Return a copy of the contract for ``error_code``."""
-    return dict(ERROR_CODE_TABLE.get(error_code, UNKNOWN_ERROR_CONTRACT))
+    return dict(ERROR_CODE_TABLE.get(error_code, _UNKNOWN_ERROR_CONTRACT))

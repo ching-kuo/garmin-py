@@ -10,7 +10,9 @@ from typing import Any
 
 import pytest
 
-pytest.importorskip("mcp", reason="mcp extra not installed")
+from tests.helpers import require_mcp
+
+require_mcp()
 
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError  # noqa: E402
 from mcp_types import CallToolRequestParams  # noqa: E402

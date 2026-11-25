@@ -6,8 +6,8 @@ and endurance/hill scores, plus their COLUMNS_* constants.
 The flat-row serializers (race predictions, endurance score, hill score,
 thresholds) are declared as
 :class:`~garmin_cli.metrics.field_table.FieldTable` instances -- each column's
-wire source(s) and converter live in one entry, and the table constructor keeps
-the entries in lockstep with the published COLUMNS_* order at import time. Two
+wire source(s) and converter live in one entry, and the published COLUMNS_*
+order is derived from the table's entries. Two
 serializers keep bespoke code because they are structural rather than flat:
 :func:`serialize_vo2max` fans one wire item out into one row per sport sub-dict,
 and :func:`serialize_zones` merges multiple flat lactate samples across items
@@ -17,23 +17,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from garmin_cli.metrics import FieldEntry, FieldTable, validate_table_coverage
+from garmin_cli.metrics import FieldEntry, FieldTable
 from garmin_cli.serializers._common import _coalesce, _listify
 from garmin_cli.units import format_pace_seconds, pace_from_speed, parse_flat_lactate
 
-COLUMNS_RACE_PREDICTIONS = ("race_type", "predicted_time_seconds", "distance_meters")
-COLUMNS_PERSONAL_RECORDS = (
-    "type_id",
-    "label",
-    "value",
-    "activity_type",
-    "date",
-    "activity_id",
-    "activity_name",
-)
-COLUMNS_ENDURANCE_SCORE = ("date", "overall_score", "endurance_classification")
-COLUMNS_HILL_SCORE = ("date", "overall_score", "endurance_score", "strength_score")
-COLUMNS_THRESHOLDS = ("sport", "lt_hr_bpm", "lt_pace", "ftp_watts", "weight_kg")
 COLUMNS_VO2MAX = ("date", "vo2max", "sport")
 COLUMNS_ZONES = ("sport", "lt_hr_bpm", "lt_pace")
 
@@ -44,8 +31,6 @@ _VO2MAX_NON_SPORT_KEYS: frozenset[str] = frozenset({"userId", "heatAltitudeAccli
 # --- Declarative field tables ------------------------------------------------
 
 _RACE_PREDICTIONS_TABLE = FieldTable(
-    name="race_predictions",
-    columns=COLUMNS_RACE_PREDICTIONS,
     entries=(
         FieldEntry(
             "race_type",
@@ -66,20 +51,18 @@ _RACE_PREDICTIONS_TABLE = FieldTable(
         ),
     ),
 )
+COLUMNS_RACE_PREDICTIONS = _RACE_PREDICTIONS_TABLE.columns
 
 _ENDURANCE_SCORE_TABLE = FieldTable(
-    name="endurance_score",
-    columns=COLUMNS_ENDURANCE_SCORE,
     entries=(
         FieldEntry("date", (("calendarDate",),)),
         FieldEntry("overall_score", (("overallScore",),)),
         FieldEntry("endurance_classification", (("enduranceClassification",),)),
     ),
 )
+COLUMNS_ENDURANCE_SCORE = _ENDURANCE_SCORE_TABLE.columns
 
 _HILL_SCORE_TABLE = FieldTable(
-    name="hill_score",
-    columns=COLUMNS_HILL_SCORE,
     entries=(
         FieldEntry("date", (("calendarDate",),)),
         FieldEntry("overall_score", (("overallScore",),)),
@@ -87,6 +70,7 @@ _HILL_SCORE_TABLE = FieldTable(
         FieldEntry("strength_score", (("strengthScore",),)),
     ),
 )
+COLUMNS_HILL_SCORE = _HILL_SCORE_TABLE.columns
 
 # Garmin identifies each personal record only by an undocumented integer
 # typeId. Labels for 1-8 were verified against live values (times/distances
@@ -122,8 +106,6 @@ def _date_part(value: Any) -> Any:
 
 
 _PERSONAL_RECORDS_TABLE = FieldTable(
-    name="personal_records",
-    columns=COLUMNS_PERSONAL_RECORDS,
     entries=(
         FieldEntry("type_id", (("typeId",),)),
         FieldEntry("label", (("typeId",),), _pr_label),
@@ -142,11 +124,10 @@ _PERSONAL_RECORDS_TABLE = FieldTable(
         FieldEntry("activity_name", (("activityName",),)),
     ),
 )
+COLUMNS_PERSONAL_RECORDS = _PERSONAL_RECORDS_TABLE.columns
 
 
 _THRESHOLDS_TABLE = FieldTable(
-    name="thresholds",
-    columns=COLUMNS_THRESHOLDS,
     entries=(
         FieldEntry("sport", (("sport",),)),
         FieldEntry("lt_hr_bpm", (("lactateThresholdHeartRate",),)),
@@ -155,6 +136,7 @@ _THRESHOLDS_TABLE = FieldTable(
         FieldEntry("weight_kg", (("weight",),)),
     ),
 )
+COLUMNS_THRESHOLDS = _THRESHOLDS_TABLE.columns
 
 
 # The displayName-scoped race-predictions endpoint returns one flat dict
@@ -279,28 +261,3 @@ def serialize_thresholds(raw: Any) -> list[dict[str, Any]]:
         _THRESHOLDS_TABLE.project(item if isinstance(item, dict) else {})
         for item in items
     ]
-
-
-# Import-time guard: COLUMNS_* must stay in lockstep with the declarative
-# tables. VO2 max (per-sport fan-out) and zones (cross-item lactate merge) are
-# structural and intentionally have no backing table.
-validate_table_coverage(
-    "performance",
-    {
-        "COLUMNS_RACE_PREDICTIONS": COLUMNS_RACE_PREDICTIONS,
-        "COLUMNS_PERSONAL_RECORDS": COLUMNS_PERSONAL_RECORDS,
-        "COLUMNS_ENDURANCE_SCORE": COLUMNS_ENDURANCE_SCORE,
-        "COLUMNS_HILL_SCORE": COLUMNS_HILL_SCORE,
-        "COLUMNS_THRESHOLDS": COLUMNS_THRESHOLDS,
-        "COLUMNS_VO2MAX": COLUMNS_VO2MAX,
-        "COLUMNS_ZONES": COLUMNS_ZONES,
-    },
-    (
-        _RACE_PREDICTIONS_TABLE,
-        _PERSONAL_RECORDS_TABLE,
-        _ENDURANCE_SCORE_TABLE,
-        _HILL_SCORE_TABLE,
-        _THRESHOLDS_TABLE,
-    ),
-    exempt=frozenset({"COLUMNS_VO2MAX", "COLUMNS_ZONES"}),
-)

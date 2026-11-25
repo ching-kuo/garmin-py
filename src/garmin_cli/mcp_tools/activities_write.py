@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shutil
 import stat
 import tempfile
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from mcp.server.mcpserver import MCPServer
 from mcp_types import ToolAnnotations
@@ -36,6 +37,7 @@ from garmin_cli.mcp_tools._shared import (
     _validation_envelope,
 )
 from garmin_cli.mcp_tools._schemas import Envelope
+from garmin_cli.serializers import serialize_activity_upload
 
 _FILE_ROOT_ENV = "GARMIN_MCP_FILE_ROOT"
 _DEFAULT_FILE_ROOT = "~/Downloads/garmin-py"
@@ -105,6 +107,24 @@ def _confine(root: Path, raw: str) -> Path | None:
     if candidate is None or _has_symlink(root, candidate):
         return None
     return candidate
+
+
+def _private_copy(path: Path, directory: Path) -> Path | None:
+    """Copy ``path`` into ``directory`` through one no-follow open, keeping its name.
+
+    The upload then never reopens the user's path by name, so a final-component
+    symlink swapped in after :func:`_confine` is refused (ELOOP), and a FIFO
+    neither blocks (O_NONBLOCK) nor passes the regular-file check. Returns None
+    for anything that is not a regular file.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    with open(os.open(path, flags), "rb") as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+            return None
+        copy = directory / path.name  # Garmin detects the format from the suffix
+        with open(copy, "xb") as target:
+            shutil.copyfileobj(source, target)
+    return copy
 
 
 def _download_target(raw: str, overwrite: bool) -> Path | str:
@@ -244,21 +264,25 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
             outcome="success",
             path_len=len(file_path) if isinstance(file_path, str) else None,
         )
-        with _write_audit(base, _emit_write_log) as audit:
+        # mkdtemp is 0700 and is always removed, copy included.
+        with _write_audit(base, _emit_write_log) as audit, tempfile.TemporaryDirectory(
+            prefix="garmin-upload-"
+        ) as scratch:
             try:
                 path = _confine(_file_root(), file_path) if file_path else None
-                if path is not None and not path.is_file():
-                    path = None
-            except (OSError, RuntimeError, ValueError):  # incl. PermissionError, bad root
-                path = None
-            if path is None:
+                copy = _private_copy(path, Path(scratch)) if path is not None else None
+            except (OSError, RuntimeError, ValueError):  # incl. PermissionError, ELOOP, bad root
+                copy = None
+            if copy is None:
                 # One message for every case so the tool is no path-existence oracle.
                 audit.fail_validation(1)
                 return _validation_envelope([_UPLOAD_UNAVAILABLE])
 
             ensure_authenticated(config)
-            raw = upload_activity(str(path))
-            activity_id, status = _extract_upload_result(raw)
+            raw = upload_activity(str(copy))
+            # The CLI row's "file" key is dropped: the MCP reply never echoes paths.
+            upload = serialize_activity_upload(str(copy), raw)[0]
+            activity_id, status = upload["activity_id"], upload["status"]
             if status == "rejected":
                 audit.rejected(activity_id=activity_id)
             else:
@@ -351,30 +375,3 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
                 "activity_id": activity_id,
                 "type": key_norm,
             }])
-
-
-def _extract_upload_result(raw: Any) -> tuple[Any, str]:
-    """Pull ``(activity_id, status)`` from the variable upload response shape.
-
-    Mirrors the extraction in ``serialize_activity_upload``: Garmin returns
-    HTTP 200 even when it rejects an import, so a ``detailedImportResult`` with
-    failures and no successes is reported as ``rejected``.
-    """
-    if not isinstance(raw, dict):
-        return None, "uploaded"
-    status = "uploaded"
-    activity_id: Any = None
-    detailed = raw.get("detailedImportResult")
-    if isinstance(detailed, dict):
-        successes = detailed.get("successes") or []
-        failures = detailed.get("failures") or []
-        if successes and isinstance(successes[0], dict):
-            activity_id = successes[0].get("internalId")
-        elif failures:
-            status = "rejected"
-    if activity_id is None and status != "rejected":
-        activity_id = raw.get("activityId") or raw.get("activity_id")
-    upstream_status = raw.get("status")
-    if upstream_status:
-        status = str(upstream_status)
-    return activity_id, status

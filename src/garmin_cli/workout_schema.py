@@ -27,9 +27,6 @@ STEP_TYPES: dict[str, int] = {
 END_CONDITIONS: dict[str, int] = {
     "distance": 3,
     "time": 2,
-    "heart.rate": 6,
-    "calories": 4,
-    "power": 5,
     "iterations": 7,
 }
 

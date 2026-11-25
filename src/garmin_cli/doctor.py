@@ -11,14 +11,14 @@ from pathlib import Path
 from typing import Callable
 
 from garmin_cli.auth import probe_session_status
-from garmin_cli.config import CliConfig
+from garmin_cli.config import GARTH_HOME_HINT, CliConfig, garth_home_ignored
 from garmin_cli.error_contracts import error_contract
 from garmin_cli.bearer_token import BEARER_ENV, validate_bearer_token
 from garmin_cli.read_only import READ_ONLY_ENV, READ_ONLY_FALSE, READ_ONLY_TRUE
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.token_store import (
     TOKEN_FILE_NAME,
-    detect_legacy_tokens,
+    expand_garmin_home,
     tokenstore_path,
     validate_garmin_home,
 )
@@ -95,7 +95,7 @@ def check_versions(_config: CliConfig) -> CheckResult:
 
 
 def check_config(config: CliConfig) -> CheckResult:
-    path = Path(os.path.expanduser(config.garth_home))
+    path = expand_garmin_home(config.garth_home)
     shown = _display_path(path)
     try:
         validate_garmin_home(str(path))
@@ -119,8 +119,38 @@ def check_config(config: CliConfig) -> CheckResult:
     return CheckResult("config", True, f"Garmin home resolves to {shown}.")
 
 
+def check_legacy_garth(config: CliConfig) -> CheckResult:
+    """Informational only: point garth-era (pre-3.0) users at GARMIN_HOME."""
+    notes = [GARTH_HOME_HINT] if garth_home_ignored(config.garth_home) else []
+    legacy_home = expand_garmin_home("~/.garth")
+    legacy_token = legacy_home / TOKEN_FILE_NAME
+    try:
+        # lstat: a symlinked ~/.garth or token file is ignored, never followed.
+        if (
+            stat.S_ISDIR(legacy_home.lstat().st_mode)
+            and stat.S_ISREG(legacy_token.lstat().st_mode)
+            and not _same_file(legacy_token, tokenstore_path(config.garth_home))
+        ):
+            notes.append(
+                f"~/.garth/{TOKEN_FILE_NAME} is not used (GARMIN_HOME points elsewhere); "
+                "set GARMIN_HOME=~/.garth to use it."
+            )
+    except FileNotFoundError:
+        pass
+    except OSError:
+        notes.append("Could not inspect ~/.garth.")
+    return CheckResult("legacy_garth", True, " ".join(notes) or "No legacy garth settings found.")
+
+
+def _same_file(first: Path, second: Path) -> bool:
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return False
+
+
 def check_token_store(config: CliConfig) -> CheckResult:
-    path = Path(os.path.expanduser(config.garth_home))
+    path = expand_garmin_home(config.garth_home)
     try:
         result = _check_token_store(path)
         if result.error_code == "AUTH_MISSING" and _has_env_credentials(config):
@@ -140,12 +170,6 @@ def _check_token_store(path: Path) -> CheckResult:
     try:
         token_stat = token_file.lstat()  # lstat: a dangling symlink is reported, not "missing"
     except FileNotFoundError:
-        if detect_legacy_tokens(str(path)):
-            return _failure(
-                "token_store",
-                f"Legacy Garmin session files were found in {shown}; log in again.",
-                "AUTH_MISSING",
-            )
         return _failure(
             "token_store",
             f"No token store was found in {shown}.",
@@ -282,6 +306,7 @@ _CHECKS: tuple[Callable[[CliConfig], CheckResult], ...] = (
     check_versions,
     check_config,
     check_token_store,
+    check_legacy_garth,
     check_mcp_extra,
     check_session,
     check_write_surface,

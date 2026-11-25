@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from garmin_cli.metrics import FieldEntry, FieldTable, validate_table_coverage
+from garmin_cli.metrics import FieldEntry, FieldTable
 from garmin_cli.serializers._common import (
     _get_nested,
     _hours,
@@ -26,66 +26,14 @@ from garmin_cli.serializers._common import (
     _minutes,
 )
 
-COLUMNS_SLEEP = (
-    "date",
-    "bedtime",
-    "wake_time",
-    "duration_hours",
-    "deep_min",
-    "light_min",
-    "rem_min",
-    "awake_min",
-    "score",
-)
-COLUMNS_HRV = ("date", "weekly_avg", "last_night", "status")
-COLUMNS_WEIGHT = ("date", "weight_kg", "bmi", "body_fat_pct")
 COLUMNS_BODY_BATTERY = ("date", "start_level", "end_level", "max_level")
 COLUMNS_STRESS = ("date", "avg_stress", "max_stress")
-COLUMNS_SPO2 = ("date", "avg_spo2", "lowest_spo2")
-COLUMNS_RESTING_HR = ("date", "resting_hr")
-COLUMNS_READINESS = ("date", "score", "level")
-COLUMNS_STATUS = (
-    "date",
-    "training_status",
-    "acute_load",
-    "chronic_load",
-    "acwr",
-    "acwr_status",
-    "load_tunnel_min",
-    "load_tunnel_max",
-    "monthly_load_aerobic_low",
-    "monthly_load_aerobic_high",
-    "monthly_load_anaerobic",
-    "aerobic_low_target_min",
-    "aerobic_low_target_max",
-    "aerobic_high_target_min",
-    "aerobic_high_target_max",
-    "anaerobic_target_min",
-    "anaerobic_target_max",
-    "load_balance_status",
-)
-COLUMNS_DAILY_SUMMARY = (
-    "date",
-    "total_steps",
-    "distance_km",
-    "active_kilocalories",
-    "floors_ascended",
-    "floors_descended",
-    "moderate_intensity_minutes",
-    "vigorous_intensity_minutes",
-    "resting_heart_rate",
-)
-COLUMNS_STEPS = ("date", "total_steps", "total_distance", "step_goal")
-COLUMNS_INTENSITY_MINUTES = ("date", "moderate_value", "vigorous_value", "weekly_goal")
 
 
 # --- Declarative field tables ------------------------------------------------
-# Each table pairs a COLUMNS_* constant with its per-column resolver. The
-# FieldTable constructor asserts the two stay in lockstep at import time.
+# Each COLUMNS_* constant is derived from its table's entry order.
 
 _SLEEP_TABLE = FieldTable(
-    name="sleep",
-    columns=COLUMNS_SLEEP,
     entries=(
         FieldEntry("date", (("calendarDate",),)),
         FieldEntry("bedtime", (("sleepStartTimestampLocal",),), _local_iso),
@@ -98,10 +46,9 @@ _SLEEP_TABLE = FieldTable(
         FieldEntry("score", (("sleepScores", "overall", "value"),)),
     ),
 )
+COLUMNS_SLEEP = _SLEEP_TABLE.columns
 
 _HRV_TABLE = FieldTable(
-    name="hrv",
-    columns=COLUMNS_HRV,
     entries=(
         FieldEntry("date", (("calendarDate",),)),
         FieldEntry("weekly_avg", (("weeklyAvg",),)),
@@ -110,10 +57,9 @@ _HRV_TABLE = FieldTable(
         FieldEntry("status", (("status",),)),
     ),
 )
+COLUMNS_HRV = _HRV_TABLE.columns
 
 _WEIGHT_TABLE = FieldTable(
-    name="weight",
-    columns=COLUMNS_WEIGHT,
     entries=(
         FieldEntry("date", (("calendarDate",),)),
         FieldEntry("weight_kg", (("weight",),), lambda grams: grams / 1000),
@@ -121,20 +67,18 @@ _WEIGHT_TABLE = FieldTable(
         FieldEntry("body_fat_pct", (("bodyFat",),)),
     ),
 )
+COLUMNS_WEIGHT = _WEIGHT_TABLE.columns
 
 _SPO2_TABLE = FieldTable(
-    name="spo2",
-    columns=COLUMNS_SPO2,
     entries=(
         FieldEntry("date", (("dateTime",),)),
         FieldEntry("avg_spo2", (("averageSpO2",),)),
         FieldEntry("lowest_spo2", (("lowestSpO2",),)),
     ),
 )
+COLUMNS_SPO2 = _SPO2_TABLE.columns
 
 _RESTING_HR_TABLE = FieldTable(
-    name="resting_hr",
-    columns=COLUMNS_RESTING_HR,
     entries=(
         FieldEntry("date", (("calendarDate",),)),
         # restingHeartRate is the displayName-scoped dailyHeartRate response
@@ -143,16 +87,16 @@ _RESTING_HR_TABLE = FieldTable(
         FieldEntry("resting_hr", (("restingHeartRate",), ("restingHeartRateValue",))),
     ),
 )
+COLUMNS_RESTING_HR = _RESTING_HR_TABLE.columns
 
 _READINESS_TABLE = FieldTable(
-    name="readiness",
-    columns=COLUMNS_READINESS,
     entries=(
         FieldEntry("date", (("calendarDate",),)),
         FieldEntry("score", (("score",),)),
         FieldEntry("level", (("level",),)),
     ),
 )
+COLUMNS_READINESS = _READINESS_TABLE.columns
 
 # Projects the per-device dict merged by serialize_training_status: load-
 # balance entry keys, status entry keys, and the flattened acuteTrainingLoadDTO
@@ -160,8 +104,6 @@ _READINESS_TABLE = FieldTable(
 # Target ranges are Garmin's 4-week load-focus numbers; the load tunnel is the
 # chronic-load band Garmin considers productive.
 _STATUS_TABLE = FieldTable(
-    name="training_status",
-    columns=COLUMNS_STATUS,
     entries=(
         FieldEntry("date", (("calendarDate",),)),
         FieldEntry("training_status", (("trainingStatusFeedbackPhrase",),)),
@@ -183,10 +125,9 @@ _STATUS_TABLE = FieldTable(
         FieldEntry("load_balance_status", (("trainingBalanceFeedbackPhrase",),)),
     ),
 )
+COLUMNS_STATUS = _STATUS_TABLE.columns
 
 _DAILY_SUMMARY_TABLE = FieldTable(
-    name="daily_summary",
-    columns=COLUMNS_DAILY_SUMMARY,
     entries=(
         # Nested v2 ``dailysummaries`` shape (verified live 2026-11-09).
         FieldEntry("date", (("calendarDate",),)),
@@ -200,10 +141,9 @@ _DAILY_SUMMARY_TABLE = FieldTable(
         FieldEntry("resting_heart_rate", (("heartRate", "restingValue"),)),
     ),
 )
+COLUMNS_DAILY_SUMMARY = _DAILY_SUMMARY_TABLE.columns
 
 _STEPS_TABLE = FieldTable(
-    name="steps",
-    columns=COLUMNS_STEPS,
     entries=(
         FieldEntry("date", (("calendarDate",),)),
         FieldEntry("total_steps", (("totalSteps",),)),
@@ -211,10 +151,9 @@ _STEPS_TABLE = FieldTable(
         FieldEntry("step_goal", (("stepGoal",),)),
     ),
 )
+COLUMNS_STEPS = _STEPS_TABLE.columns
 
 _INTENSITY_MINUTES_TABLE = FieldTable(
-    name="intensity_minutes",
-    columns=COLUMNS_INTENSITY_MINUTES,
     entries=(
         FieldEntry("date", (("calendarDate",),)),
         FieldEntry("moderate_value", (("moderateValue",),)),
@@ -222,6 +161,7 @@ _INTENSITY_MINUTES_TABLE = FieldTable(
         FieldEntry("weekly_goal", (("weeklyGoal",),)),
     ),
 )
+COLUMNS_INTENSITY_MINUTES = _INTENSITY_MINUTES_TABLE.columns
 
 
 def serialize_sleep(raw: Any) -> list[dict[str, Any]]:
@@ -385,38 +325,3 @@ def serialize_steps(raw: Any) -> list[dict[str, Any]]:
 
 def serialize_intensity_minutes(raw: Any) -> list[dict[str, Any]]:
     return _INTENSITY_MINUTES_TABLE.project_all(_listify(raw))
-
-
-# Import-time guard: every published COLUMNS_* constant must be backed by a
-# declarative FieldTable, except the two structural serializers (body battery /
-# stress) whose ``date`` is read out of a positional samples array.
-validate_table_coverage(
-    "health",
-    {
-        "COLUMNS_SLEEP": COLUMNS_SLEEP,
-        "COLUMNS_HRV": COLUMNS_HRV,
-        "COLUMNS_WEIGHT": COLUMNS_WEIGHT,
-        "COLUMNS_BODY_BATTERY": COLUMNS_BODY_BATTERY,
-        "COLUMNS_STRESS": COLUMNS_STRESS,
-        "COLUMNS_SPO2": COLUMNS_SPO2,
-        "COLUMNS_RESTING_HR": COLUMNS_RESTING_HR,
-        "COLUMNS_READINESS": COLUMNS_READINESS,
-        "COLUMNS_STATUS": COLUMNS_STATUS,
-        "COLUMNS_DAILY_SUMMARY": COLUMNS_DAILY_SUMMARY,
-        "COLUMNS_STEPS": COLUMNS_STEPS,
-        "COLUMNS_INTENSITY_MINUTES": COLUMNS_INTENSITY_MINUTES,
-    },
-    (
-        _SLEEP_TABLE,
-        _HRV_TABLE,
-        _WEIGHT_TABLE,
-        _SPO2_TABLE,
-        _RESTING_HR_TABLE,
-        _READINESS_TABLE,
-        _STATUS_TABLE,
-        _DAILY_SUMMARY_TABLE,
-        _STEPS_TABLE,
-        _INTENSITY_MINUTES_TABLE,
-    ),
-    exempt=frozenset({"COLUMNS_BODY_BATTERY", "COLUMNS_STRESS"}),
-)

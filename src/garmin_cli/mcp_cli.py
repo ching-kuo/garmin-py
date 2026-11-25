@@ -36,14 +36,12 @@ def _build_mcp_run_kwargs(
     transport: str,
     host: str | None,
     port: int | None,
-    mount_path: str | None,
     sse_path: str | None,
     message_path: str | None,
     streamable_http_path: str | None,
     stateless_http: bool,
     json_response: bool,
 ) -> dict[str, Any]:
-    mount_path = _validate_http_path_option(mount_path, "--mount-path")
     sse_path = _validate_http_path_option(sse_path, "--sse-path")
     message_path = _validate_http_path_option(message_path, "--message-path")
     streamable_http_path = _validate_http_path_option(
@@ -56,7 +54,6 @@ def _build_mcp_run_kwargs(
             {
                 "--host": host,
                 "--port": port,
-                "--mount-path": mount_path,
                 "--sse-path": sse_path,
                 "--message-path": message_path,
                 "--streamable-http-path": streamable_http_path,
@@ -66,12 +63,6 @@ def _build_mcp_run_kwargs(
             message="HTTP-only options cannot be used with stdio transport",
         )
         return {"transport": "stdio"}
-
-    if mount_path is not None:
-        raise click.UsageError(
-            "--mount-path is not supported by MCP v2 direct execution. "
-            "Mount the ASGI app yourself if you need a path prefix."
-        )
 
     if transport == "sse":
         _reject_invalid_options(
@@ -201,12 +192,6 @@ def _resolve_mcp_auth(host: str, port: int | None) -> tuple[Any, Any]:
     help="Bind port for HTTP transports.",
 )
 @click.option(
-    "--mount-path",
-    type=str,
-    default=None,
-    help="Deprecated in MCP v2 direct execution; rejected if provided.",
-)
-@click.option(
     "--sse-path",
     type=str,
     default=None,
@@ -246,7 +231,6 @@ def mcp_server_cmd(
     transport: str,
     host: str | None,
     port: int | None,
-    mount_path: str | None,
     sse_path: str | None,
     message_path: str | None,
     streamable_http_path: str | None,
@@ -274,7 +258,6 @@ def mcp_server_cmd(
         transport=transport,
         host=host,
         port=port,
-        mount_path=mount_path,
         sse_path=sse_path,
         message_path=message_path,
         streamable_http_path=streamable_http_path,

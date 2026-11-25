@@ -46,7 +46,7 @@ garmin-cli --version
 
 ## Authentication
 
-`garmin-cli` authenticates via the maintained [`python-garminconnect`](https://github.com/cyberjunky/python-garminconnect) backend. The primary session-home surface is now `GARMIN_HOME` / `--garmin-home`; `GARTH_HOME` / `--garth-home` remains as a deprecated compatibility alias.
+`garmin-cli` authenticates via the maintained [`python-garminconnect`](https://github.com/cyberjunky/python-garminconnect) backend. Set the session home with `GARMIN_HOME` or `--garmin-home`. The old `GARTH_HOME` / `--garth-home` aliases were removed in 3.0.
 
 ### Interactive login (recommended)
 
@@ -79,16 +79,16 @@ garmin-cli --json login status
 # {"ok": true, "command": "login status", "count": 1, "data": [{"authenticated": true, "garmin_home": "..."}]}
 ```
 
-`login status` exits 0 with `"authenticated": false` when no session is saved or Garmin rejects it, and exits 1 with `RATE_LIMITED`, `SERVER_ERROR`, or `NETWORK_ERROR` when Garmin throttles, fails, or is unreachable (or `AUTH_FAILED` for an unusable Garmin home path). MCP `login_status` reports those three codes in optional `error_code` / `detail` fields. `login status` never repairs permissions or migrates legacy tokens. Status checks (`login status`, `doctor`, MCP `login_status`) may still refresh the session tokens on disk, as any authenticated request can.
+`login status` exits 0 with `"authenticated": false` when no session is saved or Garmin rejects it, and exits 1 with `RATE_LIMITED`, `SERVER_ERROR`, or `NETWORK_ERROR` when Garmin throttles, fails, or is unreachable (or `AUTH_FAILED` for an unusable Garmin home path). MCP `login_status` reports those three codes in optional `error_code` / `detail` fields. `login status` never repairs permissions. Status checks (`login status`, `doctor`, MCP `login_status`) may still refresh the session tokens on disk, as any authenticated request can.
 
-Log out by deleting the saved token file (`garmin_tokens.json` in the Garmin home). Symlinked token files and Garmin homes reached through a symlink are refused. For the default home it also deletes a legacy `~/.garth/garmin_tokens.json`, which would otherwise be migrated back on the next command:
+Log out by deleting the saved token file (`garmin_tokens.json` in the selected Garmin home; a `~/.garth` copy is left alone). Symlinked token files and Garmin homes reached through a symlink are refused:
 
 ```bash
 garmin-cli --json login logout
-# {"ok": true, "command": "login logout", "count": 1, "data": [{"logged_out": true, "legacy_token_removed": false}]}
+# {"ok": true, "command": "login logout", "count": 1, "data": [{"logged_out": true}]}
 ```
 
-`logged_out` is `false`, still with exit code 0, when there was nothing to delete. The plain-text output lists every file it deleted. A running MCP server keeps the session it already loaded and may save refreshed tokens again after `login logout`, so stop the server before logging out. A legacy `~/.garth` that is a symlink or not a directory is left alone (migration ignores it too).
+`logged_out` is `false`, still with exit code 0, when there was nothing to delete. The plain-text output names the deleted file. A running MCP server keeps the session it already loaded and may save refreshed tokens again after `login logout`, so stop the server before logging out.
 
 ### Environment variables (alternative)
 
@@ -119,7 +119,7 @@ garmin-cli --garmin-home /path/to/session health sleep --days 1
 
 The default session directory is `~/.garminconnect`. It is created with `0o700` permissions. A home reached through a symlink is rejected (root-owned system links such as macOS `/tmp` are allowed), and `GARMIN_HOME` must be a directory: a `.json` file path fails with `INVALID_INPUT`. Do not share this directory.
 
-New sessions are stored as `garmin_tokens.json` inside `GARMIN_HOME`. If you still have an existing `~/.garth/garmin_tokens.json`, the CLI will copy it into the new default home on first use (created 0600 from the start; a symlinked `~/.garth` or legacy token file is not copied). `GARTH_HOME` / `--garth-home` still work as deprecated aliases when you need to keep an older path explicitly.
+Sessions are stored as `garmin_tokens.json` inside `GARMIN_HOME`. Since 3.0 a session saved only under the old `~/.garth` is no longer copied over: commands fail with `AUTH_MISSING` until you run `garmin-cli login`. `GARMIN_HOME=~/.garth` works only when that folder holds a `garmin_tokens.json`; old garth OAuth files (`oauth1_token.json`, `oauth2_token.json`) need a fresh login. `doctor` notes a leftover `GARTH_HOME` or an unused `~/.garth/garmin_tokens.json` without failing, and while the default home is in use with `GARTH_HOME` set, `AUTH_MISSING` messages add "GARTH_HOME is no longer read; set GARMIN_HOME."
 
 ## Troubleshooting
 
@@ -130,7 +130,7 @@ garmin-cli doctor
 garmin-cli doctor --fast --format json  # skip the live session probe
 ```
 
-The checks cover Python, the installed garmin-py and garminconnect versions, configuration, token-store layout and permissions (0700 directory; `garmin_tokens.json` a regular file, not a symlink, with mode 600), the optional MCP install (mcp >=2.2.0,<3), the authenticated session, and MCP write-surface binding. With `GARMIN_EMAIL` and `GARMIN_PASSWORD` set, a missing Garmin home, token store, or session passes (the credentials are not verified until a command signs in). Each failed check carries a specific recovery hint (for example the permission mode to set). Paths are home-relative where possible, and credentials are never included. MCP clients can run the same non-interactive checks with the read-only `server_doctor` tool.
+The checks cover Python, the installed garmin-py and garminconnect versions, configuration, token-store layout and permissions (0700 directory; `garmin_tokens.json` a regular file, not a symlink, with mode 600), leftover pre-3.0 `GARTH_HOME` / `~/.garth` settings (informational only), the optional MCP install (mcp >=2.2.0,<3), the authenticated session, and MCP write-surface binding. With `GARMIN_EMAIL` and `GARMIN_PASSWORD` set, a missing Garmin home, token store, or session passes (the credentials are not verified until a command signs in). Each failed check carries a specific recovery hint (for example the permission mode to set). Paths are home-relative where possible, and credentials are never included. MCP clients can run the same non-interactive checks with the read-only `server_doctor` tool.
 
 ## Output Formats
 
@@ -440,7 +440,7 @@ Each MCP write tool call (including `training_plan_apply`, `training_plan_resche
 
 ### File access
 
-The MCP `activity_download` and `activity_upload` tools only touch files inside one directory: `GARMIN_MCP_FILE_ROOT` (default `~/Downloads/garmin-py`, created with 0700 permissions on the first download; a custom value must be an absolute path, `~` allowed). Relative paths are taken under that root; paths that escape it, contain `..`, or pass through any symlink (file or directory, even one pointing inside the root) are rejected, and every unavailable upload path returns the same `File not available under GARMIN_MCP_FILE_ROOT` error. `activity_download` is annotated destructive because `overwrite=true` replaces a file. The CLI `activity download` / `activity upload` commands are not confined. The root and every directory under it must not be writable by untrusted users: the checks inspect intermediate directories before the download starts and before an upload reopens the file by name, so someone who can swap one for a symlink in between could redirect a download's write or an upload's read.
+The MCP `activity_download` and `activity_upload` tools only touch files inside one directory: `GARMIN_MCP_FILE_ROOT` (default `~/Downloads/garmin-py`, created with 0700 permissions on the first download; a custom value must be an absolute path, `~` allowed). Relative paths are taken under that root; paths that escape it, contain `..`, or pass through any symlink (file or directory, even one pointing inside the root) are rejected, and every unavailable upload path returns the same `File not available under GARMIN_MCP_FILE_ROOT` error. `activity_download` is annotated destructive because `overwrite=true` replaces a file. The CLI `activity download` / `activity upload` commands are not confined. An upload opens the file once without following a final symlink, requires a regular file, and sends Garmin a private copy (deleted afterwards), so the upload never reopens the path by name. The root and every directory under it must still not be writable by untrusted users: the checks inspect intermediate directories before the download starts and before the upload opens the file, so someone who can swap a directory for a symlink in between could redirect a download's write or an upload's read.
 
 ### Installation
 
@@ -567,7 +567,7 @@ To run MCP server tests, also install the mcp extra:
 pip install -e ".[dev,mcp]"
 ```
 
-E2E tests make real Garmin Connect API calls. They require a valid `garmin_tokens.json` session in `~/.garminconnect` (or `GARMIN_HOME`; `GARTH_HOME` still works as an alias). Set `E2E_RATE_LIMIT_SECONDS` (default: 5) to adjust the inter-request delay.
+E2E tests make real Garmin Connect API calls. They require a valid `garmin_tokens.json` session in `~/.garminconnect` (or `GARMIN_HOME`). Set `E2E_RATE_LIMIT_SECONDS` (default: 5) to adjust the inter-request delay.
 
 ### Contract tests and fixtures
 

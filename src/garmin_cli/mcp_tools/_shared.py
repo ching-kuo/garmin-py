@@ -19,7 +19,7 @@ from pydantic import Field
 
 from garmin_cli.auth import ensure_authenticated
 from garmin_cli.config import CliConfig
-from garmin_cli.date_utils import today
+from garmin_cli.date_utils import _MAX_DAYS, today
 from garmin_cli.endpoints._base import (
     _bounded_thread_pool,
     _cancel_futures_on_error,
@@ -30,7 +30,7 @@ from garmin_cli.exceptions import GarminCliError
 from garmin_cli.mcp_tools._schemas import Envelope
 from garmin_cli.workout_schema import is_positive_id
 
-_MAX_DAYS = 90
+_MAX_LIMIT = 100
 
 # Tool id parameter type: strict, so JSON true, 1.0 and "1" fail schema
 # validation instead of being coerced to 1 and reaching a (destructive) handler.
@@ -102,8 +102,8 @@ def _validate_positive_id(value: int, name: str) -> int:
 
 
 def _validate_limit(value: int) -> int:
-    if value < 1 or value > 100:
-        raise ToolError(f"limit must be between 1 and 100, got {value}")
+    if value < 1 or value > _MAX_LIMIT:
+        raise ToolError(f"limit must be between 1 and {_MAX_LIMIT}, got {value}")
     return value
 
 

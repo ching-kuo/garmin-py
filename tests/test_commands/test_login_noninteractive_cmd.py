@@ -176,7 +176,7 @@ def test_logout_deletes_token_file(tmp_path: Path) -> None:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["command"] == "login logout"
-    assert payload["data"] == [{"logged_out": True, "legacy_token_removed": False}]
+    assert payload["data"] == [{"logged_out": True}]
     assert not (home / "garmin_tokens.json").exists()
 
 
@@ -184,17 +184,14 @@ def test_logout_with_nothing_to_delete_exits_zero(tmp_path: Path) -> None:
     result = _invoke(tmp_path, ["--json", "login", "logout"])
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["data"] == [
-        {"logged_out": False, "legacy_token_removed": False}
-    ]
+    assert json.loads(result.stdout)["data"] == [{"logged_out": False}]
 
 
-def test_logout_default_home_also_removes_legacy_token(
+def test_logout_default_home_leaves_legacy_garth_token_alone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("GARMIN_HOME", raising=False)
-    monkeypatch.delenv("GARTH_HOME", raising=False)
     for name in (".garminconnect", ".garth"):
         (tmp_path / name).mkdir()
         (tmp_path / name / "garmin_tokens.json").write_text("{}")
@@ -202,44 +199,20 @@ def test_logout_default_home_also_removes_legacy_token(
     result = CliRunner(mix_stderr=False).invoke(cli, ["--json", "login", "logout"])
 
     assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout)["data"] == [
-        {"logged_out": True, "legacy_token_removed": True}
-    ]
-    assert not (tmp_path / ".garth" / "garmin_tokens.json").exists()
+    assert json.loads(result.stdout)["data"] == [{"logged_out": True}]
+    assert (tmp_path / ".garth" / "garmin_tokens.json").exists()
     assert not (tmp_path / ".garminconnect" / "garmin_tokens.json").exists()
 
 
-def test_logout_text_names_every_deleted_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("GARMIN_HOME", raising=False)
-    monkeypatch.delenv("GARTH_HOME", raising=False)
-    for name in (".garminconnect", ".garth"):
-        (tmp_path / name).mkdir()
-        (tmp_path / name / "garmin_tokens.json").write_text("{}")
+def test_logout_text_names_the_deleted_file(tmp_path: Path) -> None:
+    home = tmp_path / "garth"
+    home.mkdir(mode=0o700)
+    (home / "garmin_tokens.json").write_text("{}")
 
-    result = CliRunner(mix_stderr=False).invoke(cli, ["login", "logout"])
+    result = _invoke(tmp_path, ["login", "logout"])
 
     assert result.exit_code == 0
-    assert str(tmp_path / ".garminconnect" / "garmin_tokens.json") in result.stdout
-    assert str(tmp_path / ".garth" / "garmin_tokens.json") in result.stdout
-
-
-def test_logout_ignores_legacy_home_that_is_not_a_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("GARMIN_HOME", raising=False)
-    monkeypatch.delenv("GARTH_HOME", raising=False)
-    (tmp_path / ".garth").write_text("a file, not a directory")
-
-    result = CliRunner(mix_stderr=False).invoke(cli, ["--json", "login", "logout"])
-
-    assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout)["data"] == [
-        {"logged_out": False, "legacy_token_removed": False}
-    ]
+    assert str(home / "garmin_tokens.json") in result.stdout
 
 
 @pytest.mark.parametrize("trailing_slash", ["", "/"])

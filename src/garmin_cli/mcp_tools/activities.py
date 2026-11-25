@@ -61,11 +61,13 @@ def _validate_offset(value: int) -> int:
 # the doubled MCP payload (text content + structuredContent) stays under
 # typical client tool-result token caps.
 _AUTO_CELL_BUDGET = 2400
+_MAX_SAMPLES = 5000
+_LAPS_ROW_CAP = 100
 
 
 def _validate_max_samples(value: int) -> int:
-    if value != 0 and (value < 100 or value > 5000):
-        raise ToolError(f"max_samples must be between 100 and 5000 (or 0 for auto), got {value}")
+    if value != 0 and (value < 100 or value > _MAX_SAMPLES):
+        raise ToolError(f"max_samples must be between 100 and {_MAX_SAMPLES} (or 0 for auto), got {value}")
     return value
 
 
@@ -155,7 +157,7 @@ def register_activity_tools(mcp: MCPServer, config: CliConfig) -> None:
             config,
             lambda: _envelope(
                 fetch_laps_for_activity(get_activity(activity_id), activity_id)[0],
-                cap=100,
+                cap=_LAPS_ROW_CAP,
                 offset=offset,
             ),
         )

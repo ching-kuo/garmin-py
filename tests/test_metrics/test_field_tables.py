@@ -2,9 +2,8 @@
 
 The existing ``tests/test_serializers.py`` is the byte-identical regression net
 for serializer *output*; these tests exercise the new
-:mod:`garmin_cli.metrics.field_table` primitives directly and assert the
-import-time consistency guards that protect the migrated health / performance /
-device serializers from COLUMNS_*-vs-table drift.
+:mod:`garmin_cli.metrics.field_table` primitives directly and check that
+``FieldTable.columns`` (and so every derived ``COLUMNS_*``) follows entry order.
 """
 from __future__ import annotations
 
@@ -12,13 +11,8 @@ from typing import Any
 
 import pytest
 
-from garmin_cli.metrics import (
-    FieldEntry,
-    FieldTable,
-    project_row,
-    resolve_field,
-    validate_table_coverage,
-)
+from garmin_cli.metrics import FieldEntry, FieldTable
+from garmin_cli.metrics.field_table import project_row, resolve_field
 
 
 # ---------------------------------------------------------------------------
@@ -99,8 +93,6 @@ class TestProjectRow:
 
     def test_table_project_and_project_all(self) -> None:
         table = FieldTable(
-            name="t",
-            columns=("date", "v"),
             entries=(
                 FieldEntry("date", (("calendarDate",),)),
                 FieldEntry("v", (("value",),)),
@@ -113,131 +105,15 @@ class TestProjectRow:
 
     def test_empty_item_yields_all_none_row(self) -> None:
         table = FieldTable(
-            name="t",
-            columns=("a", "b"),
             entries=(FieldEntry("a", (("a",),)), FieldEntry("b", (("b",),))),
         )
         assert table.project({}) == {"a": None, "b": None}
 
-
-# ---------------------------------------------------------------------------
-# FieldTable construction invariants
-# ---------------------------------------------------------------------------
-
-
-class TestFieldTableConstruction:
+    def test_columns_derive_from_entry_order(self) -> None:
+        table = FieldTable(entries=(FieldEntry("z", (("z",),)), FieldEntry("a", (("a",),))))
+        assert table.columns == ("z", "a")
 
     def test_is_frozen(self) -> None:
-        table = FieldTable(
-            name="t", columns=("a",), entries=(FieldEntry("a", (("a",),)),)
-        )
+        table = FieldTable(entries=(FieldEntry("a", (("a",),)),))
         with pytest.raises((AttributeError, Exception)):
-            table.name = "other"  # type: ignore[misc]
-
-    def test_entry_order_must_match_columns(self) -> None:
-        with pytest.raises(RuntimeError, match="drift"):
-            FieldTable(
-                name="t",
-                columns=("a", "b"),
-                entries=(FieldEntry("b", (("b",),)), FieldEntry("a", (("a",),))),
-            )
-
-    def test_missing_entry_for_column_raises(self) -> None:
-        with pytest.raises(RuntimeError, match="drift"):
-            FieldTable(
-                name="t", columns=("a", "b"), entries=(FieldEntry("a", (("a",),)),)
-            )
-
-    def test_extra_entry_not_in_columns_raises(self) -> None:
-        with pytest.raises(RuntimeError, match="drift"):
-            FieldTable(
-                name="t",
-                columns=("a",),
-                entries=(FieldEntry("a", (("a",),)), FieldEntry("b", (("b",),))),
-            )
-
-
-# ---------------------------------------------------------------------------
-# validate_table_coverage (cross-domain analogue of _validate_registry_coverage)
-# ---------------------------------------------------------------------------
-
-
-def _table(name: str, columns: tuple[str, ...]) -> FieldTable:
-    return FieldTable(
-        name=name,
-        columns=columns,
-        entries=tuple(FieldEntry(c, ((c,),)) for c in columns),
-    )
-
-
-class TestValidateTableCoverage:
-
-    def test_passes_when_every_constant_backed(self) -> None:
-        t = _table("x", ("a", "b"))
-        validate_table_coverage("demo", {"COLUMNS_X": ("a", "b")}, (t,))
-
-    def test_raises_when_constant_unbacked(self) -> None:
-        t = _table("x", ("a", "b"))
-        with pytest.raises(RuntimeError, match="no backing"):
-            validate_table_coverage(
-                "demo", {"COLUMNS_X": ("a", "b"), "COLUMNS_Y": ("z",)}, (t,)
-            )
-
-    def test_exempt_constant_is_skipped(self) -> None:
-        t = _table("x", ("a", "b"))
-        validate_table_coverage(
-            "demo",
-            {"COLUMNS_X": ("a", "b"), "COLUMNS_STRUCTURAL": ("z",)},
-            (t,),
-            exempt=frozenset({"COLUMNS_STRUCTURAL"}),
-        )
-
-    def test_domain_name_in_error(self) -> None:
-        with pytest.raises(RuntimeError, match="mydomain"):
-            validate_table_coverage("mydomain", {"COLUMNS_Y": ("z",)}, ())
-
-
-# ---------------------------------------------------------------------------
-# Adoption check: the live serializer modules' tables stay consistent.
-# Importing the modules already runs validate_table_coverage at import time;
-# this re-asserts each declared table is self-consistent for defence in depth.
-# ---------------------------------------------------------------------------
-
-
-class TestDomainTablesAreConsistent:
-
-    def test_health_tables_match_columns(self) -> None:
-        from garmin_cli.serializers import health
-
-        pairs = [
-            (health._SLEEP_TABLE, health.COLUMNS_SLEEP),
-            (health._HRV_TABLE, health.COLUMNS_HRV),
-            (health._WEIGHT_TABLE, health.COLUMNS_WEIGHT),
-            (health._SPO2_TABLE, health.COLUMNS_SPO2),
-            (health._RESTING_HR_TABLE, health.COLUMNS_RESTING_HR),
-            (health._READINESS_TABLE, health.COLUMNS_READINESS),
-            (health._STATUS_TABLE, health.COLUMNS_STATUS),
-            (health._DAILY_SUMMARY_TABLE, health.COLUMNS_DAILY_SUMMARY),
-            (health._STEPS_TABLE, health.COLUMNS_STEPS),
-            (health._INTENSITY_MINUTES_TABLE, health.COLUMNS_INTENSITY_MINUTES),
-        ]
-        for table, columns in pairs:
-            assert table.columns == columns
-            assert tuple(e.key for e in table.entries) == columns
-
-    def test_performance_tables_match_columns(self) -> None:
-        from garmin_cli.serializers import performance
-
-        pairs = [
-            (performance._RACE_PREDICTIONS_TABLE, performance.COLUMNS_RACE_PREDICTIONS),
-            (performance._ENDURANCE_SCORE_TABLE, performance.COLUMNS_ENDURANCE_SCORE),
-            (performance._HILL_SCORE_TABLE, performance.COLUMNS_HILL_SCORE),
-            (performance._THRESHOLDS_TABLE, performance.COLUMNS_THRESHOLDS),
-        ]
-        for table, columns in pairs:
-            assert table.columns == columns
-
-    def test_device_table_matches_columns(self) -> None:
-        from garmin_cli.serializers import devices
-
-        assert devices._DEVICE_TABLE.columns == devices.COLUMNS_DEVICE
+            table.entries = ()  # type: ignore[misc]

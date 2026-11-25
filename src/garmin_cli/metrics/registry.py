@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any, Callable, Mapping
 
 from garmin_cli.units import to_km as _to_km
 from garmin_cli.units import to_kmh as _to_kmh
@@ -407,14 +407,3 @@ _ENTRIES: tuple[MetricEntry, ...] = (
 
 
 REGISTRY: Mapping[str, MetricEntry] = {entry.key: entry for entry in _ENTRIES}
-
-
-def for_sport(type_key: str | None) -> Iterable[MetricEntry]:
-    """Yield entries applicable to the given sport ``typeKey``.
-
-    Entries with ``sports=None`` are universal and always yielded. When
-    ``type_key`` is None or unknown, only universal entries are yielded.
-    """
-    for entry in _ENTRIES:
-        if entry.sports is None or (type_key is not None and type_key in entry.sports):
-            yield entry

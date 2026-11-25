@@ -351,6 +351,102 @@ def test_new_health_range_commands(
     assert parsed["data"] == [expected]
 
 
+# Range commands sharing commands._options.render_date_range (auth + envelope);
+# the performance ones live here too because they take the same path.
+_RANGE_CASES = [
+    ("health", "steps", "get_steps_range", "serialize_steps"),
+    ("health", "daily-summary", "get_daily_summary_range", "serialize_daily_summary"),
+    ("health", "intensity-minutes", "get_intensity_minutes_range", "serialize_intensity_minutes"),
+    ("performance", "endurance-score", "get_endurance_score_range", "serialize_endurance_score"),
+    ("performance", "hill-score", "get_hill_score_range", "serialize_hill_score"),
+]
+_RANGE_COMMANDS = pytest.mark.parametrize(("group", "command", "endpoint", "serializer"), _RANGE_CASES)
+_RANGE_COMMAND_NAMES = pytest.mark.parametrize(
+    ("group", "command"), [(group, command) for group, command, _, _ in _RANGE_CASES]
+)
+
+
+@_RANGE_COMMANDS
+@pytest.mark.parametrize(
+    ("json_mode", "days", "rows"),
+    [
+        pytest.param(True, "1", [{"date": "2026-03-11"}], id="json-one-day"),
+        pytest.param(True, "2", [{"date": "2026-03-10"}, {"date": "2026-03-11"}], id="json-two-days"),
+        pytest.param(True, "1", [], id="json-empty"),
+        pytest.param(False, "1", [{"date": "2026-03-11"}], id="table-one-day"),
+    ],
+)
+def test_range_command_output(
+    mocker: Any,
+    group: str,
+    command: str,
+    endpoint: str,
+    serializer: str,
+    json_mode: bool,
+    days: str,
+    rows: list[dict[str, Any]],
+) -> None:
+    mock_auth = mocker.patch("garmin_cli.commands._options.ensure_authenticated")
+    mocker.patch(f"garmin_cli.commands.{group}.{endpoint}", return_value=[])
+    mocker.patch(f"garmin_cli.commands.{group}.{serializer}", return_value=rows)
+    args = ["--json"] if json_mode else []
+
+    result = CliRunner(mix_stderr=False).invoke(cli, [*args, group, command, "--days", days])
+
+    assert result.exit_code == 0
+    mock_auth.assert_called_once()
+    if not json_mode:
+        assert "2026-03-11" in result.output
+        return
+    parsed = json.loads(result.output)
+    assert parsed["ok"] is True
+    assert parsed["count"] == len(rows)
+    assert parsed["data"] == rows
+
+
+@_RANGE_COMMANDS
+def test_range_command_reports_date_range(
+    mocker: Any, group: str, command: str, endpoint: str, serializer: str
+) -> None:
+    mocker.patch("garmin_cli.commands._options.ensure_authenticated")
+    mocker.patch(f"garmin_cli.commands.{group}.{endpoint}", return_value=[])
+    mocker.patch(f"garmin_cli.commands.{group}.{serializer}", return_value=[])
+
+    result = CliRunner(mix_stderr=False).invoke(
+        cli, ["--json", group, command, "--from", "2026-03-01", "--to", "2026-03-07"]
+    )
+
+    assert json.loads(result.output)["date_range"] == {"from": "2026-03-01", "to": "2026-03-07"}
+
+
+@_RANGE_COMMAND_NAMES
+def test_range_command_rejects_date_with_days(mocker: Any, group: str, command: str) -> None:
+    mocker.patch("garmin_cli.commands._options.ensure_authenticated")
+
+    result = CliRunner(mix_stderr=False).invoke(
+        cli, [group, command, "--date", "2026-03-11", "--days", "7"]
+    )
+
+    assert result.exit_code != 0
+
+
+@_RANGE_COMMAND_NAMES
+def test_range_command_auth_failure_json_envelope(mocker: Any, group: str, command: str) -> None:
+    from garmin_cli.exceptions import GarminCliError
+
+    mocker.patch(
+        "garmin_cli.commands._options.ensure_authenticated",
+        side_effect=GarminCliError(error="No creds", error_code="AUTH_MISSING"),
+    )
+
+    result = CliRunner(mix_stderr=False).invoke(cli, ["--json", group, command, "--days", "1"])
+
+    assert result.exit_code == 1
+    parsed = json.loads(result.output)
+    assert parsed["ok"] is False
+    assert parsed["error_code"] == "AUTH_MISSING"
+
+
 def test_health_status_single_day_command(mocker: Any) -> None:
     mocker.patch("garmin_cli.commands.health.ensure_authenticated")
     mocker.patch(
@@ -466,7 +562,7 @@ class TestUsageErrorInJsonMode:
             cli,
             [
                 "--json",
-                "--garth-home",
+                "--garmin-home",
                 "/tmp/x",
                 "health",
                 "sleep",

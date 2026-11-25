@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from garmin_cli.metrics import REGISTRY
+from garmin_cli.metrics import sport_profile
+from garmin_cli.metrics.registry import REGISTRY
 from garmin_cli.metrics.sport_profile import (
     CYCLING_PROFILE,
     DEFAULT_PROFILE,
@@ -124,6 +125,10 @@ class TestRegistryCoverage:
     def test_every_union_column_resolves_in_registry(self) -> None:
         for key in UNION_COLUMNS:
             assert key in REGISTRY
+
+    def test_appended_universal_keys_are_universal_standard_keys(self) -> None:
+        # Universal keys are hand-listed twice; catch one added to only one list.
+        assert set(sport_profile._APPENDED_UNIVERSAL) <= set(sport_profile._UNIVERSAL_STANDARD_KEYS)
 
 
 class TestUnionColumns:

@@ -8,12 +8,14 @@ from typing import Any
 
 import pytest
 
-pytest.importorskip("mcp", reason="mcp extra not installed")
+from tests.helpers import require_mcp
 
-from garmin_cli.config import CliConfig
-from garmin_cli.mcp_server import create_mcp_server
-from mcp.server.mcpserver.exceptions import ToolError
-from tests.e2e.conftest import assert_row_has_keys
+require_mcp()
+
+from garmin_cli.config import CliConfig  # noqa: E402
+from garmin_cli.mcp_server import create_mcp_server  # noqa: E402
+from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402
+from tests.e2e.conftest import assert_row_has_keys  # noqa: E402
 
 
 def _call_tool_json(

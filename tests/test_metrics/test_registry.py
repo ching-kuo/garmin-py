@@ -5,10 +5,9 @@ from typing import Any
 
 import pytest
 
-from garmin_cli.metrics import (
+from garmin_cli.metrics.registry import (
     REGISTRY,
     MetricEntry,
-    for_sport,
     resolve,
 )
 from garmin_cli.serializers import COLUMNS_ACTIVITY_DETAIL, serialize_activity_detail
@@ -38,78 +37,6 @@ class TestMetricEntry:
     def test_unknown_key_raises_keyerror(self) -> None:
         with pytest.raises(KeyError):
             REGISTRY["not_a_real_metric"]
-
-
-# ---------------------------------------------------------------------------
-# for_sport
-# ---------------------------------------------------------------------------
-
-
-class TestForSport:
-
-    def test_running_includes_running_metrics(self) -> None:
-        keys = {entry.key for entry in for_sport("running")}
-        assert "avg_cadence_spm" in keys
-        assert "avg_ground_contact_time" in keys
-        assert "avg_vertical_oscillation" in keys
-        assert "avg_vertical_ratio" in keys
-        assert "avg_stride_length" in keys
-        assert "aerobic_training_effect" in keys
-        assert "anaerobic_training_effect" in keys
-
-    def test_running_excludes_cycling_only_metrics(self) -> None:
-        keys = {entry.key for entry in for_sport("running")}
-        assert "norm_power_w" not in keys
-        assert "tss" not in keys
-        assert "intensity_factor" not in keys
-        assert "avg_cadence_rpm" not in keys
-
-    def test_cycling_includes_cycling_metrics(self) -> None:
-        keys = {entry.key for entry in for_sport("cycling")}
-        assert "avg_power_w" in keys
-        assert "max_power_w" in keys
-        assert "norm_power_w" in keys
-        assert "tss" in keys
-        assert "intensity_factor" in keys
-        assert "avg_cadence_rpm" in keys
-        assert "aerobic_training_effect" in keys
-
-    def test_cycling_excludes_running_only_metrics(self) -> None:
-        keys = {entry.key for entry in for_sport("cycling")}
-        assert "avg_cadence_spm" not in keys
-        assert "avg_ground_contact_time" not in keys
-        assert "avg_stride_length" not in keys
-
-    def test_lap_swimming_includes_swim_metrics(self) -> None:
-        keys = {entry.key for entry in for_sport("lap_swimming")}
-        assert "swolf" in keys
-        assert "total_strokes" in keys
-        assert "avg_stroke_rate" in keys
-        assert "distance_per_stroke" in keys
-
-    def test_lap_swimming_excludes_running_and_cycling_only(self) -> None:
-        keys = {entry.key for entry in for_sport("lap_swimming")}
-        assert "avg_cadence_spm" not in keys
-        assert "avg_cadence_rpm" not in keys
-        assert "norm_power_w" not in keys
-
-    def test_open_water_swimming_excludes_swolf(self) -> None:
-        keys = {entry.key for entry in for_sport("open_water_swimming")}
-        assert "swolf" not in keys
-
-    def test_unknown_sport_returns_only_universal_entries(self) -> None:
-        for entry in for_sport("unknown_typekey"):
-            assert entry.sports is None
-
-    def test_none_sport_returns_only_universal_entries(self) -> None:
-        for entry in for_sport(None):
-            assert entry.sports is None
-
-    def test_universal_entries_present_for_every_sport(self) -> None:
-        universal_keys = {e.key for e in REGISTRY.values() if e.sports is None}
-        for sport in ("running", "cycling", "lap_swimming", "open_water_swimming", None, "unknown"):
-            keys = {entry.key for entry in for_sport(sport)}
-            assert universal_keys.issubset(keys)
 
 
 # ---------------------------------------------------------------------------

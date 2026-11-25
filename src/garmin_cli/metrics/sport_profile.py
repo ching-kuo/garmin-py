@@ -12,7 +12,6 @@ from garmin_cli.metrics.registry import (
     CYCLING_TYPE_KEYS,
     LAP_SWIM_TYPE_KEYS,
     OW_SWIM_TYPE_KEYS,
-    REGISTRY,
     RUNNING_TYPE_KEYS,
 )
 
@@ -219,29 +218,3 @@ UNION_COLUMNS: tuple[str, ...] = (
 def columns_for_sport(type_key: str | None) -> tuple[str, ...]:
     """Return the table column order for ``type_key`` (sport-aware)."""
     return profile_for(type_key).detail_metrics()
-
-
-def _validate_registry_coverage() -> None:
-    for profile in PROFILES + (DEFAULT_PROFILE,):
-        for key in profile.detail_metrics():
-            if key not in REGISTRY:
-                raise RuntimeError(
-                    f"SportProfile references unknown metric key: {key!r}"
-                )
-    for key in UNION_COLUMNS:
-        if key not in REGISTRY:
-            raise RuntimeError(
-                f"UNION_COLUMNS references unknown metric key: {key!r}"
-            )
-    # Universal keys are hand-listed twice: in the sport tables
-    # (_UNIVERSAL_STANDARD_KEYS) and at the tail of the CSV union
-    # (_APPENDED_UNIVERSAL). Catch a key added to one but not the other.
-    appended_not_universal = set(_APPENDED_UNIVERSAL) - set(_UNIVERSAL_STANDARD_KEYS)
-    if appended_not_universal:
-        raise RuntimeError(
-            "_APPENDED_UNIVERSAL keys missing from _UNIVERSAL_STANDARD_KEYS: "
-            f"{sorted(appended_not_universal)!r}"
-        )
-
-
-_validate_registry_coverage()

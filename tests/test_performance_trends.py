@@ -13,7 +13,9 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
-pytest.importorskip("mcp")
+from tests.helpers import require_mcp
+
+require_mcp()
 
 from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402
 

@@ -237,7 +237,7 @@ class TestLogin:
         (garth_home / "oauth1_token.json").write_text("{}")
         (garth_home / "oauth2_token.json").write_text("{}")
 
-        with pytest.raises(FileNotFoundError, match="Legacy garth session files"):
+        with pytest.raises(FileNotFoundError, match="No garmin_tokens.json"):
             backend.resume(str(garth_home))
 
 
