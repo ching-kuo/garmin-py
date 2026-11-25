@@ -229,28 +229,31 @@ class TestPerformanceVo2maxCommand:
 
 class TestPerformanceZonesCommand:
 
-    def test_zones_json_ok(self, mocker: Any) -> None:
+    def test_zones_json_ok(self, mocker: Any, sample_zone_tables_raw: Any) -> None:
         mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
         mocker.patch(
-            "garmin_cli.commands.performance.get_lactate_threshold",
-            return_value={"lactateThresholdHeartRate": 168},
+            "garmin_cli.commands.performance.get_zone_tables",
+            return_value=sample_zone_tables_raw,
         )
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["--json", "performance", "zones"])
         assert result.exit_code == 0
         parsed = json.loads(result.output)
         assert parsed["ok"] is True
+        assert parsed["data"][0] == {
+            "kind": "heart_rate", "sport": "default", "zone": 1, "low": 118, "high": 143, "unit": "bpm",
+        }
 
-    def test_zones_table_output_handles_list_payload(self, mocker: Any) -> None:
+    def test_zones_table_output(self, mocker: Any, sample_zone_tables_raw: Any) -> None:
         mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
         mocker.patch(
-            "garmin_cli.commands.performance.get_lactate_threshold",
-            return_value=[{"sport": "running", "lactateThresholdHeartRate": 168}],
+            "garmin_cli.commands.performance.get_zone_tables",
+            return_value=sample_zone_tables_raw,
         )
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["performance", "zones"])
         assert result.exit_code == 0
-        assert "running" in result.output or "168" in result.output
+        assert "cycling" in result.output and "351" in result.output
 
 
 # ---------------------------------------------------------------------------

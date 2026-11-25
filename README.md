@@ -324,7 +324,7 @@ garmin-cli device list  # registered devices: device_id, display_name, device_ty
 Recent fixes normalized several JSON payloads for agent-safe output:
 
 - `performance vo2max` returns `date`, `vo2max`, `sport`
-- `performance zones` returns `sport`, `lt_hr_bpm`, `lt_pace`
+- `performance zones` returns one row per heart-rate or power zone: `kind` (`heart_rate` or `power`), `sport`, `zone`, `low`, `high` (the next zone's floor, exclusive; the top heart-rate zone ends at Garmin's max HR, the top power zone is null), `unit` (`bpm` or `W`); power zones cover cycling and running
 - `workout calendar` includes compatibility `id` plus explicit `workout_id` and `workout_schedule_id`, and also lists Garmin Coach (adaptive plan) sessions that Garmin's calendar pages omit
 - `workout get` includes recursive `segments`, compatibility `steps`/`steps_summary`, and a `write_projection` only when the workout fits the simplified write schema
 - `health hrv` reads `lastNightAvg` and still falls back to legacy `lastNight`
@@ -408,7 +408,7 @@ The MCP server exposes primitive health, activity, workout, performance, and dev
 4. Claude shows the diff and asks for approval in the client. Only after approval should the client invoke `training_plan_apply`; the server does not treat an agent-supplied boolean as human approval.
 5. Apply rechecks live state, creates and verifies destinations first, removes source schedules last (a schedule the plan vacates from a destination date, as in a swap, is removed just before that destination is written), and reports `complete`, `compensated`, `partial`, or `unknown` truthfully. A compensated apply restores removed schedules under new ids, so preview again and rebuild the plan before retrying.
 
-`training_plan_reconcile(detail="targets")` adds HR, pace, power, and cadence target comparisons for matched running and cycling activities. It uses HR-zone and lap summaries first, fetches stride-downsampled streams only when required (at most 10 streams per call and 1000 samples per stream), and reports per-target coverage and data quality. Missing sensors and unsupported sports remain explicit `insufficient_data` states rather than failure verdicts. Apply tools can mutate the Garmin calendar and rely on the MCP client's destructive-tool approval UX.
+`training_plan_reconcile(detail="targets")` adds HR, pace, power, and cadence target comparisons for matched running and cycling activities. Power zone-number targets are resolved to watts from the power zone table of the workout's sport (reported as `resolved_band`; a cycling workout done as a run reports `power_zone_sport_mismatch`, a workout sport without power zones `power_zone_sport_unsupported`), and custom bpm/watt ranges are compared directly. Scores from a sample stream cover the whole activity and say so with `scope: "whole_activity"`; `provenance.power_zone_requests` counts the zone-table reads. It uses HR-zone and lap summaries first, fetches stride-downsampled streams only when required (at most 10 streams per call and 1000 samples per stream), and reports per-target coverage and data quality. Missing sensors and unsupported sports remain explicit `insufficient_data` states rather than failure verdicts. Apply tools can mutate the Garmin calendar and rely on the MCP client's destructive-tool approval UX.
 
 ### Resources and prompts
 

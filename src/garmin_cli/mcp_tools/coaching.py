@@ -19,6 +19,7 @@ from garmin_cli.endpoints.activities import (
     get_activity_splits,
     list_activities,
 )
+from garmin_cli.endpoints.performance import get_power_zones
 from garmin_cli.endpoints.workouts import get_calendar_range, get_workout
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.mcp_tools._shared import _authenticated, _parse_date
@@ -30,6 +31,7 @@ from garmin_cli.serializers import (
     serialize_calendar_workout,
     serialize_detail_metrics,
     serialize_workout_detail,
+    serialize_zones,
 )
 from garmin_cli.services.activities import downsample_rows
 from garmin_cli.services.coaching_snapshot import collect_snapshot, validate_snapshot_inputs
@@ -37,6 +39,7 @@ from garmin_cli.services.reconciliation import reconcile_plan
 from garmin_cli.services.reconciliation_targets import (
     SUPPORTED_SPORTS,
     compare_activity_targets,
+    power_zone_sport,
     required_stream_metrics,
 )
 
@@ -52,6 +55,20 @@ def _optional_target_read(call: Any) -> Any:
         return call()
     except GarminCliError as exc:
         if exc.error_code == "NOT_FOUND":
+            return None
+        raise
+
+
+def _power_zones_or_none(sport: str) -> Any:
+    """A transient power-zone read failure leaves power zone targets unresolved.
+
+    Auth, rate-limit, and input errors still fail the call, like the other
+    target reads; a 404 is already None.
+    """
+    try:
+        return get_power_zones(sport)
+    except GarminCliError as exc:
+        if exc.error_code in {"SERVER_ERROR", "NETWORK_ERROR"}:
             return None
         raise
 
@@ -140,6 +157,7 @@ def register_coaching_tools(mcp: MCPServer, config: CliConfig) -> None:
             activity_raw: dict[int, dict[str, Any]] = {}
             target_comparisons: dict[int, dict[str, Any]] = {}
             stream_requests = 0
+            power_zone_requests = 0
             stream_truncated = False
             futures: list[Future[Any]] = []
             task_count = max(1, len(activity_ids) * 4)
@@ -237,10 +255,32 @@ def register_coaching_tools(mcp: MCPServer, config: CliConfig) -> None:
                         )
                         target_inputs[activity_id] = (workout, laps, zones, sport)
 
+                    power_zone_sports = {
+                        activity_id: zone_sport
+                        for activity_id, (workout, _laps, _zones, sport) in target_inputs.items()
+                        if (zone_sport := power_zone_sport(workout, sport)) is not None
+                    }
+                    power_zone_futures = {
+                        zone_sport: pool.submit(_power_zones_or_none, zone_sport)
+                        for zone_sport in sorted(set(power_zone_sports.values()))
+                    }
+                    futures.extend(power_zone_futures.values())
+                    power_zone_requests = len(power_zone_futures)
+                    # Resolved before streams, so only a power zone with watt
+                    # bounds spends a stream slot.
+                    power_zone_rows = {
+                        zone_sport: serialize_zones({"power": future.result()})
+                        for zone_sport, future in power_zone_futures.items()
+                    }
+                    activity_power_zones = {
+                        activity_id: power_zone_rows[zone_sport]
+                        for activity_id, zone_sport in power_zone_sports.items()
+                    }
+
                     stream_futures: dict[int, Future[Any]] = {}
                     stream_blocked: set[int] = set()
                     for activity_id, (workout, laps, _zones, _sport) in target_inputs.items():
-                        if not required_stream_metrics(workout, laps):
+                        if not required_stream_metrics(workout, laps, activity_power_zones.get(activity_id)):
                             continue
                         if len(stream_futures) >= TARGET_STREAM_LIMIT:
                             stream_truncated = True
@@ -275,6 +315,7 @@ def register_coaching_tools(mcp: MCPServer, config: CliConfig) -> None:
                             hr_zones=zones,
                             samples=samples,
                             stream_unavailable_reason=unavailable_reason,
+                            power_zones=activity_power_zones.get(activity_id),
                         )
             return reconcile_plan(
                 calendar,
@@ -289,6 +330,7 @@ def register_coaching_tools(mcp: MCPServer, config: CliConfig) -> None:
                 today=plan_today,
                 target_comparisons=target_comparisons,
                 stream_requests=stream_requests,
+                power_zone_requests=power_zone_requests,
                 sample_budget=TARGET_SAMPLE_BUDGET,
                 stream_truncated=stream_truncated,
             )

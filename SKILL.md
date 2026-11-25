@@ -332,10 +332,12 @@ Max nesting: 2 levels (no repeats inside repeats).
 |------|--------|---------|
 | `no.target` | *(none)* | `{"type":"no.target"}` |
 | `open` | *(none)*; alias of `no.target` (Garmin has no open target) | `{"type":"open"}` |
-| `heart.rate.zone` | `zone` (1-5) | `{"type":"heart.rate.zone","zone":3}` |
+| `heart.rate.zone` | `zone` (1-5), or `min`, `max` (custom bpm range, at most 250) | `{"type":"heart.rate.zone","zone":3}`, `{"type":"heart.rate.zone","min":145,"max":155}` |
 | `speed.zone` | `min`, `max` (m/s) | `{"type":"speed.zone","min":3.33,"max":4.17}` |
-| `power.zone` | `zone` (1-7) | `{"type":"power.zone","zone":4}` |
+| `power.zone` | `zone` (1-7), or `min`, `max` (custom watt range, at most 2500) | `{"type":"power.zone","zone":4}`, `{"type":"power.zone","min":240,"max":260}` |
 | `cadence.zone` | `min`, `max` (full steps/min for running, e.g. 170-180) | `{"type":"cadence.zone","min":170,"max":180}` |
+
+A heart-rate or power target uses either `zone` or `min`/`max`, never both. Zone numbers follow the athlete's own Garmin zones; `performance zones` lists their bpm and watt bounds.
 
 ### Pace/speed reference (running)
 
@@ -445,7 +447,8 @@ garmin-cli --json performance thresholds
 garmin-cli --json performance vo2max
 garmin-cli --json performance vo2max --date 2026-03-11
 
-# Lactate threshold zones -- fields: sport, lt_hr_bpm, lt_pace
+# HR and power zone tables -- fields: kind (heart_rate|power), sport, zone, low, high, unit (bpm|W)
+# high is the next zone's floor (exclusive); the top HR zone ends at max HR, the top power zone's high is null
 garmin-cli --json performance zones
 
 # Race predictions -- fields: race_type, predicted_time_seconds, distance_meters
@@ -645,7 +648,7 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `workout_delete` | `workout_id` | `{count, rows}` — `ok: true, action: "deleted", workout_id`. **Destructive.** |
 | `workout_unschedule` | `schedule_id` | `{count, rows}` — `ok: true, action: "unscheduled", schedule_id`. Removes a calendar entry (the workout template is preserved); `schedule_id` is the `workout_schedule_id` returned by `workout_schedule`, not the workout id. **Destructive.** |
 | `coach_snapshot` | `date?`, `baseline_days?`, `recent_daily_days?`, `include_extended_daily_baselines?`, `sports?` | Bounded recovery baselines, activity-derived weekly load, current Garmin training status, upcoming plan (today plus six days), wellness rows (readiness, SpO2, steps, weight), execution, data quality, and request provenance. `date` defaults to today in the athlete's Garmin profile timezone. Default cost is at most 24 Garmin data calls, which is also the hard cap (session check, timezone lookup and retries are not counted); `recent_daily_days` accepts 1-9. A terminal 429 preserves fetched sections with `complete=false`, `aborted=true`. **Read-only.** |
-| `training_plan_reconcile` | `start_date`, `end_date`, `detail?`, `max_activities?` | Planned-versus-actual entries with exact/inferred/ambiguous match state and request provenance. Range max 28 days; activity cap max 100. `detail="targets"` compares HR, pace, power, and cadence for matched running/cycling activities using zones/laps first and at most 10 streams per call (1000 samples each) only when needed; per-target coverage and quality distinguish missing sensors as `insufficient_data`. **Read-only.** |
+| `training_plan_reconcile` | `start_date`, `end_date`, `detail?`, `max_activities?` | Planned-versus-actual entries with exact/inferred/ambiguous match state and request provenance. Range max 28 days; activity cap max 100. `detail="targets"` compares HR, pace, power, and cadence for matched running/cycling activities (power zone numbers resolve to watts from the workout sport's zone table, shown as `resolved_band`; stream-based scores carry `scope: "whole_activity"`) using zones/laps first and at most 10 streams per call (1000 samples each) only when needed; per-target coverage and quality distinguish missing sensors as `insufficient_data`. **Read-only.** |
 | `training_plan_preview` | `plan` | Strict validation (one entry per date, canonical YYYY-MM-DD) plus a live, normalized `create_template`/`schedule`/`keep`/`move`/`replace`/`unschedule` diff; conflicts report `source_schedule_changed` or `destination_occupied` (an occupant the plan itself vacates through another entry's verified source or a removal is not a conflict, so swaps, chained shifts, and removal plus replacement on one date are allowed). Already-applied moves and removals preview as `keep`/`no_op`. Performs no write. **Read-only.** |
 | `training_plan_apply` | `plan` | Revalidates and rereads live state, writes destinations first, removes sources last (an entry's own same-date `replace_schedule_id` source is deleted only after its replacement is scheduled; a schedule the plan vacates for another entry's destination is removed just before that destination is written), and reports per-operation state plus `complete`, `no_op`, `compensated`, `partial`, or `unknown`. Compensation only touches identifiers returned by this call's own writes: it removes new schedules first, then reschedules removed sources, each verified by its new id, workout, and date (a restore Garmin returns no id for must show up as exactly one new row, or it is `unknown`) (`restore_source` operations report the old `schedule_id` and the new `restored_schedule_id`). Restored schedules get new ids, so re-run `training_plan_preview` and rebuild the plan before retrying a compensated apply. No `confirm` parameter exists; client approval must precede invocation. **Destructive.** |
 | `training_plan_reschedule` | `schedule_id`, `new_date`, `expected_date` | Verifies the expected source date, returns a `destination_occupied` conflict without writing when the new date already holds a different workout, schedules/verifies the destination before source removal, and compensates a failed move when possible. **Destructive.** |
@@ -659,7 +662,7 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `performance_hill_score` | `start_date?` or `days?`, `end_date?` | `{count, rows}` — hill score, endurance score, strength score (one API call per day) |
 | `performance_thresholds` | *(none)* | `{count, rows}` |
 | `performance_vo2max` | `date?` | `{count, rows}` |
-| `performance_zones` | *(none)* | `{count, rows}` |
+| `performance_zones` | *(none)* | `{count, rows}` — one row per HR or power zone: `kind`, `sport`, `zone`, `low`, `high` (max HR for the top HR zone, null for the top power zone), `unit` |
 | `performance_personal_records` | *(none)* | `{count, rows}` — all-time PRs with human-readable `label` (null for unmapped typeIds) |
 | `performance_ftp_history` | `start_date?` or `days?`, `end_date?`, `sport?` (`cycling`\|`running`) | `{count, rows}` — daily `date`, `sport`, `ftp_watts` |
 | `performance_acclimation` | `start_date?` or `days?`, `end_date?` | `{count, rows}` — daily heat acclimation %, acclimated altitude (m), trend labels, current altitude |

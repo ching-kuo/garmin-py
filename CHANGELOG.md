@@ -49,6 +49,7 @@
 - Library callers of `build_garmin_payload` / `merge_workout_payload` can no longer use the `heart.rate`, `calories`, or `power` end conditions (the CLI and MCP tools never accepted them).
 - Library imports: `garmin_cli.metrics` exports only `FieldEntry` and `FieldTable` (import `REGISTRY`, `MetricEntry`, `resolve`, and the `*_TYPE_KEYS` sets from `garmin_cli.metrics.registry`; `for_sport` and `validate_table_coverage` are gone, `project_row` / `resolve_field` live in `garmin_cli.metrics.field_table`); `FieldTable` takes only `entries` and derives `columns`; `garmin_cli.serializers` no longer re-exports `REGISTRY`, `CYCLING_TYPE_KEYS`, `LAP_SWIM_TYPE_KEYS`, `RUNNING_TYPE_KEYS`, `UNION_COLUMNS`, `SportProfile`, `profile_for` (use `garmin_cli.metrics.registry` / `garmin_cli.metrics.sport_profile`), `COLUMNS_ACTIVITY_LAPS_*` (use `garmin_cli.serializers.activities`), or the private `_`-helpers (use `garmin_cli.serializers._common`); `error_contracts.UNKNOWN_ERROR_CONTRACT` is private; `token_store.expand_garth_home` is renamed `expand_garmin_home` and the legacy migration helpers are removed.
 - Library imports: `garmin_cli.endpoints.health.get_resting_hr(day)` and `get_training_readiness(day)` are removed; use `get_resting_hr_range(day, day)` and `get_training_readiness_range(day, day)`.
+- `performance zones` (MCP `performance_zones`) returns the athlete's heart-rate and power zone tables, one row per zone with `kind`, `sport`, `zone`, `low`, `high`, `unit`, instead of `sport`, `lt_hr_bpm`, `lt_pace` (lactate-threshold values stay in `performance thresholds`).
 
 ### Added
 
@@ -68,6 +69,10 @@
 - `mcp-server --read-only` (also `GARMIN_MCP_READ_ONLY=1` and a "Read-only mode" setting in the Claude Desktop extension) registers no write tools (workout, activity, file, and training-plan writes), and its server instructions and `plan_next_week` prompt stop at the preview; `doctor` and `server_doctor` report the mode, and `doctor` fails the check for a non-boolean `GARMIN_MCP_READ_ONLY` (still reporting any bearer-token problem), which `mcp-server` refuses at start-up.
 - MCP health and performance range tools accept `days` (an integer 1-90) instead of `start_date`, and `end_date` defaults to today in the athlete's Garmin profile timezone; explicit ranges work as before.
 - `coach_snapshot`/`report_snapshot`, `activity_get`/`activity_detail_metrics`, and `health_daily_summary` describe when to use each instead of the overlapping tool.
+- Workout heart-rate and power targets accept a custom range instead of a zone number: `{"type":"heart.rate.zone","min":145,"max":155}` (bpm, at most 250) or `{"type":"power.zone","min":240,"max":260}` (watts, at most 2500), in `workout create` / `workout update`, the MCP workout tools, and inline plan workouts; `workout get` reads them back in the same shape, including custom power ranges made in Garmin Connect.
+- `performance zones` / MCP `performance_zones` list the athlete's heart-rate zones per sport profile and cycling and running power zones, with each zone's low and high bound.
+- `training_plan_reconcile(detail="targets")` resolves power zone-number targets to watts from the power zone table of the workout's sport (shown as `resolved_band`) instead of reporting `missing_power_zone_boundaries`, and compares custom bpm and watt ranges against lap or stream data; stream-based scores add `scope: "whole_activity"`, and provenance adds `power_zone_requests`.
+- `workout get` keeps a custom heart-rate or power range with a unit (for example percent of FTP) as `unit` and leaves it out of `write_projection`, so it is never rewritten as watts or bpm; a step with a secondary target is also left out (`unsupported_secondary_target`) instead of being rewritten without it.
 
 ### Changed
 

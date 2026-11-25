@@ -5,6 +5,7 @@ import copy
 
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.workout_schema import (
+    CUSTOM_RANGE_WIRE_TYPES,
     END_CONDITIONS,
     RANGE_TARGETS,
     READ_ONLY_FIELDS,
@@ -12,6 +13,7 @@ from garmin_cli.workout_schema import (
     STEP_TYPES,
     TARGET_TYPES,
     ZONE_TARGETS,
+    is_custom_range,
     is_positive_id,
 )
 
@@ -64,11 +66,14 @@ def _build_target(target: dict | None) -> tuple[dict, dict]:
     """
     target = target or {}
     target_type_key = target.get("type", "no.target")
-    api_key, type_id = TARGET_TYPES.get(target_type_key, (target_type_key, 1))
+    custom_range = is_custom_range(target)
+    wire = CUSTOM_RANGE_WIRE_TYPES.get(target_type_key) if custom_range else None
+    api_key, type_id = wire or TARGET_TYPES.get(target_type_key, (target_type_key, 1))
     target_type = {"workoutTargetTypeId": type_id, "workoutTargetTypeKey": api_key}
 
-    if target_type_key in RANGE_TARGETS:
-        extra: dict = {}
+    if target_type_key in RANGE_TARGETS or custom_range:
+        # A custom bpm/watt range sends zoneNumber null (live shape).
+        extra: dict = {"zoneNumber": None} if custom_range else {}
         if "min" in target:
             extra["targetValueOne"] = target["min"]
         if "max" in target:

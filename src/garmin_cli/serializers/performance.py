@@ -1,6 +1,6 @@
 """Serializers for performance-domain Garmin Connect payloads.
 
-Covers lactate thresholds, VO2 max, lactate-threshold zones, race predictions,
+Covers lactate thresholds, VO2 max, HR/power zone tables, race predictions,
 and endurance/hill scores, plus their COLUMNS_* constants.
 
 The flat-row serializers (race predictions, endurance score, hill score,
@@ -10,19 +10,19 @@ wire source(s) and converter live in one entry, and the published COLUMNS_*
 order is derived from the table's entries. Two
 serializers keep bespoke code because they are structural rather than flat:
 :func:`serialize_vo2max` fans one wire item out into one row per sport sub-dict,
-and :func:`serialize_zones` merges multiple flat lactate samples across items
-(via :func:`parse_flat_lactate`) and coalesces two pace representations.
+and :func:`serialize_zones` turns per-sport zone floors into low/high rows.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from garmin_cli.metrics import FieldEntry, FieldTable
 from garmin_cli.serializers._common import _coalesce, _listify
-from garmin_cli.units import format_pace_seconds, pace_from_speed, parse_flat_lactate
+from garmin_cli.units import format_pace_seconds
 
 COLUMNS_VO2MAX = ("date", "vo2max", "sport")
-COLUMNS_ZONES = ("sport", "lt_hr_bpm", "lt_pace")
+COLUMNS_ZONES = ("kind", "sport", "zone", "low", "high", "unit")
 
 
 _VO2MAX_NON_SPORT_KEYS: frozenset[str] = frozenset({"userId", "heatAltitudeAcclimation"})
@@ -224,33 +224,57 @@ def serialize_vo2max(raw: Any) -> list[dict[str, Any]]:
     return [row for row in rows if row.get("date") is not None or row.get("vo2max") is not None]
 
 
+def _is_finite(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _zone_rows(item: dict[str, Any], kind: str, unit: str, zone_count: int, top: Any = None) -> list[dict[str, Any]]:
+    """Zone rows from zone<N>Floor values; *top* is the top zone's known ceiling."""
+    floors: list[float] = []
+    ended = False
+    for number in range(1, zone_count + 1):
+        floor = item.get(f"zone{number}Floor")
+        # Unused zones read 0.0 or null after the last one (live RUNNING power
+        # zones 6-7); only such a trailing run marks the end of the table.
+        if floor is None or (floor == 0 and floors):
+            ended = True
+            continue
+        if ended or not _is_finite(floor) or floor < 0 or (floors and floor <= floors[-1]):
+            # A gap before a later floor, or a floor that does not rise, is
+            # not a usable table.
+            return []
+        floors.append(floor)
+    if len(floors) < 2:
+        # An unconfigured (all-zero) table bounds no zone.
+        return []
+    # The top zone is open-ended unless a finite ceiling above its floor is known.
+    top_high = top if _is_finite(top) and top > floors[-1] else None
+    sport = item.get("sport")
+    return [
+        {
+            "kind": kind,
+            "sport": sport.lower() if isinstance(sport, str) else sport,
+            "zone": number,
+            "low": low,
+            # A zone ends below the next floor.
+            "high": floors[number] if number < len(floors) else top_high,
+            "unit": unit,
+        }
+        for number, low in enumerate(floors, start=1)
+    ]
+
+
 def serialize_zones(raw: Any) -> list[dict[str, Any]]:
-    value = raw.get("value") if isinstance(raw, dict) else None
-    items = _listify(value if isinstance(value, dict) else raw)
-    if items and all(item.get("sport") is None for item in items):
-        by_sport = parse_flat_lactate(items)
-        return [
-            {
-                "sport": sport,
-                "lt_hr_bpm": payload.get("lactateThresholdHeartRate"),
-                "lt_pace": payload.get("lactateThresholdPace"),
-            }
-            for sport, payload in by_sport.items()
-        ]
-    rows: list[dict[str, Any]] = []
-    for item in items:
-        pace = _coalesce(
-            format_pace_seconds(item.get("lactateThresholdPace")),
-            pace_from_speed(item.get("lactateThresholdSpeed")),
-        )
-        rows.append(
-            {
-                "sport": item.get("sport"),
-                "lt_hr_bpm": item.get("lactateThresholdHeartRate"),
-                "lt_pace": pace,
-            }
-        )
-    return rows
+    """Flatten get_zone_tables() output to one row per (kind, sport, zone)."""
+    tables = raw if isinstance(raw, dict) else {}
+    return [
+        *(
+            row
+            for item in _listify(tables.get("heart_rate"))
+            for row in _zone_rows(item, "heart_rate", "bpm", 5, item.get("maxHeartRateUsed"))
+        ),
+        *(row for item in _listify(tables.get("power")) for row in _zone_rows(item, "power", "W", 7)),
+    ]
 
 
 def serialize_thresholds(raw: Any) -> list[dict[str, Any]]:

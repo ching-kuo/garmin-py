@@ -188,6 +188,25 @@ def test_preview_keeps_an_applied_inline_workout_with_open_target() -> None:
     assert result["conflicts"] == []
 
 
+def test_plan_with_custom_range_targets_validates_and_reapplies_as_keep() -> None:
+    workout = {
+        "name": "SST",
+        "sport": "cycling",
+        "steps": [
+            {"type": "interval", "duration": {"type": "time", "value": 600}, "target": {"type": "power.zone", "min": 240, "max": 260}},
+            {"type": "recovery", "duration": {"type": "time", "value": 300}, "target": {"type": "heart.rate.zone", "min": 110, "max": 130}},
+        ],
+    }
+    plan = _plan()
+    plan["entries"] = [{"entry_id": "ride-1", "date": "2026-07-10", "workout": workout}]
+    projection = serialize_workout_detail({**build_garmin_payload(workout), "workoutId": 10})[0]["write_projection"]
+
+    result = preview_training_plan(plan, [{"date": "2026-07-10", "workout_id": 10, "workout_schedule_id": 99}], {10: projection})
+
+    assert validate_training_plan(plan) == []
+    assert [operation["action"] for operation in result["operations"]] == ["keep"]
+
+
 def test_preview_inline_match_ignores_int_float_and_null_target_differences() -> None:
     workout = {
         "name": "Cadence",

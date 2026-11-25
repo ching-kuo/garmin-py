@@ -22,8 +22,8 @@ from garmin_cli.endpoints.metrics import (
 )
 from garmin_cli.endpoints.performance import (
     get_all_thresholds,
-    get_lactate_threshold,
     get_personal_records,
+    get_zone_tables,
 )
 from garmin_cli.mcp_tools._shared import (
     Days,
@@ -91,8 +91,8 @@ def register_performance_tools(mcp: MCPServer, config: CliConfig) -> None:
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def performance_zones() -> Envelope:
-        """Get lactate-threshold-derived zone inputs. Returns sport, lt_hr_bpm, lt_pace."""
-        return _run_tool(config, get_lactate_threshold, serialize_zones)
+        """Get the athlete's heart-rate zones (per sport profile) and cycling/running power zones. Returns kind (heart_rate|power), sport, zone, low, high (next zone's floor, exclusive; the top HR zone ends at max HR, the top power zone is null), unit (bpm|W)."""
+        return _run_tool(config, get_zone_tables, serialize_zones)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def performance_ftp_history(

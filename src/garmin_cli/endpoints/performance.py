@@ -6,7 +6,7 @@ from typing import Any
 
 from garmin_cli import backend as garth
 from garmin_cli.date_utils import today
-from garmin_cli.endpoints._base import _make_request, _make_typed_request
+from garmin_cli.endpoints._base import _fan_out, _make_request, _make_typed_request
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.units import (
     format_pace_seconds,
@@ -22,6 +22,45 @@ def _request(url: str, *, params: dict[str, Any] | None = None) -> Any:
 def get_lactate_threshold() -> Any:
     result = _request("/biometric-service/biometric/latestLactateThreshold")
     return result if result is not None else []
+
+
+# Garmin sport keys whose power zones `performance zones` reports.
+POWER_ZONE_SPORTS = ("CYCLING", "RUNNING")
+
+
+def get_heart_rate_zones() -> Any:
+    """Per-sport HR zone floors (the path upstream get_heart_rate_zones_v2 reads)."""
+    result = _request("/biometric-service/heartRateZones/v2", params={"generateDefaults": "false"})
+    return result if result is not None else []
+
+
+def get_power_zones(sport: str) -> Any:
+    """Power zone floors and FTP for one Garmin sport key; None when the account has none."""
+    try:
+        return _request(f"/biometric-service/powerZones/sport/{sport}")
+    except GarminCliError as exc:
+        if exc.error_code == "NOT_FOUND":
+            return None
+        raise
+
+
+def _zone_table(sport: str | None) -> Any:
+    if sport is None:
+        return get_heart_rate_zones()
+    try:
+        return get_power_zones(sport)
+    except GarminCliError as exc:
+        # A sport the account has no power table for can answer 400; the HR
+        # and other power tables are still worth returning.
+        if exc.error_code == "INVALID_INPUT":
+            return None
+        raise
+
+
+def get_zone_tables() -> dict[str, Any]:
+    """HR zone tables plus the power zone table of each sport in POWER_ZONE_SPORTS."""
+    heart_rate, *power = _fan_out(_zone_table, [None, *POWER_ZONE_SPORTS])
+    return {"heart_rate": heart_rate, "power": [zones for zones in power if zones]}
 
 
 def get_personal_records() -> Any:

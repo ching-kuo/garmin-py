@@ -14,6 +14,7 @@ from garmin_cli.endpoints.performance import (
     get_lactate_threshold,
     get_personal_records,
     get_vo2max,
+    get_zone_tables,
 )
 from garmin_cli.exceptions import GarminCliError
 from tests.helpers import make_http_error as _http_error
@@ -49,6 +50,79 @@ class TestGetPersonalRecords:
         with pytest.raises(GarminCliError) as exc_info:
             get_personal_records()
         assert exc_info.value.error_code == "NOT_FOUND"
+
+
+# ---------------------------------------------------------------------------
+# get_zone_tables
+# ---------------------------------------------------------------------------
+
+class TestGetZoneTables:
+
+    @pytest.fixture(autouse=True)
+    def _no_fan_out_delay(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GARMIN_CLI_DAILY_CALL_DELAY", "0")
+
+    def test_reads_hr_v2_and_per_sport_power_zones(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        responses = {
+            "/biometric-service/heartRateZones/v2": [{"sport": "DEFAULT", "zone1Floor": 118}],
+            "/biometric-service/powerZones/sport/CYCLING": {"sport": "CYCLING", "zone1Floor": 0.0},
+        }
+
+        def connectapi(path: str, params: Any = None) -> Any:
+            if path.endswith("RUNNING"):
+                raise _http_error(404)
+            return responses[path]
+
+        mock_garth.connectapi.side_effect = connectapi
+        mocker.patch("garmin_cli.endpoints.performance.garth", mock_garth)
+
+        result = get_zone_tables()
+
+        # A sport without power zones (404) is left out rather than failing.
+        assert result == {
+            "heart_rate": [{"sport": "DEFAULT", "zone1Floor": 118}],
+            "power": [{"sport": "CYCLING", "zone1Floor": 0.0}],
+        }
+        hr_call = next(c for c in mock_garth.connectapi.call_args_list if "heartRateZones" in c.args[0])
+        assert hr_call.kwargs["params"] == {"generateDefaults": "false"}
+
+    def test_rejected_power_table_is_missing_and_hr_rows_remain(self, mocker: Any) -> None:
+        def connectapi(path: str, params: Any = None) -> Any:
+            if path.endswith("RUNNING"):
+                raise _http_error(400)
+            return {"sport": "CYCLING"} if "powerZones" in path else [{"sport": "DEFAULT"}]
+
+        mock_garth = MagicMock()
+        mock_garth.connectapi.side_effect = connectapi
+        mocker.patch("garmin_cli.endpoints.performance.garth", mock_garth)
+
+        assert get_zone_tables() == {"heart_rate": [{"sport": "DEFAULT"}], "power": [{"sport": "CYCLING"}]}
+
+    def test_rate_limited_power_read_propagates(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.endpoints.performance.get_heart_rate_zones", return_value=[])
+        mocker.patch(
+            "garmin_cli.endpoints.performance.get_power_zones",
+            side_effect=GarminCliError(error="Slow down.", error_code="RATE_LIMITED"),
+        )
+
+        with pytest.raises(GarminCliError) as exc_info:
+            get_zone_tables()
+        assert exc_info.value.error_code == "RATE_LIMITED"
+
+    def test_power_errors_other_than_not_found_propagate(self, mocker: Any) -> None:
+        def connectapi(path: str, params: Any = None) -> Any:
+            if "powerZones" in path:
+                raise _http_error(403)
+            return []
+
+        mock_garth = MagicMock()
+        mock_garth.connectapi.side_effect = connectapi
+        mocker.patch("garmin_cli.endpoints.performance.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            get_zone_tables()
+        assert exc_info.value.error_code != "NOT_FOUND"
 
 
 # ---------------------------------------------------------------------------

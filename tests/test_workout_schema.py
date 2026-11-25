@@ -443,8 +443,8 @@ def test_read_only_fields_are_tolerated_only_on_partial_update() -> None:
         ({"type": "interval", "duration": {"type": "time", "value": 60}, "notes": "x"}, "steps[0]: unknown key 'notes'"),
         ({"type": "interval", "duration": {"type": "time", "value": 60, "units": "s"}}, "steps[0].duration: unknown key 'units'"),
         (
-            {"type": "interval", "duration": {"type": "time", "value": 60}, "target": {"type": "heart.rate.zone", "zone": 2, "min": 1}},
-            "steps[0].target: unknown key 'min'",
+            {"type": "interval", "duration": {"type": "time", "value": 60}, "target": {"type": "speed.zone", "zone": 2, "min": 1, "max": 2}},
+            "steps[0].target: unknown key 'zone'",
         ),
         ({"type": "repeat", "count": 2, "duration": {}, "steps": [{"type": "rest", "duration": {"type": "time", "value": 60}}]}, "steps[0]: unknown key 'duration'"),
     ],
@@ -452,6 +452,60 @@ def test_read_only_fields_are_tolerated_only_on_partial_update() -> None:
 def test_unknown_nested_keys_are_rejected(step: dict, path: str) -> None:
     errors = validate_workout_input({"steps": [step]}, partial=True)
     assert any(path in error for error in errors), errors
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        {"type": "heart.rate.zone", "min": 140, "max": 155},
+        {"type": "power.zone", "min": 240, "max": 260.5},
+        {"type": "heart.rate.zone", "min": 40, "max": 250},
+        {"type": "power.zone", "min": 1, "max": 2500},
+        # Garmin's "stay below" ranges start at 0.
+        {"type": "power.zone", "min": 0, "max": 150},
+        {"type": "heart.rate.zone", "min": 0, "max": 130},
+    ],
+)
+def test_custom_hr_and_power_ranges_are_valid(target: dict) -> None:
+    data = _minimal_workout()
+    data["steps"][0]["target"] = target
+    assert validate_workout_input(data) == []
+
+
+@pytest.mark.parametrize(
+    ("target", "message"),
+    [
+        ({"type": "heart.rate.zone", "min": 140}, "missing required field 'max'"),
+        ({"type": "power.zone", "max": 260}, "missing required field 'min'"),
+        ({"type": "heart.rate.zone", "min": -1, "max": 150}, "'min' must be non-negative"),
+        ({"type": "power.zone", "min": 240, "max": 10**309}, "'max' must be a number"),
+        ({"type": "power.zone", "min": 260, "max": 240}, "'min' must be less than 'max'"),
+        ({"type": "power.zone", "min": 250, "max": 250}, "'min' must be less than 'max'"),
+        ({"type": "heart.rate.zone", "min": 140, "max": 251}, "at most 250"),
+        ({"type": "power.zone", "min": 240, "max": 2501}, "at most 2500"),
+        ({"type": "power.zone", "min": "240", "max": 260}, "'min' must be a number"),
+        ({"type": "heart.rate.zone", "zone": 3, "min": 140, "max": 155}, "either 'zone' or 'min'/'max'"),
+        ({"type": "power.zone"}, "missing required field 'zone'"),
+    ],
+)
+def test_custom_hr_and_power_range_errors(target: dict, message: str) -> None:
+    data = _minimal_workout()
+    data["steps"][0]["target"] = target
+    errors = validate_workout_input(data)
+    assert any(message in error for error in errors), errors
+
+
+@pytest.mark.parametrize(
+    "target",
+    [{"type": "speed.zone", "min": 3.0, "max": 10**309}, {"type": "cadence.zone", "min": -(10**309), "max": 180}],
+)
+def test_oversized_integers_are_validation_errors(target: dict) -> None:
+    data = _minimal_workout()
+    data["steps"][0]["target"] = target
+    assert validate_workout_input(data)
+    data = _minimal_workout()
+    data["steps"][0]["duration"]["value"] = 10**309
+    assert any("positive finite number" in error for error in validate_workout_input(data))
 
 
 def test_description_is_capped() -> None:

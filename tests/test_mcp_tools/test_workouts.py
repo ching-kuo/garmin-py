@@ -110,6 +110,24 @@ class TestMcpWorkoutCreate:
         assert event.outcome == "dry-run"
         assert event.dry_run is True
 
+    def test_dry_run_accepts_custom_watt_range_and_rejects_zone_mix(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_tools.workouts._emit_write_log")
+        server = create_mcp_server(_config())
+        step = {"type": "interval", "duration": {"type": "time", "value": 600}}
+
+        ok = _call(server, "workout_create", {"workout": {
+            "name": "SST", "sport": "cycling", "steps": [{**step, "target": {"type": "power.zone", "min": 240, "max": 260}}],
+        }, "dry_run": True})["rows"][0]
+        mixed = _call(server, "workout_create", {"workout": {
+            "name": "SST", "sport": "cycling", "steps": [{**step, "target": {"type": "power.zone", "zone": 3, "min": 240, "max": 260}}],
+        }, "dry_run": True})["rows"][0]
+
+        wire_step = ok["wire_payload"]["workoutSegments"][0]["workoutSteps"][0]
+        assert wire_step["targetType"]["workoutTargetTypeKey"] == "power.3s"
+        assert (wire_step["targetValueOne"], wire_step["targetValueTwo"], wire_step["zoneNumber"]) == (240, 260, None)
+        assert mixed["ok"] is False
+        assert any("either 'zone' or 'min'/'max'" in error for error in mixed["errors"])
+
     def test_validation_error_returns_envelope(self, mocker: Any) -> None:
         auth = mocker.patch("garmin_cli.mcp_tools.workouts.ensure_authenticated")
         create = mocker.patch("garmin_cli.mcp_tools.workouts.create_workout")
@@ -382,6 +400,20 @@ class TestMcpWorkoutUpdate:
         event = log.call_args.args[0]
         assert event.outcome == "dry-run"
         assert event.dry_run is True
+
+    def test_dry_run_update_with_custom_hr_range(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_tools.workouts.ensure_authenticated")
+        mocker.patch("garmin_cli.mcp_tools.workouts.get_workout", return_value=dict(_EXISTING_WORKOUT))
+        mocker.patch("garmin_cli.mcp_tools.workouts._emit_write_log")
+        server = create_mcp_server(_config())
+        steps = [{"type": "interval", "duration": {"type": "time", "value": 600},
+                  "target": {"type": "heart.rate.zone", "min": 145, "max": 155}}]
+
+        row = _call(server, "workout_update", {"workout_id": 42, "workout": {"steps": steps}, "dry_run": True})["rows"][0]
+
+        wire_step = row["wire_payload"]["workoutSegments"][0]["workoutSteps"][0]
+        assert wire_step["targetType"] == {"workoutTargetTypeId": 4, "workoutTargetTypeKey": "heart.rate.zone"}
+        assert (wire_step["targetValueOne"], wire_step["targetValueTwo"], wire_step["zoneNumber"]) == (145, 155, None)
 
     def test_live_update_calls_both_get_and_update(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.mcp_tools.workouts.ensure_authenticated")

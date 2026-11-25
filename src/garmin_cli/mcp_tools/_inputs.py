@@ -36,7 +36,7 @@ class Duration(TypedDict):
 
 
 class Target(TypedDict):
-    """zone for heart.rate.zone (1-5) / power.zone (1-7); min < max for speed.zone (m/s) / cadence.zone."""
+    """heart.rate.zone: zone 1-5 or min < max bpm (<=250); power.zone: zone 1-7 or min < max W (<=2500); min < max for speed.zone (m/s) / cadence.zone."""
 
     __pydantic_config__ = _STRICT  # type: ignore[misc]
     type: TargetType

@@ -45,11 +45,23 @@ TARGET_TYPES: dict[str, tuple[str, int]] = {
 
 _VALID_DURATION_TYPES = {"time", "distance"}
 
-# Zone-based target types (use zoneNumber)
+# Zone-based target types (use zoneNumber, or min/max for a custom range)
 ZONE_TARGETS = frozenset({"heart.rate.zone", "power.zone"})
 
 # Range-based target types (use targetValueOne / targetValueTwo)
 RANGE_TARGETS = frozenset({"speed.zone", "cadence.zone"})
+
+# Custom bpm / watt ranges on a zone target are sent as targetValueOne/Two with
+# zoneNumber null. Live Garmin-authored custom power ranges use power.3s (id 10);
+# custom HR ranges keep heart.rate.zone's TARGET_TYPES entry (2026-11-25 probe).
+CUSTOM_RANGE_WIRE_TYPES: dict[str, tuple[str, int]] = {"power.zone": ("power.3s", 10)}
+# Upper sanity bound and unit per custom range, to catch unit mistakes.
+_CUSTOM_RANGE_LIMITS = {"heart.rate.zone": (250, "bpm"), "power.zone": (2500, "W")}
+
+
+def is_custom_range(target: dict) -> bool:
+    """Whether a user-facing zone target is a custom min/max range, not a zone number."""
+    return target.get("type") in ZONE_TARGETS and ("min" in target or "max" in target)
 
 WORKOUT_FIELDS = frozenset({"name", "sport", "description", "steps"})
 # Garmin-owned fields: tolerated in partial updates, where the merge warns and
@@ -99,13 +111,17 @@ def is_positive_id(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
-def _is_finite_number(value: object) -> bool:
-    """Return whether ``value`` is a finite numeric scalar (not ``bool``)."""
-    return (
-        isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-    )
+def _is_finite_number(value: object) -> TypeGuard[int | float]:
+    """Return whether ``value`` is a finite numeric scalar (not ``bool``).
+
+    An int too large for a float (JSON allows 10**309) is not finite here.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def unknown_key_errors(value: dict, allowed: frozenset[str], path: str) -> list[str]:
@@ -134,10 +150,15 @@ def _validate_target(target: object, index: int, prefix: str) -> list[str]:
         return errors
 
     allowed = {"type"} | ({"zone"} if target_type in ZONE_TARGETS else set())
-    allowed |= {"min", "max"} if target_type in RANGE_TARGETS else set()
+    allowed |= {"min", "max"} if target_type in RANGE_TARGETS | ZONE_TARGETS else set()
     errors.extend(unknown_key_errors(target, frozenset(allowed), f"{prefix}[{index}].target"))
 
-    if target_type in ZONE_TARGETS:
+    custom_range = is_custom_range(target)
+    if custom_range and "zone" in target:
+        errors.append(f"{prefix}[{index}]: target uses either 'zone' or 'min'/'max', not both")
+    elif custom_range:
+        errors.extend(_range_errors(target, f"{prefix}[{index}]", _CUSTOM_RANGE_LIMITS[target_type]))
+    elif target_type in ZONE_TARGETS:
         zone = target.get("zone")
         if zone is None:
             errors.append(f"{prefix}[{index}]: target missing required field 'zone'")
@@ -150,28 +171,29 @@ def _validate_target(target: object, index: int, prefix: str) -> list[str]:
             )
 
     if target_type in RANGE_TARGETS:
-        min_value = target.get("min")
-        max_value = target.get("max")
-        if min_value is None:
-            errors.append(f"{prefix}[{index}]: target missing required field 'min'")
-        elif not _is_finite_number(min_value):
-            errors.append(f"{prefix}[{index}]: target 'min' must be a number")
-        if max_value is None:
-            errors.append(f"{prefix}[{index}]: target missing required field 'max'")
-        elif not _is_finite_number(max_value):
-            errors.append(f"{prefix}[{index}]: target 'max' must be a number")
-        elif isinstance(min_value, (int, float)) and not isinstance(min_value, bool):
-            if min_value < 0:
-                errors.append(f"{prefix}[{index}]: target 'min' must be non-negative")
-            if max_value < 0:
-                errors.append(f"{prefix}[{index}]: target 'max' must be non-negative")
-            if (
-                _is_finite_number(min_value)
-                and _is_finite_number(max_value)
-                and min_value >= max_value
-            ):
-                errors.append(f"{prefix}[{index}]: target 'min' must be less than 'max'")
+        errors.extend(_range_errors(target, f"{prefix}[{index}]", None))
 
+    return errors
+
+
+def _range_errors(target: dict, where: str, limit: tuple[int, str] | None) -> list[str]:
+    """Check min/max: present, finite, non-negative, ordered, and at most *limit*."""
+    errors: list[str] = []
+    bounds: dict[str, float] = {}
+    for key in ("min", "max"):
+        value = target.get(key)
+        if value is None:
+            errors.append(f"{where}: target missing required field '{key}'")
+        elif not _is_finite_number(value):
+            errors.append(f"{where}: target '{key}' must be a number")
+        elif value < 0:
+            errors.append(f"{where}: target '{key}' must be non-negative")
+        elif limit is not None and value > limit[0]:
+            errors.append(f"{where}: target '{key}' must be at most {limit[0]} {limit[1]}")
+        else:
+            bounds[key] = value
+    if len(bounds) == 2 and bounds["min"] >= bounds["max"]:
+        errors.append(f"{where}: target 'min' must be less than 'max'")
     return errors
 
 
@@ -273,12 +295,7 @@ def _expanded_metrics(steps: list[object]) -> tuple[int, float, float]:
         if not isinstance(duration, dict):
             continue
         value = duration.get("value")
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not math.isfinite(value)
-            or value <= 0
-        ):
+        if not _is_finite_number(value) or value <= 0:
             continue
         if duration.get("type") == "time":
             duration_seconds += value

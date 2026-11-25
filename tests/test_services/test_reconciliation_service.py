@@ -404,3 +404,234 @@ def test_targets_report_stream_budget_exhaustion_and_unsupported_sports() -> Non
     assert exhausted["targets"][0]["reason"] == "stream_request_limit_reached"
     assert unsupported["state"] == "insufficient_data"
     assert unsupported["reason"] == "unsupported_sport"
+
+
+def _cycling_power_zones() -> list[dict]:
+    from garmin_cli.serializers import serialize_zones
+
+    floors = {"sport": "CYCLING", **{f"zone{n}Floor": f for n, f in enumerate((0.0, 130.0, 176.0, 211.0, 246.0, 281.0, 351.0), 1)}}
+    return [row for row in serialize_zones({"power": [floors]}) if row["kind"] == "power"]
+
+
+def test_power_zone_target_resolves_to_watts_from_the_zone_table() -> None:
+    workout = _target_workout(
+        [_step("interval", {"type": "power.zone", "zone": 3}), _step("interval", {"type": "power.zone", "zone": 3}),
+         _step("interval", {"type": "power.zone", "zone": 7})],
+        sport="cycling",
+    )
+    laps = [
+        {"lap_index": 1, "duration_min": 1.0, "avg_power_w": 210.9},
+        {"lap_index": 2, "duration_min": 1.0, "avg_power_w": 211},
+        {"lap_index": 3, "duration_min": 1.0, "avg_power_w": 900},
+    ]
+
+    result = compare_activity_targets(
+        sport="road_biking", workout=workout, laps=laps, hr_zones=[], samples=[], power_zones=_cycling_power_zones(),
+    )
+
+    by_zone = {target["prescribed_band"]["zone"]: target for target in result["targets"]}
+    assert by_zone[3]["resolved_band"] == {"min": 176.0, "max": 211.0}
+    # The next zone's floor is exclusive: 211 W is zone 4.
+    assert by_zone[3]["time_in_band_pct"] == 50.0
+    assert by_zone[7]["resolved_band"] == {"min": 351.0, "max": None}
+    assert by_zone[7]["time_in_band_pct"] == 100.0
+    intervals = result["interval_mapping"]["intervals"]
+    assert [interval["in_band"] for interval in intervals] == [True, False, True]
+
+
+def test_power_zone_target_without_zone_table_stays_insufficient() -> None:
+    workout = _target_workout([_step("interval", {"type": "power.zone", "zone": 3})], sport="cycling")
+    laps = [{"lap_index": 1, "duration_min": 1.0, "avg_power_w": 200}]
+
+    result = compare_activity_targets(sport="road_biking", workout=workout, laps=laps, hr_zones=[], samples=[])
+
+    assert result["targets"][0]["reason"] == "missing_power_zone_boundaries"
+    assert result["interval_mapping"]["intervals"][0]["reason"] == "missing_power_zone_boundaries"
+
+
+def test_custom_watt_and_bpm_ranges_compare_directly_against_laps() -> None:
+    workout = _target_workout(
+        [_step("interval", {"type": "power.zone", "min": 240, "max": 260}),
+         _step("recovery", {"type": "heart.rate.zone", "min": 110, "max": 130})],
+        sport="cycling",
+    )
+    laps = [
+        {"lap_index": 1, "duration_min": 1.0, "avg_power_w": 250, "avg_hr": 150},
+        {"lap_index": 2, "duration_min": 1.0, "avg_power_w": 120, "avg_hr": 125},
+    ]
+
+    result = compare_activity_targets(sport="road_biking", workout=workout, laps=laps, hr_zones=[], samples=[])
+
+    by_type = {target["target_type"]: target for target in result["targets"]}
+    assert by_type["power"]["prescribed_band"] == {"min": 240, "max": 260}
+    assert by_type["power"]["time_in_band_pct"] == 100.0
+    assert by_type["hr"]["prescribed_band"] == {"min": 110, "max": 130}
+    assert by_type["hr"]["time_in_band_pct"] == 100.0
+    assert by_type["hr"]["quality"] == "lap_summary"
+    assert [interval["in_band"] for interval in result["interval_mapping"]["intervals"]] == [True, True]
+
+
+def test_custom_range_endpoints_are_inclusive() -> None:
+    workout = _target_workout(
+        [_step("interval", {"type": "power.zone", "min": 240, "max": 260}),
+         _step("interval", {"type": "power.zone", "min": 240, "max": 260})],
+        sport="cycling",
+    )
+    laps = [{"lap_index": 1, "duration_min": 1.0, "avg_power_w": 240}, {"lap_index": 2, "duration_min": 1.0, "avg_power_w": 260}]
+
+    result = compare_activity_targets(sport="road_biking", workout=workout, laps=laps, hr_zones=[], samples=[])
+
+    assert result["targets"][0]["time_in_band_pct"] == 100.0
+    assert [interval["in_band"] for interval in result["interval_mapping"]["intervals"]] == [True, True]
+
+
+def test_all_zero_power_table_reports_missing_boundaries() -> None:
+    from garmin_cli.serializers import serialize_zones
+
+    zero_table = serialize_zones({"power": [{"sport": "CYCLING", **{f"zone{n}Floor": 0.0 for n in range(1, 8)}}]})
+    workout = _target_workout([_step("interval", {"type": "power.zone", "zone": 1})], sport="cycling")
+    laps = [{"lap_index": 1, "duration_min": 1.0, "avg_power_w": 100}]
+
+    result = compare_activity_targets(
+        sport="road_biking", workout=workout, laps=laps, hr_zones=[], samples=[], power_zones=zero_table,
+    )
+
+    assert result["targets"][0]["reason"] == "missing_power_zone_boundaries"
+
+
+def test_power_zone_bounds_ignore_heart_rate_rows(sample_zone_tables_raw: dict) -> None:
+    from garmin_cli.serializers import serialize_zones
+
+    rows = serialize_zones(sample_zone_tables_raw)  # HR rows come first
+    cycling = [row for row in rows if row["sport"] != "running"]
+    workout = _target_workout([_step("interval", {"type": "power.zone", "zone": 3})], sport="cycling")
+
+    result = compare_activity_targets(
+        sport="road_biking", workout=workout, laps=[], hr_zones=[], samples=[{"directPower": 200}], power_zones=cycling,
+    )
+
+    assert result["targets"][0]["resolved_band"] == {"min": 176.0, "max": 211.0}
+
+
+def test_running_power_zone_five_is_open_ended_and_six_is_missing(sample_zone_tables_raw: dict) -> None:
+    from garmin_cli.serializers import serialize_zones
+
+    running = serialize_zones({"power": [sample_zone_tables_raw["power"][1]]})
+    workout = _target_workout(
+        [_step("interval", {"type": "power.zone", "zone": 5}), _step("interval", {"type": "power.zone", "zone": 6})],
+    )
+    laps = [{"lap_index": 1, "duration_min": 1.0, "avg_power_w": 500}, {"lap_index": 2, "duration_min": 1.0, "avg_power_w": 500}]
+
+    result = compare_activity_targets(
+        sport="running", workout=workout, laps=laps, hr_zones=[], samples=[], power_zones=running,
+    )
+
+    by_zone = {target["prescribed_band"]["zone"]: target for target in result["targets"]}
+    assert by_zone[5]["resolved_band"] == {"min": 372.0, "max": None}
+    assert by_zone[5]["time_in_band_pct"] == 100.0
+    assert by_zone[6]["reason"] == "missing_power_zone_boundaries"
+
+
+def test_power_zone_target_on_a_different_sport_activity_is_insufficient(sample_zone_tables_raw: dict) -> None:
+    from garmin_cli.serializers import serialize_zones
+    from garmin_cli.services.reconciliation_targets import power_zone_sport
+
+    workout = _target_workout([_step("interval", {"type": "power.zone", "zone": 3})], sport="running")
+    laps = [{"lap_index": 1, "duration_min": 1.0, "avg_power_w": 300}]
+
+    result = compare_activity_targets(
+        sport="road_biking", workout=workout, laps=laps, hr_zones=[], samples=[],
+        power_zones=serialize_zones({"power": sample_zone_tables_raw["power"]}),
+    )
+
+    assert result["targets"][0]["reason"] == "power_zone_sport_mismatch"
+    assert power_zone_sport(workout, "road_biking") is None
+    assert power_zone_sport(workout, "trail_running") == "RUNNING"
+    assert power_zone_sport(_target_workout(workout["write_projection"]["steps"], sport="swimming"), "running") is None
+
+
+def test_power_zones_come_from_the_workout_sport_table(sample_zone_tables_raw: dict) -> None:
+    from garmin_cli.serializers import serialize_zones
+
+    both = serialize_zones({"power": sample_zone_tables_raw["power"]})  # cycling rows first
+    workout = _target_workout([_step("interval", {"type": "power.zone", "zone": 3})])
+
+    result = compare_activity_targets(
+        sport="running", workout=workout, laps=[], hr_zones=[], samples=[{"directPower": 320}], power_zones=both,
+    )
+
+    assert result["targets"][0]["resolved_band"] == {"min": 310.0, "max": 341.0}
+
+
+def test_unsupported_workout_sport_and_mismatch_reasons_match_interval_mapping(sample_zone_tables_raw: dict) -> None:
+    from garmin_cli.serializers import serialize_zones
+
+    zones = serialize_zones({"power": sample_zone_tables_raw["power"]})
+    laps = [{"lap_index": 1, "duration_min": 1.0, "avg_power_w": 300}]
+    for workout_sport, reason in (("walking", "power_zone_sport_unsupported"), ("cycling", "power_zone_sport_mismatch")):
+        workout = _target_workout([_step("interval", {"type": "power.zone", "zone": 3})], sport=workout_sport)
+
+        result = compare_activity_targets(
+            sport="running", workout=workout, laps=laps, hr_zones=[], samples=[], power_zones=zones,
+        )
+
+        assert result["targets"][0]["reason"] == reason
+        assert result["interval_mapping"]["intervals"][0]["reason"] == reason
+
+
+def test_same_band_on_timed_and_distance_steps_is_scored_separately() -> None:
+    target = {"type": "power.zone", "min": 200, "max": 250}
+    workout = _target_workout(
+        [_step("interval", target), _step("interval", target, duration_type="distance")], sport="cycling",
+    )
+
+    result = compare_activity_targets(
+        sport="road_biking", workout=workout, laps=[], hr_zones=[], samples=[{"directPower": 220}],
+    )
+
+    assert sorted(target_row.get("time_in_band_pct", -1) for target_row in result["targets"]) == [100.0, 100.0]
+
+
+def test_unscored_stream_result_has_no_scope() -> None:
+    workout = _target_workout([_step("interval", {"type": "power.zone", "min": 200, "max": 250})], sport="cycling")
+
+    result = compare_activity_targets(sport="road_biking", workout=workout, laps=[], hr_zones=[], samples=[])
+
+    assert "scope" not in result["targets"][0]
+
+
+def test_stream_is_requested_only_for_resolvable_power_zones() -> None:
+    workout = _target_workout([_step("interval", {"type": "power.zone", "zone": 3})], sport="cycling")
+
+    assert required_stream_metrics(workout, []) == ()
+    assert required_stream_metrics(workout, [], _cycling_power_zones()) == ("directPower",)
+
+
+def test_warmup_lap_hr_does_not_suppress_interval_stream() -> None:
+    workout = _target_workout([
+        _step("warmup", {"type": "no.target"}),
+        _step("interval", {"type": "heart.rate.zone", "min": 150, "max": 160}),
+    ])
+    laps = [{"lap_index": 1, "duration_min": 1.0, "avg_hr": 120}, {"lap_index": 2, "duration_min": 1.0}]
+
+    assert required_stream_metrics(workout, laps) == ("directHeartRate",)
+
+
+def test_zero_weight_distance_laps_do_not_suppress_stream() -> None:
+    workout = _target_workout(
+        [_step("interval", {"type": "power.zone", "min": 200, "max": 250}, duration_type="distance")], sport="cycling",
+    )
+    laps = [{"lap_index": 1, "duration_min": 1.0, "distance_km": 0.0, "avg_power_w": 220}]
+
+    assert required_stream_metrics(workout, laps) == ("directPower",)
+
+
+def test_stream_scores_are_labelled_whole_activity() -> None:
+    workout = _target_workout([_step("interval", {"type": "power.zone", "min": 200, "max": 250})], sport="cycling")
+
+    result = compare_activity_targets(
+        sport="road_biking", workout=workout, laps=[], hr_zones=[], samples=[{"directPower": 220}],
+    )
+
+    assert result["targets"][0]["quality"] == "sampled_stream"
+    assert result["targets"][0]["scope"] == "whole_activity"

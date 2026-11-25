@@ -517,6 +517,56 @@ def sample_lactate_threshold_live_raw() -> list[dict]:
 
 
 @pytest.fixture()
+def sample_zone_tables_raw() -> dict:
+    """get_zone_tables() output built from live 2026-11-25 payload shapes."""
+    return {
+        "heart_rate": [
+            {
+                "sport": "DEFAULT",
+                "trainingMethod": "LACTATE_THRESHOLD",
+                "zone1Floor": 118,
+                "zone2Floor": 143,
+                "zone3Floor": 163,
+                "zone4Floor": 172,
+                "zone5Floor": 181,
+                "maxHeartRateUsed": 194,
+                "lactateThresholdHeartRateUsed": 179,
+                "restingHeartRateUsed": 48,
+                "restingHrAutoUpdateUsed": False,
+                "changeState": "UNCHANGED",
+            },
+        ],
+        "power": [
+            {
+                "sport": "CYCLING",
+                "functionalThresholdPower": 250.0,
+                "zone1Floor": 0.0,
+                "zone2Floor": 130.0,
+                "zone3Floor": 176.0,
+                "zone4Floor": 211.0,
+                "zone5Floor": 246.0,
+                "zone6Floor": 281.0,
+                "zone7Floor": 351.0,
+                "userLocalTime": None,
+            },
+            {
+                # RUNNING uses zones 1-5 only; zones 6-7 read 0.0.
+                "sport": "RUNNING",
+                "functionalThresholdPower": 310.0,
+                "zone1Floor": 248.0,
+                "zone2Floor": 279.0,
+                "zone3Floor": 310.0,
+                "zone4Floor": 341.0,
+                "zone5Floor": 372.0,
+                "zone6Floor": 0.0,
+                "zone7Floor": 0.0,
+                "userLocalTime": None,
+            },
+        ],
+    }
+
+
+@pytest.fixture()
 def sample_vo2max_raw() -> dict:
     return {
         "calendarDate": "2026-03-11",

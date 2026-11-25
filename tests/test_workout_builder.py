@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import copy
 
+import pytest
+
 from garmin_cli.workout_builder import build_garmin_payload, merge_workout_payload
 
 
@@ -162,6 +164,42 @@ class TestBuildGarminPayload:
         step = payload["workoutSegments"][0]["workoutSteps"][0]
         target = step["targetType"]
         assert target["workoutTargetTypeId"] == 2
+
+    @pytest.mark.parametrize(
+        ("target", "wire_type"),
+        [
+            # Live custom ranges: heart.rate.zone (4) in bpm, power.3s (10) in W.
+            ({"type": "heart.rate.zone", "min": 140, "max": 155}, {"workoutTargetTypeId": 4, "workoutTargetTypeKey": "heart.rate.zone"}),
+            ({"type": "power.zone", "min": 106, "max": 130}, {"workoutTargetTypeId": 10, "workoutTargetTypeKey": "power.3s"}),
+        ],
+    )
+    def test_custom_range_targets_use_target_values_with_null_zone(self, target: dict, wire_type: dict) -> None:
+        payload = build_garmin_payload(_running_workout(steps=[
+            {"type": "interval", "duration": {"type": "time", "value": 300}, "target": target}
+        ]))
+        step = payload["workoutSegments"][0]["workoutSteps"][0]
+        assert step["targetType"] == wire_type
+        assert (step["targetValueOne"], step["targetValueTwo"]) == (target["min"], target["max"])
+        assert "zoneNumber" in step and step["zoneNumber"] is None
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            {"type": "heart.rate.zone", "min": 140, "max": 155},
+            {"type": "power.zone", "min": 106, "max": 130},
+            {"type": "power.zone", "zone": 4},
+            {"type": "heart.rate.zone", "zone": 2},
+        ],
+    )
+    def test_targets_round_trip_through_workout_detail(self, target: dict) -> None:
+        from garmin_cli.serializers import serialize_workout_detail
+
+        workout = _running_workout(steps=[
+            {"type": "interval", "duration": {"type": "time", "value": 300}, "target": target}
+        ])
+        row = serialize_workout_detail(build_garmin_payload(workout))[0]
+        assert row["segments"][0]["steps"][0]["target"] == target
+        assert row["write_projection"]["steps"] == workout["steps"]
 
     def test_cadence_zone_target_uses_range_values(self) -> None:
         workout = _running_workout(steps=[

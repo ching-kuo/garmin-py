@@ -16,12 +16,14 @@ from garmin_cli.serializers._common import (
     _minutes,
 )
 from garmin_cli.workout_schema import (
+    CUSTOM_RANGE_WIRE_TYPES,
     RANGE_TARGETS,
     SPORT_TYPES,
     STEP_TYPES,
     TARGET_TYPES,
     ZONE_TARGETS,
     calendar_schedule_id,
+    is_custom_range,
     validate_workout_input,
 )
 
@@ -127,20 +129,42 @@ def _target_type_key(step: dict[str, Any]) -> Any:
 _TARGET_NAMES_BY_WIRE_KEY = {
     wire_key: name for name, (wire_key, _type_id) in TARGET_TYPES.items() if wire_key not in TARGET_TYPES
 }
+# Wire keys used only for custom ranges (power.3s -> power.zone).
+_RANGE_NAMES_BY_WIRE_KEY = {wire_key: name for name, (wire_key, _type_id) in CUSTOM_RANGE_WIRE_TYPES.items()}
 
 
 def _normalize_target(step: dict[str, Any]) -> dict[str, Any] | None:
-    target_type = _target_type_key(step)
-    if target_type is None:
+    wire_type = _target_type_key(step)
+    if wire_type is None:
         return None
-    target_type = _TARGET_NAMES_BY_WIRE_KEY.get(target_type, target_type)
+    low = _coalesce(step.get("targetValueOne"), step.get("targetValueLow"))
+    high = _coalesce(step.get("targetValueTwo"), step.get("targetValueHigh"))
+    # Legacy payloads without a zoneNumber key kept the zone in targetValueOne.
+    legacy_zone = "zoneNumber" not in step and high is None
+    # Wire-side custom range: explicit null zone number, at least one bound.
+    wire_range = not legacy_zone and step.get("zoneNumber") is None and (low is not None or high is not None)
+    range_name = _RANGE_NAMES_BY_WIRE_KEY.get(wire_type) if wire_range else None
+    target_type = range_name or _TARGET_NAMES_BY_WIRE_KEY.get(wire_type, wire_type)
     target: dict[str, Any] = {"type": target_type}
-    if target_type in ZONE_TARGETS:
-        target["zone"] = _coalesce(step.get("zoneNumber"), step.get("targetValueOne"))
-    elif target_type in RANGE_TARGETS:
-        target["min"] = _coalesce(step.get("targetValueOne"), step.get("targetValueLow"))
-        target["max"] = _coalesce(step.get("targetValueTwo"), step.get("targetValueHigh"))
+    if target_type in ZONE_TARGETS and not wire_range:
+        target["zone"] = low if legacy_zone else step.get("zoneNumber")
+    elif target_type in RANGE_TARGETS | ZONE_TARGETS:
+        target["min"] = low
+        target["max"] = high
+        # A unit (for example percent of FTP or max HR) changes what a custom
+        # bpm/watt range means; pace and cadence ranges ignore it as before.
+        if target_type in ZONE_TARGETS and step.get("targetValueUnit") is not None:
+            target["unit"] = step["targetValueUnit"]
     return target
+
+
+def _has_secondary_target(step: dict[str, Any]) -> bool:
+    secondary = step.get("secondaryTargetType")
+    key = secondary.get("workoutTargetTypeKey") if isinstance(secondary, dict) else secondary
+    return key not in (None, "no.target") or any(
+        step.get(field) is not None
+        for field in ("secondaryTargetValueOne", "secondaryTargetValueTwo", "secondaryZoneNumber")
+    )
 
 
 def _normalize_workout_step(step: dict[str, Any]) -> dict[str, Any]:
@@ -222,6 +246,12 @@ def _workout_step_to_write_input(
         reasons.append({"path": f"{path}.duration.value", "reason": "invalid_duration"})
         return None
 
+    raw = step.get("raw")
+    if isinstance(raw, dict) and _has_secondary_target(raw):
+        # The write schema has no secondary target; a rewrite would drop it.
+        reasons.append({"path": f"{path}.secondary_target", "reason": "unsupported_secondary_target"})
+        return None
+
     result: dict[str, Any] = {
         "type": step_type,
         "duration": {"type": duration["type"], "value": value},
@@ -233,12 +263,16 @@ def _workout_step_to_write_input(
             return None
         target_type = target["type"]
         simplified_target: dict[str, Any] = {"type": target_type}
-        if target_type in ZONE_TARGETS:
+        if "unit" in target:
+            reasons.append({"path": f"{path}.target.unit", "reason": "unsupported_target_unit"})
+            return None
+        custom_range = is_custom_range(target)
+        if target_type in ZONE_TARGETS and not custom_range:
             if not isinstance(target.get("zone"), int) or isinstance(target.get("zone"), bool):
                 reasons.append({"path": f"{path}.target.zone", "reason": "missing_zone"})
                 return None
             simplified_target["zone"] = target["zone"]
-        if target_type in RANGE_TARGETS:
+        if target_type in RANGE_TARGETS or custom_range:
             if target.get("min") is None or target.get("max") is None:
                 reasons.append({"path": f"{path}.target", "reason": "missing_target_bounds"})
                 return None

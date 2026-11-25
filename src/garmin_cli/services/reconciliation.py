@@ -52,6 +52,7 @@ def reconcile_plan(
     today: date | None = None,
     target_comparisons: dict[Any, dict[str, Any]] | None = None,
     stream_requests: int = 0,
+    power_zone_requests: int = 0,
     sample_budget: int = 0,
     stream_truncated: bool = False,
 ) -> dict[str, Any]:
@@ -212,6 +213,7 @@ def reconcile_plan(
     if detail == "targets":
         provenance.update({
             "stream_requests": stream_requests,
+            "power_zone_requests": power_zone_requests,
             "sample_budget": sample_budget,
             "stream_truncated": stream_truncated,
         })

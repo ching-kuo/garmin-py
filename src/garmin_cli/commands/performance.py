@@ -24,8 +24,8 @@ from garmin_cli.endpoints.metrics import (
 )
 from garmin_cli.endpoints.performance import (
     get_all_thresholds,
-    get_lactate_threshold,
     get_personal_records,
+    get_zone_tables,
 )
 from garmin_cli.output import render_output
 from garmin_cli.serializers import (
@@ -86,9 +86,9 @@ def vo2max_cmd(ctx: click.Context, value_date: datetime | None) -> None:
 @performance.command("zones")
 @click.pass_context
 def zones_cmd(ctx: click.Context) -> None:
-    """Get lactate-threshold-derived zone inputs."""
+    """Get heart-rate and power zone tables (low/high per zone)."""
     ensure_authenticated(ctx.obj["config"])
-    raw = get_lactate_threshold()
+    raw = get_zone_tables()
     data = serialize_zones(raw)
     render_output(ctx.obj["config"].output_format, "performance zones", data, COLUMNS_ZONES)
 

@@ -224,10 +224,11 @@ class TestPerformanceTools:
         # Should filter to latest date only
         assert all(row["date"] == "2026-01-05" for row in result["rows"])
 
-    def test_performance_zones(self, mocker: Any) -> None:
+    def test_performance_zones(self, mocker: Any, sample_zone_tables_raw: Any) -> None:
 
         mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
-        mocker.patch("garmin_cli.mcp_tools.performance.get_lactate_threshold", return_value=[{"sport": "running", "lactateThresholdHeartRate": 168}])
+        mocker.patch("garmin_cli.mcp_tools.performance.get_zone_tables", return_value=sample_zone_tables_raw)
         server = create_mcp_server(_config())
         result = _call(server, "performance_zones", {})
-        assert result["count"] >= 1
+        assert result["count"] == 5 + 7 + 5
+        assert {"kind": "power", "sport": "cycling", "zone": 7, "low": 351.0, "high": None, "unit": "W"} in result["rows"]

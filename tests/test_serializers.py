@@ -441,6 +441,95 @@ class TestSerializeWorkoutDetailStructure:
         assert row["write_compatible"] is True
         assert row["write_projection"]["steps"][0]["count"] == 3
 
+    def test_live_custom_power_range_reads_as_power_zone_range(self) -> None:
+        # Live Garmin-authored custom power range: power.3s (id 10), zoneNumber null.
+        raw = {
+            "workoutName": "Sweet spot",
+            "sportType": {"sportTypeKey": "cycling"},
+            "workoutSegments": [{
+                "segmentOrder": 1,
+                "sportType": {"sportTypeKey": "cycling"},
+                "workoutSteps": [{
+                    "type": "ExecutableStepDTO",
+                    "stepOrder": 1,
+                    "stepType": {"stepTypeKey": "interval"},
+                    "endCondition": {"conditionTypeKey": "time"},
+                    "endConditionValue": 600.0,
+                    "targetType": {"workoutTargetTypeId": 10, "workoutTargetTypeKey": "power.3s"},
+                    "targetValueOne": 106.0,
+                    "targetValueTwo": 130.0,
+                    "targetValueUnit": None,
+                    "zoneNumber": None,
+                }],
+            }],
+        }
+
+        row = serialize_workout_detail(raw)[0]
+
+        target = {"type": "power.zone", "min": 106.0, "max": 130.0}
+        assert row["segments"][0]["steps"][0]["target"] == target
+        assert row["write_projection"]["steps"][0]["target"] == target
+
+    @pytest.mark.parametrize(
+        ("wire", "target", "reason"),
+        [
+            # A zone number wins over stored values.
+            ({"workoutTargetTypeKey": "power.zone", "zoneNumber": 3, "targetValueOne": 1.0, "targetValueTwo": 2.0},
+             {"type": "power.zone", "zone": 3}, None),
+            # zoneNumber null never falls back to targetValueOne as the zone.
+            ({"workoutTargetTypeKey": "heart.rate.zone", "zoneNumber": None, "targetValueOne": 140.0},
+             {"type": "heart.rate.zone", "min": 140.0, "max": None}, "missing_target_bounds"),
+            ({"workoutTargetTypeKey": "heart.rate.zone", "zoneNumber": None},
+             {"type": "heart.rate.zone", "zone": None}, "missing_zone"),
+            # power.3s with a zone number is not a custom range.
+            ({"workoutTargetTypeKey": "power.3s", "zoneNumber": 3},
+             {"type": "power.3s"}, "unsupported_target"),
+            # A unit (for example percent of FTP) is never rewritten as watts.
+            ({"workoutTargetTypeKey": "power.zone", "zoneNumber": None, "targetValueOne": 60.0,
+              "targetValueTwo": 80.0, "targetValueUnit": "percent"},
+             {"type": "power.zone", "min": 60.0, "max": 80.0, "unit": "percent"}, "unsupported_target_unit"),
+            # Pace ranges keep ignoring a unit.
+            ({"workoutTargetTypeKey": "pace.zone", "targetValueOne": 2.6, "targetValueTwo": 2.8, "targetValueUnit": "kph"},
+             {"type": "speed.zone", "min": 2.6, "max": 2.8}, None),
+            # Legacy payloads without a zoneNumber key keep the zone in targetValueOne.
+            ({"workoutTargetTypeKey": "heart.rate.zone", "targetValueOne": 3},
+             {"type": "heart.rate.zone", "zone": 3}, None),
+            # A secondary target would be lost on rewrite.
+            ({"workoutTargetTypeKey": "power.3s", "zoneNumber": None, "targetValueOne": 200.0, "targetValueTwo": 250.0,
+              "secondaryTargetType": {"workoutTargetTypeKey": "cadence"}, "secondaryTargetValueOne": 85.0,
+              "secondaryTargetValueTwo": 95.0},
+             {"type": "power.zone", "min": 200.0, "max": 250.0}, "unsupported_secondary_target"),
+        ],
+    )
+    def test_target_read_back_edge_cases(self, wire: dict, target: dict, reason: str | None) -> None:
+        wire = dict(wire)
+        raw = {
+            "workoutName": "W",
+            "sportType": {"sportTypeKey": "cycling"},
+            "workoutSegments": [{
+                "segmentOrder": 1,
+                "sportType": {"sportTypeKey": "cycling"},
+                "workoutSteps": [{
+                    "type": "ExecutableStepDTO",
+                    "stepOrder": 1,
+                    "stepType": {"stepTypeKey": "interval"},
+                    "endCondition": {"conditionTypeKey": "time"},
+                    "endConditionValue": 600.0,
+                    "targetType": {"workoutTargetTypeKey": wire.pop("workoutTargetTypeKey")},
+                    **wire,
+                }],
+            }],
+        }
+
+        row = serialize_workout_detail(raw)[0]
+
+        assert row["segments"][0]["steps"][0]["target"] == target
+        if reason is None:
+            assert row["write_projection"]["steps"][0]["target"] == target
+        else:
+            assert row["write_projection"] is None
+            assert reason in {item["reason"] for item in row["write_incompatibilities"]}
+
     def test_long_stored_description_keeps_write_projection(self) -> None:
         # The 1024-char cap is for write input only; reconciliation reads
         # write_projection from stored workouts of any description length.
@@ -656,31 +745,54 @@ class TestPerformanceSerializers:
         ]
         assert COLUMNS_VO2MAX == ("date", "vo2max", "sport")
 
-    def test_serialize_zones_normalizes_speed_and_preserves_pace_string(self) -> None:
-        assert serialize_zones(
-            {
-                "sport": "running",
-                "lactateThresholdHeartRate": 168,
-                "lactateThresholdSpeed": 3.2,
-            }
-        ) == [{"sport": "running", "lt_hr_bpm": 168, "lt_pace": "5:12"}]
-        assert serialize_zones(
-            {
-                "sport": "running",
-                "lactateThresholdHeartRate": 168,
-                "lactateThresholdPace": "4:10",
-            }
-        ) == [{"sport": "running", "lt_hr_bpm": 168, "lt_pace": "4:10"}]
-        assert COLUMNS_ZONES == ("sport", "lt_hr_bpm", "lt_pace")
+    def test_serialize_zones_gives_each_zone_low_and_high(self, sample_zone_tables_raw: Any) -> None:
+        rows = serialize_zones(sample_zone_tables_raw)
 
-    def test_serialize_zones_merges_live_lactate_payload(
+        assert COLUMNS_ZONES == ("kind", "sport", "zone", "low", "high", "unit")
+        hr = [(row["zone"], row["low"], row["high"]) for row in rows if row["kind"] == "heart_rate"]
+        # The top HR zone ends at maxHeartRateUsed (194).
+        assert hr == [(1, 118, 143), (2, 143, 163), (3, 163, 172), (4, 172, 181), (5, 181, 194)]
+        no_max = {**sample_zone_tables_raw["heart_rate"][0], "maxHeartRateUsed": 181}
+        assert serialize_zones({"heart_rate": [no_max]})[-1]["high"] is None
+        assert {row["sport"] for row in rows if row["kind"] == "heart_rate"} == {"default"}
+        cycling = [(row["zone"], row["low"], row["high"]) for row in rows if row["sport"] == "cycling"]
+        assert cycling[0] == (1, 0.0, 130.0)
+        assert cycling[-1] == (7, 351.0, None)
+        # RUNNING power zones 6-7 read 0.0 (unused), so the table stops at zone 5.
+        running = [(row["zone"], row["low"], row["high"]) for row in rows if row["sport"] == "running"]
+        assert running[-1] == (5, 372.0, None) and len(running) == 5
+        assert {row["unit"] for row in rows} == {"bpm", "W"}
+
+    def test_serialize_zones_skips_missing_tables(self) -> None:
+        assert serialize_zones({"heart_rate": [], "power": [None]}) == []
+        assert serialize_zones(None) == []
+
+    @pytest.mark.parametrize(
+        "floors",
+        [
+            (0, 0, 0, 0, 0),  # unconfigured table
+            (float("nan"), 130.0, 176.0),
+            (-5.0, 130.0, 176.0),
+            (150.0, float("inf")),
+            (150.0,),  # one floor cannot bound a zone
+            (0.0, 130.0, None, 211.0),  # a gap before a later floor is not a verified end
+        ],
+    )
+    def test_serialize_zones_drops_unconfigured_tables(self, floors: tuple) -> None:
+        item = {"sport": "CYCLING", **{f"zone{n}Floor": floor for n, floor in enumerate(floors, 1)}}
+        assert serialize_zones({"heart_rate": [item], "power": [item]}) == []
+
+    def test_parse_flat_lactate_merges_live_lactate_payload(
         self,
         sample_lactate_threshold_live_raw: Any,
     ) -> None:
-        assert serialize_zones(sample_lactate_threshold_live_raw) == [
-            # 3.75 m/s is 266.67 s/km, which rounds to 4:27.
-            {"sport": "running", "lt_hr_bpm": 177, "lt_pace": "4:27"}
-        ]
+        from garmin_cli.units import parse_flat_lactate
+
+        # 3.75 m/s is 266.67 s/km, which rounds to 4:27.
+        assert parse_flat_lactate(sample_lactate_threshold_live_raw)["running"] == {
+            "lactateThresholdHeartRate": 177,
+            "lactateThresholdPace": "4:27",
+        }
 
 
 @pytest.mark.parametrize(

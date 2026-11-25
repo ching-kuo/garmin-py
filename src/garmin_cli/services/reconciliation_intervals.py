@@ -59,19 +59,46 @@ def _lap_value(lap: dict[str, Any], target_type: str) -> float | None:
 _TOP_HR_ZONE = 5
 
 
+def power_zone_bounds(zone: Any, power_zones: list[dict[str, Any]]) -> dict[str, float | None] | None:
+    """Watt band of *zone* from serialized power zone rows; max None is open-ended."""
+    row = next(
+        (row for row in power_zones if row.get("kind") == "power" and row.get("zone") == zone),
+        None,
+    )
+    low = _number(row.get("low")) if row else None
+    return None if row is None or low is None else {"min": low, "max": _number(row.get("high"))}
+
+
+def _in_band(value: float, low: float, high: float, high_inclusive: bool) -> bool:
+    return low <= value and (value <= high if high_inclusive else value < high)
+
+
+def _boundary_reason(target_type: str) -> str:
+    """Reason for a prescription without numeric bounds."""
+    return "missing_power_zone_boundaries" if target_type == "power" else f"missing_{target_type}_target_boundaries"
+
+
 def _band(
     target: dict[str, Any],
     target_type: str,
     rows: dict[Any, dict[str, Any]],
+    power_zones: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], float | None, float | None, bool]:
     """Return (prescribed band, low, high, whether high is inclusive).
 
-    *rows* maps HR zone number to its time-in-zone row.
+    *rows* maps HR zone number to its time-in-zone row; *power_zones* are the
+    athlete's serialized power zone rows for the activity's sport.
     """
     if "zone" not in target:
         prescribed = {"min": target.get("min"), "max": target.get("max")}
         return prescribed, _number(target.get("min")), _number(target.get("max")), True
     prescribed = {"zone": target.get("zone")}
+    if target_type == "power":
+        bounds = power_zone_bounds(target.get("zone"), power_zones)
+        if bounds is None:
+            return prescribed, None, None, True
+        # A zone ends below the next zone's floor (exclusive).
+        return prescribed, bounds["min"], math.inf if bounds["max"] is None else bounds["max"], False
     if target_type != "hr":
         return prescribed, None, None, True
     zone = target.get("zone")
@@ -92,8 +119,14 @@ def compare_interval_completion(
     workout: dict[str, Any],
     laps: list[dict[str, Any]],
     hr_zones: list[dict[str, Any]],
+    power_zones: list[dict[str, Any]] | None = None,
+    power_zone_reason: str | None = None,
 ) -> dict[str, Any]:
-    """Map laps only when the expanded workout and lap counts match exactly."""
+    """Map laps only when the expanded workout and lap counts match exactly.
+
+    *power_zone_reason* explains an unresolvable power zone number (for
+    example a sport mismatch) instead of the generic missing-boundaries reason.
+    """
     projection = workout.get("write_projection")
     steps = _expanded_steps(projection.get("steps")) if isinstance(projection, dict) else []
     if not steps or len(steps) != len(laps):
@@ -121,20 +154,19 @@ def compare_interval_completion(
         if target_type is None or not isinstance(target, dict):
             intervals.append({**row, "state": "not_targeted", "in_band": None})
             continue
-        prescribed, low, high, high_inclusive = _band(target, target_type, zones_by_number)
+        prescribed, low, high, high_inclusive = _band(target, target_type, zones_by_number, power_zones or [])
         value = _lap_value(lap, target_type)
         row["prescribed_band"] = prescribed
         if low is None or high is None:
-            reason = (
-                "missing_power_zone_boundaries"
-                if target_type == "power"
-                else f"missing_{target_type}_target_boundaries"
-            )
             intervals.append({
                 **row,
                 "state": "insufficient_data",
                 "in_band": None,
-                "reason": reason,
+                "reason": (
+                    power_zone_reason
+                    if power_zone_reason and target_type == "power" and "zone" in target
+                    else _boundary_reason(target_type)
+                ),
             })
         elif value is None:
             intervals.append({
@@ -147,6 +179,6 @@ def compare_interval_completion(
             intervals.append({
                 **row,
                 "state": "completed",
-                "in_band": low <= value <= high if high_inclusive else low <= value < high,
+                "in_band": _in_band(value, low, high, high_inclusive),
             })
     return {"state": "mapped", "intervals": intervals}
