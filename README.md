@@ -10,7 +10,7 @@ Read tools cover sleep, HRV, stress, body battery, training status/load, activit
 2. Open it with Claude Desktop (or drag it into Settings → Extensions).
 3. Enter your Garmin Connect email and password when prompted — they are stored in the operating system keychain, never in the conversation.
 
-On first launch the bundle creates a private virtual environment under `~/.garmin-py/mcpb/` and installs the matching `garmin-py` release from PyPI (internet required once). Requirements: Python 3.12+ on `PATH` (macOS ships 3.9 — install from [python.org](https://www.python.org/downloads/) or Homebrew).
+On first launch the bundle creates a virtual environment under `~/.garmin-py/mcpb/` (private, 0700, on macOS and Linux) and installs the matching `garmin-py` release from PyPI (internet required once). Requirements: Python 3.12+ somewhere on the machine. macOS ships 3.9 as `python3`; the bundle starts on it (its manifest asks only for 3.8+) and then switches to the oldest Homebrew or [python.org](https://www.python.org/downloads/) Python 3.12+ it finds, so install one of those if you have none. pyenv, asdf, and uv Pythons are not searched. The installer ignores `pip.conf` and `PIP_*` settings, so it always installs from PyPI, not a custom index mirror.
 
 If your account uses multi-factor authentication, the first tool call reports `MFA_REQUIRED`; Claude asks for the one-time code and completes the login with the `submit_mfa_code` tool. The session is saved, so this normally happens once.
 

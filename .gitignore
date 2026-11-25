@@ -58,8 +58,9 @@ dmypy.json
 .claude/
 docs/plans/
 
-# Garth session (credentials)
+# Garmin sessions (credentials)
 .garth/
+.garminconnect/
 
 # Environment variables
 .env

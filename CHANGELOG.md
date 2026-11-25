@@ -96,6 +96,12 @@
 - `login status`, `doctor`, and the MCP `login_status` / session resources no longer chmod the Garmin home while checking status (they may still refresh tokens on disk). Every session resume and save refuses a symlinked `garmin_tokens.json`, dangling links included.
 - A fresh login now saves the client it authenticated, then publishes it; a concurrent status check could previously swap in a stale session that was saved instead.
 - The MCP write audit log works: each write tool call logs exactly one JSON object (tool, outcome, ids, and lengths only, never names, paths, codes, or an activity type key Garmin has not accepted) to stderr on the `garmin_cli.audit` logger; it used to log only a bare word. `training_plan_apply`, `training_plan_reschedule`, and `submit_mfa_code` are now audited; calls rejected by the input schema or id checks log `failed-validation` with only the tool name; plan results refused by conflicts or the live recheck before any write log `conflict`; an upload Garmin declined logs `rejected`; the lines propagate to host-configured root handlers instead of a private stderr handler when the host configured logging; an unexpected error is logged as `failed-upstream` before it propagates; `workout_unschedule` logs `schedule_id` (it was logged as `workout_id`).
+- The Claude Desktop bundle installs the dependency versions pinned at release time (`server/constraints.txt`) when they have wheels for your platform and Python, otherwise retries once in a fresh environment without the pins; both attempts share one 15-minute limit; pip ignores `pip.conf` and `PIP_*` settings (custom index mirrors are not used); on macOS and Linux `~/.garmin-py/mcpb/` is private (0700), including directories left by older releases (Windows keeps the existing permissions).
+
+### CI
+
+- Every GitHub Action is pinned to a commit SHA, workflows default to read-only `contents` permission without persisted checkout credentials, and publishing stops when the release tag does not match the pyproject version.
+- CI also tests on macOS, smoke-tests the CLI-only wheel (no `[mcp]` extra), builds the `.mcpb` bundle on every push and PR (a release attaches that same CI-built bundle), and type-checks `mcpb/` and `scripts/`.
 
 ### Fixed
 
@@ -144,6 +150,7 @@
 - `training_plan_preview` / `training_plan_apply` treat a scheduled workout without a schedule id as occupying the date for an entry that names no source (it used to pass as the entry's own source), read workout templates only for scheduled rows (not logged activities), and skip a template Garmin no longer has instead of failing the plan.
 - Strict calendar reads (plan rechecks, `workout_schedule`) read a no-content (HTTP 204) calendar page or schedule lookup as an empty period instead of failing.
 - A failure to save the session tokens after a successful `garmin-cli login` reports "Authenticated, but saving the session ... failed" (`AUTH_FAILED`) instead of "Garmin login failed".
+- The Claude Desktop bundle no longer fails on macOS when `python3` is Apple's Python 3.9: it switches to the oldest Homebrew (`/opt/homebrew/bin`, `/usr/local/bin`) or python.org Python whose real version meets the minimum (pyenv, asdf, and uv Pythons are not searched). The manifest now declares Python >=3.8 so Claude Desktop lets the bundle start on such a Mac; the launcher still enforces 3.12.
 
 ## [2.13.0] - 2026-11-09
 

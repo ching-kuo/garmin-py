@@ -66,7 +66,7 @@
   "compatibility": {
     "platforms": ["darwin", "win32", "linux"],
     "runtimes": {
-      "python": ">=__GARMIN_PY_MIN_PYTHON__"
+      "python": ">=3.8"
     }
   }
 }

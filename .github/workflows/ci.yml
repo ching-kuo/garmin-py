@@ -8,20 +8,29 @@ on:
   # publish.yml runs this whole workflow as a gate before publishing.
   workflow_call:
 
+permissions:
+  contents: read
+
 jobs:
   test:
-    name: Test (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python-version: ["3.12", "3.13"]
+        include:
+          - os: macos-latest
+            python-version: "3.12"
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -30,21 +39,71 @@ jobs:
         run: pip install -e ".[dev,mcp]"
 
       - name: Lint with ruff
+        if: runner.os == 'Linux'
         run: ruff check src/ tests/
 
       - name: Type-check with mypy
-        run: mypy src/
+        if: runner.os == 'Linux'
+        # Separate runs: mcpb/main.py and scripts/ are standalone files, not
+        # part of the garmin_cli package.
+        run: |
+          mypy src/
+          mypy mcpb/ scripts/
 
       - name: Run tests
         run: python -m pytest tests/ -q
+
+  package:
+    name: Package smoke (wheel without [mcp], .mcpb build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Build wheel
+        run: |
+          pip install build
+          python -m build --wheel
+
+      # A clean venv with only the CLI: the console script must not need mcp.
+      - name: Smoke-test the CLI-only wheel
+        run: |
+          python -m venv "$RUNNER_TEMP/cli-only"
+          "$RUNNER_TEMP/cli-only/bin/pip" install dist/*.whl
+          if "$RUNNER_TEMP/cli-only/bin/python" -c "import mcp" 2>/dev/null; then
+            echo "mcp is installed; the smoke test must run without the [mcp] extra" >&2
+            exit 1
+          fi
+          "$RUNNER_TEMP/cli-only/bin/garmin-cli" --version
+          "$RUNNER_TEMP/cli-only/bin/garmin-cli" --help
+
+      # Never published from here. On a release, publish.yml (which calls this
+      # workflow) attaches this same artifact, so the shipped bundle is the
+      # one built before the PyPI upload.
+      - name: Build Claude Desktop bundle
+        run: python scripts/build_mcpb.py
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mcpb
+          path: dist/*.mcpb
+          if-no-files-found: error
 
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
           cache: pip
