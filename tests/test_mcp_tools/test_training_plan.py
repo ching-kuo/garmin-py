@@ -35,14 +35,14 @@ def test_plan_tool_annotations() -> None:
 def test_preview_is_read_only_and_returns_keep(mocker: Any) -> None:
     auth = mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
     calendar = mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.get_calendar_range",
+        "garmin_cli.services.schedule_writes.get_calendar_range",
         return_value=[{"date": "2026-07-10", "workoutId": 10, "workoutScheduleId": 99}],
     )
     get = mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.get_workout",
+        "garmin_cli.services.plan_apply.get_workout",
         return_value={"workoutId": 10, "workoutName": "Run", "sportType": {"sportTypeKey": "running"}, "workoutSegments": []},
     )
-    create = mocker.patch("garmin_cli.mcp_tools.training_plan.create_workout")
+    create = mocker.patch("garmin_cli.services.plan_apply.create_workout")
     server = create_mcp_server(_config())
 
     result = _call(server, "training_plan_preview", {"plan": _plan()})
@@ -55,14 +55,37 @@ def test_preview_is_read_only_and_returns_keep(mocker: Any) -> None:
     create.assert_not_called()
 
 
+def test_preview_skips_projections_of_logged_activities_and_deleted_templates(mocker: Any) -> None:
+    from garmin_cli.exceptions import GarminCliError
+
+    mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+    mocker.patch(
+        "garmin_cli.services.schedule_writes.get_calendar_range",
+        return_value=[
+            # A logged activity of a template that was since deleted.
+            {"date": "2026-07-09", "workoutId": 30, "id": 5, "itemType": "activity"},
+            {"date": "2026-07-11", "workoutId": 20, "workoutScheduleId": 6},
+        ],
+    )
+    get = mocker.patch(
+        "garmin_cli.services.plan_apply.get_workout",
+        side_effect=GarminCliError(error="Not found.", error_code="NOT_FOUND"),
+    )
+
+    result = _call(create_mcp_server(_config()), "training_plan_preview", {"plan": _plan()})
+
+    assert result["complete"] is True, result
+    get.assert_called_once_with(20)
+
+
 def test_preview_calendar_read_includes_expected_source_date(mocker: Any) -> None:
     mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
     calendar = mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.get_calendar_range",
+        "garmin_cli.services.schedule_writes.get_calendar_range",
         return_value=[{"date": "2026-06-30", "workoutId": 10, "workoutScheduleId": 99}],
     )
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.get_workout",
+        "garmin_cli.services.plan_apply.get_workout",
         return_value={
             "workoutId": 10,
             "workoutName": "Run",
@@ -89,14 +112,14 @@ def test_preview_calendar_read_includes_expected_source_date(mocker: Any) -> Non
 def test_apply_schedules_then_verifies_before_returning_success(mocker: Any) -> None:
     mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.get_calendar_range",
+        "garmin_cli.services.schedule_writes.get_calendar_range",
         side_effect=[[], [], [{"date": "2026-07-10", "workoutId": 10, "workoutScheduleId": 99}]],
     )
     schedule = mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.schedule_workout",
+        "garmin_cli.services.plan_apply.schedule_workout",
         return_value={"workoutScheduleId": 99},
     )
-    unschedule = mocker.patch("garmin_cli.mcp_tools.training_plan.unschedule_workout")
+    unschedule = mocker.patch("garmin_cli.services.plan_apply.unschedule_workout")
     server = create_mcp_server(_config())
 
     result = _call(server, "training_plan_apply", {"plan": _plan()})
@@ -120,14 +143,14 @@ def test_apply_schedules_then_verifies_before_returning_success(mocker: Any) -> 
 def test_apply_cleans_returned_schedule_when_verification_fails(mocker: Any) -> None:
     mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.get_calendar_range",
+        "garmin_cli.services.schedule_writes.get_calendar_range",
         side_effect=[[], [], []],
     )
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.schedule_workout",
+        "garmin_cli.services.plan_apply.schedule_workout",
         return_value={"workoutScheduleId": 99},
     )
-    unschedule = mocker.patch("garmin_cli.mcp_tools.training_plan.unschedule_workout")
+    unschedule = mocker.patch("garmin_cli.services.plan_apply.unschedule_workout")
     server = create_mcp_server(_config())
 
     result = _call(server, "training_plan_apply", {"plan": _plan()})
@@ -145,20 +168,20 @@ def test_apply_failed_write_that_may_have_landed_is_unknown(
     from garmin_cli.exceptions import GarminCliError
 
     mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
-    mocker.patch("garmin_cli.mcp_tools.training_plan.get_calendar_range", return_value=[])
+    mocker.patch("garmin_cli.services.schedule_writes.get_calendar_range", return_value=[])
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.create_workout", return_value={"workoutId": 10}
+        "garmin_cli.services.plan_apply.create_workout", return_value={"workoutId": 10}
     )
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.schedule_workout",
+        "garmin_cli.services.plan_apply.schedule_workout",
         return_value={"workoutScheduleId": 99},
     )
     mocker.patch(
-        f"garmin_cli.mcp_tools.training_plan.{failing}",
+        f"garmin_cli.services.plan_apply.{failing}",
         side_effect=GarminCliError("upstream failed", code),
     )
-    mocker.patch("garmin_cli.mcp_tools.training_plan.unschedule_workout")
-    mocker.patch("garmin_cli.mcp_tools.training_plan.delete_workout")
+    mocker.patch("garmin_cli.services.plan_apply.unschedule_workout")
+    mocker.patch("garmin_cli.services.plan_apply.delete_workout")
     plan = _plan()
     plan["entries"][0] = {
         "entry_id": "run-1",
@@ -196,14 +219,14 @@ def test_apply_keeps_template_whose_schedule_may_exist(
     from garmin_cli.exceptions import GarminCliError
 
     mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
-    mocker.patch("garmin_cli.mcp_tools.training_plan.get_calendar_range", return_value=[])
-    mocker.patch("garmin_cli.mcp_tools.training_plan.create_workout", return_value={"workoutId": 10})
+    mocker.patch("garmin_cli.services.schedule_writes.get_calendar_range", return_value=[])
+    mocker.patch("garmin_cli.services.plan_apply.create_workout", return_value={"workoutId": 10})
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.schedule_workout",
+        "garmin_cli.services.plan_apply.schedule_workout",
         return_value=schedule_result,
         side_effect=GarminCliError("lost", schedule_error) if schedule_error else None,
     )
-    delete = mocker.patch("garmin_cli.mcp_tools.training_plan.delete_workout")
+    delete = mocker.patch("garmin_cli.services.plan_apply.delete_workout")
 
     result = _call(create_mcp_server(_config()), "training_plan_apply", {"plan": _workout_plan()})
 
@@ -213,11 +236,11 @@ def test_apply_keeps_template_whose_schedule_may_exist(
 
 def test_apply_local_payload_error_is_not_an_ambiguous_write(mocker: Any) -> None:
     mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
-    mocker.patch("garmin_cli.mcp_tools.training_plan.get_calendar_range", return_value=[])
+    mocker.patch("garmin_cli.services.schedule_writes.get_calendar_range", return_value=[])
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.build_garmin_payload", side_effect=RuntimeError("bug")
+        "garmin_cli.services.plan_apply.build_garmin_payload", side_effect=RuntimeError("bug")
     )
-    create = mocker.patch("garmin_cli.mcp_tools.training_plan.create_workout")
+    create = mocker.patch("garmin_cli.services.plan_apply.create_workout")
 
     result = _call(create_mcp_server(_config()), "training_plan_apply", {"plan": _workout_plan()})
 
@@ -230,14 +253,14 @@ def test_reschedule_failed_schedule_that_may_have_landed_is_unknown(mocker: Any)
 
     mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.get_calendar_range",
+        "garmin_cli.services.schedule_writes.get_calendar_range",
         side_effect=[[{"date": "2026-07-08", "workoutId": 10, "id": 99, "itemType": "workout"}], []],
     )
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.schedule_workout",
+        "garmin_cli.services.plan_reschedule.schedule_workout",
         side_effect=GarminCliError("timed out", "NETWORK_ERROR"),
     )
-    unschedule = mocker.patch("garmin_cli.mcp_tools.training_plan.unschedule_workout")
+    unschedule = mocker.patch("garmin_cli.services.plan_reschedule.unschedule_workout")
 
     result = _call(
         create_mcp_server(_config()),
@@ -255,22 +278,22 @@ def test_apply_keeps_new_template_if_schedule_cleanup_fails(mocker: Any) -> None
 
     mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.get_calendar_range",
+        "garmin_cli.services.schedule_writes.get_calendar_range",
         side_effect=[[], [], []],
     )
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.create_workout",
+        "garmin_cli.services.plan_apply.create_workout",
         return_value={"workoutId": 10},
     )
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.schedule_workout",
+        "garmin_cli.services.plan_apply.schedule_workout",
         return_value={"workoutScheduleId": 99},
     )
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.unschedule_workout",
+        "garmin_cli.services.plan_apply.unschedule_workout",
         side_effect=GarminCliError("cleanup failed", "SERVER_ERROR"),
     )
-    delete = mocker.patch("garmin_cli.mcp_tools.training_plan.delete_workout")
+    delete = mocker.patch("garmin_cli.services.plan_apply.delete_workout")
     plan = {
         "name": "July block",
         "start_date": "2026-07-01",
@@ -309,11 +332,11 @@ def test_apply_equivalent_inline_workout_is_a_no_op(mocker: Any) -> None:
         "entries": [{"entry_id": "run-1", "date": "2026-07-10", "workout": inline}],
     }
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.get_calendar_range",
+        "garmin_cli.services.schedule_writes.get_calendar_range",
         return_value=[{"date": "2026-07-10", "workoutId": 10, "workoutScheduleId": 99}],
     )
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.get_workout",
+        "garmin_cli.services.plan_apply.get_workout",
         return_value={
             "workoutId": 10,
             "workoutName": "Easy Run",
@@ -336,8 +359,8 @@ def test_apply_equivalent_inline_workout_is_a_no_op(mocker: Any) -> None:
             ],
         },
     )
-    create = mocker.patch("garmin_cli.mcp_tools.training_plan.create_workout")
-    schedule = mocker.patch("garmin_cli.mcp_tools.training_plan.schedule_workout")
+    create = mocker.patch("garmin_cli.services.plan_apply.create_workout")
+    schedule = mocker.patch("garmin_cli.services.plan_apply.schedule_workout")
     server = create_mcp_server(_config())
 
     result = _call(server, "training_plan_apply", {"plan": plan})
@@ -361,14 +384,14 @@ def test_apply_equivalent_inline_workout_is_a_no_op(mocker: Any) -> None:
 def test_reschedule_existing_destination_removes_source(mocker: Any) -> None:
     mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.get_calendar_range",
+        "garmin_cli.services.schedule_writes.get_calendar_range",
         side_effect=[
             [{"date": "2026-07-05", "workoutId": 10, "workoutScheduleId": 50}],
             [{"date": "2026-07-10", "workoutId": 10, "workoutScheduleId": 99}],
         ],
     )
-    schedule = mocker.patch("garmin_cli.mcp_tools.training_plan.schedule_workout")
-    unschedule = mocker.patch("garmin_cli.mcp_tools.training_plan.unschedule_workout")
+    schedule = mocker.patch("garmin_cli.services.plan_reschedule.schedule_workout")
+    unschedule = mocker.patch("garmin_cli.services.plan_reschedule.unschedule_workout")
     server = create_mcp_server(_config())
 
     result = _call(
@@ -401,7 +424,7 @@ def test_reschedule_existing_destination_rechecks_a_failed_unschedule(
 
     mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.get_calendar_range",
+        "garmin_cli.services.schedule_writes.get_calendar_range",
         side_effect=[
             [{"date": "2026-07-05", "workoutId": 10, "workoutScheduleId": 50}],
             [{"date": "2026-07-10", "workoutId": 10, "workoutScheduleId": 99}],
@@ -409,7 +432,7 @@ def test_reschedule_existing_destination_rechecks_a_failed_unschedule(
         ],
     )
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.unschedule_workout",
+        "garmin_cli.services.plan_reschedule.unschedule_workout",
         side_effect=GarminCliError(error="boom", error_code="SERVER_ERROR"),
     )
     server = create_mcp_server(_config())
@@ -430,6 +453,131 @@ def test_reschedule_existing_destination_rechecks_a_failed_unschedule(
         assert result["errors"] == [{"error_code": "SERVER_ERROR", "message": "Source unschedule did not complete."}]
 
 
+def test_reschedule_existing_destination_reports_a_non_garmin_unschedule_failure(mocker: Any) -> None:
+    source = {"date": "2026-07-05", "workoutId": 10, "workoutScheduleId": 50}
+    mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
+    mocker.patch(
+        "garmin_cli.services.schedule_writes.get_calendar_range",
+        side_effect=[[source], [{"date": "2026-07-10", "workoutId": 10, "workoutScheduleId": 99}], [source]],
+    )
+    mocker.patch("garmin_cli.services.plan_reschedule.unschedule_workout", side_effect=RuntimeError("boom"))
+
+    result = _call(
+        create_mcp_server(_config()),
+        "training_plan_reschedule",
+        {"schedule_id": 50, "expected_date": "2026-07-05", "new_date": "2026-07-10"},
+    )
+
+    assert result["outcome"] == "partial"
+    assert result["operations"] == [
+        {"action": "unschedule", "schedule_id": 50, "state": "failed", "error_code": "INTERNAL_ERROR"}
+    ]
+
+
+def test_reschedule_reports_non_garmin_failures_of_source_and_compensation_unschedules(mocker: Any) -> None:
+    source = {"date": "2026-07-05", "workoutId": 10, "workoutScheduleId": 50}
+    mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
+    mocker.patch(
+        "garmin_cli.services.schedule_writes.get_calendar_range",
+        side_effect=[[source], [], [{"date": "2026-07-10", "workoutId": 10, "workoutScheduleId": 99}], [source]],
+    )
+    mocker.patch("garmin_cli.services.plan_reschedule.schedule_workout", return_value={"workoutScheduleId": 99})
+    unschedule = mocker.patch(
+        "garmin_cli.services.plan_reschedule.unschedule_workout", side_effect=RuntimeError("boom")
+    )
+
+    result = _call(
+        create_mcp_server(_config()),
+        "training_plan_reschedule",
+        {"schedule_id": 50, "expected_date": "2026-07-05", "new_date": "2026-07-10"},
+    )
+
+    assert result["outcome"] == "unknown"
+    assert result["operations"] == [
+        {"action": "unschedule", "schedule_id": 50, "state": "failed", "error_code": "INTERNAL_ERROR"},
+        {"action": "schedule", "state": "unknown", "schedule_id": 99, "error_code": "INTERNAL_ERROR"},
+    ]
+    assert [call.args for call in unschedule.call_args_list] == [(50,), (99,)]
+
+
+def test_reschedule_unverified_destination_cleanup_failure_is_unknown(mocker: Any) -> None:
+    mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
+    mocker.patch(
+        "garmin_cli.services.schedule_writes.get_calendar_range",
+        side_effect=[[{"date": "2026-07-05", "workoutId": 10, "workoutScheduleId": 50}], [], []],
+    )
+    mocker.patch("garmin_cli.services.plan_reschedule.schedule_workout", return_value={"workoutScheduleId": 99})
+    mocker.patch("garmin_cli.services.plan_reschedule.unschedule_workout", side_effect=RuntimeError("boom"))
+
+    result = _call(
+        create_mcp_server(_config()),
+        "training_plan_reschedule",
+        {"schedule_id": 50, "expected_date": "2026-07-05", "new_date": "2026-07-10"},
+    )
+
+    assert result["outcome"] == "unknown"
+    assert result["operations"] == [
+        {"action": "schedule", "state": "unknown", "schedule_id": 99, "error_code": "INTERNAL_ERROR"}
+    ]
+
+
+@pytest.mark.parametrize(
+    ("returned", "outcome", "operation"),
+    [
+        ({"workoutScheduleId": 99}, "compensated", {"action": "schedule", "state": "compensated", "schedule_id": 99}),
+        ({}, "unknown", {"action": "schedule", "state": "unknown", "date": "2026-07-10"}),
+    ],
+)
+def test_reschedule_failed_verification_read_keeps_the_source(
+    mocker: Any, returned: dict, outcome: str, operation: dict
+) -> None:
+    from garmin_cli.exceptions import GarminCliError
+
+    mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
+    mocker.patch(
+        "garmin_cli.services.schedule_writes.get_calendar_range",
+        side_effect=[
+            [{"date": "2026-07-05", "workoutId": 10, "workoutScheduleId": 50}],
+            [],
+            GarminCliError("unreachable", "NETWORK_ERROR"),
+        ],
+    )
+    mocker.patch("garmin_cli.services.plan_reschedule.schedule_workout", return_value=returned)
+    unschedule = mocker.patch("garmin_cli.services.plan_reschedule.unschedule_workout")
+
+    result = _call(
+        create_mcp_server(_config()),
+        "training_plan_reschedule",
+        {"schedule_id": 50, "expected_date": "2026-07-05", "new_date": "2026-07-10"},
+    )
+
+    assert result["outcome"] == outcome
+    assert result["operations"] == [operation]
+    assert result["errors"] == [{"error_code": "NETWORK_ERROR", "message": "New schedule could not be verified."}]
+    assert 50 not in [call.args[0] for call in unschedule.call_args_list]
+
+
+def test_reschedule_accepts_a_compact_expected_date(mocker: Any) -> None:
+    mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
+    mocker.patch(
+        "garmin_cli.services.schedule_writes.get_calendar_range",
+        side_effect=[
+            [{"date": "2026-07-05", "workoutId": 10, "workoutScheduleId": 50}],
+            [{"date": "2026-07-10", "workoutId": 10, "workoutScheduleId": 99}],
+        ],
+    )
+    unschedule = mocker.patch("garmin_cli.services.plan_reschedule.unschedule_workout")
+
+    result = _call(
+        create_mcp_server(_config()),
+        "training_plan_reschedule",
+        {"schedule_id": 50, "expected_date": "20260705", "new_date": "2026-07-10"},
+    )
+
+    assert result["outcome"] == "complete", result
+    unschedule.assert_called_once_with(50)
+
+
 def test_reschedule_negative_id_gets_the_positive_integer_message() -> None:
     from mcp.server.mcpserver.exceptions import ToolError
 
@@ -444,7 +592,7 @@ def test_reschedule_negative_id_gets_the_positive_integer_message() -> None:
 def test_reschedule_ignores_a_logged_activity_on_the_destination(mocker: Any) -> None:
     mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.get_calendar_range",
+        "garmin_cli.services.schedule_writes.get_calendar_range",
         side_effect=[
             [{"date": "2026-07-05", "workoutId": 10, "workoutScheduleId": 50}],
             [{"date": "2026-07-10", "workoutId": 10, "id": 777, "itemType": "activity"}],
@@ -452,9 +600,9 @@ def test_reschedule_ignores_a_logged_activity_on_the_destination(mocker: Any) ->
         ],
     )
     schedule = mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.schedule_workout", return_value={"workoutScheduleId": 1000}
+        "garmin_cli.services.plan_reschedule.schedule_workout", return_value={"workoutScheduleId": 1000}
     )
-    unschedule = mocker.patch("garmin_cli.mcp_tools.training_plan.unschedule_workout")
+    unschedule = mocker.patch("garmin_cli.services.plan_reschedule.unschedule_workout")
 
     result = _call(
         create_mcp_server(_config()),
@@ -470,7 +618,7 @@ def test_reschedule_ignores_a_logged_activity_on_the_destination(mocker: Any) ->
 def test_reschedule_cleans_unverified_destination(mocker: Any) -> None:
     mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.get_calendar_range",
+        "garmin_cli.services.schedule_writes.get_calendar_range",
         side_effect=[
             [{"date": "2026-07-05", "workoutId": 10, "workoutScheduleId": 50}],
             [],
@@ -478,10 +626,10 @@ def test_reschedule_cleans_unverified_destination(mocker: Any) -> None:
         ],
     )
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.schedule_workout",
+        "garmin_cli.services.plan_reschedule.schedule_workout",
         return_value={"workoutScheduleId": 99},
     )
-    unschedule = mocker.patch("garmin_cli.mcp_tools.training_plan.unschedule_workout")
+    unschedule = mocker.patch("garmin_cli.services.plan_reschedule.unschedule_workout")
     server = create_mcp_server(_config())
 
     result = _call(
@@ -501,15 +649,15 @@ def test_reschedule_cleans_unverified_destination(mocker: Any) -> None:
 def test_reschedule_keeps_source_when_destination_id_is_unavailable(mocker: Any) -> None:
     mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch(
-        "garmin_cli.mcp_tools.training_plan.get_calendar_range",
+        "garmin_cli.services.schedule_writes.get_calendar_range",
         side_effect=[
             [{"date": "2026-07-05", "workoutId": 10, "workoutScheduleId": 50}],
             [],
             [{"date": "2026-07-10", "workoutId": 10}],
         ],
     )
-    mocker.patch("garmin_cli.mcp_tools.training_plan.schedule_workout", return_value={})
-    unschedule = mocker.patch("garmin_cli.mcp_tools.training_plan.unschedule_workout")
+    mocker.patch("garmin_cli.services.plan_reschedule.schedule_workout", return_value={})
+    unschedule = mocker.patch("garmin_cli.services.plan_reschedule.unschedule_workout")
     server = create_mcp_server(_config())
 
     result = _call(

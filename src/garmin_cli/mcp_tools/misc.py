@@ -31,7 +31,6 @@ from garmin_cli.endpoints.health import (
     get_training_readiness_range,
 )
 from garmin_cli.endpoints.metrics import get_endurance_score_range, get_race_predictions
-from garmin_cli.endpoints.workouts import get_calendar_range
 from garmin_cli.doctor import run_checks
 from garmin_cli.exceptions import TRANSIENT_ERROR_CODES
 from garmin_cli.mcp_tools._audit import WriteLogEvent, _emit_audit, _write_audit
@@ -46,7 +45,6 @@ from garmin_cli.mcp_tools._schemas import Envelope, SessionStatus
 from garmin_cli.serializers import (
     serialize_activity_summary,
     serialize_body_battery,
-    serialize_calendar_workout,
     serialize_device,
     serialize_endurance_score,
     serialize_hrv,
@@ -58,13 +56,10 @@ from garmin_cli.serializers import (
     serialize_stress,
     serialize_training_readiness,
 )
+from garmin_cli.services.schedule_writes import calendar_rows
 
 # Module-level so tests can patch the sink per domain.
 _emit_write_log = _emit_audit
-
-
-def _calendar_rows(raw: Any) -> list[dict[str, Any]]:
-    return serialize_calendar_workout({"calendarItems": raw})
 
 
 def _report_specs(kind: str, anchor: date) -> tuple[date, list[ReportSection]]:
@@ -76,7 +71,8 @@ def _report_specs(kind: str, anchor: date) -> tuple[date, list[ReportSection]]:
             ("hrv", lambda: get_hrv(anchor, anchor), serialize_hrv),
             ("readiness", lambda: get_training_readiness_range(anchor, anchor), serialize_training_readiness),
             ("body_battery", lambda: get_body_battery_range(anchor, anchor), serialize_body_battery),
-            ("planned_today", lambda: get_calendar_range(anchor, anchor), _calendar_rows),
+            # calendar_rows already serializes; list() only satisfies the spec shape.
+            ("planned_today", lambda: calendar_rows(anchor, anchor), list),
         ]
     elif kind == "evening":
         window_from = anchor
@@ -87,7 +83,7 @@ def _report_specs(kind: str, anchor: date) -> tuple[date, list[ReportSection]]:
             ("stress", lambda: get_stress_range(anchor, anchor), serialize_stress),
             ("body_battery", lambda: get_body_battery_range(anchor, anchor), serialize_body_battery),
             ("activities_today", lambda: list_activities(20, 0, None, None, anchor, anchor), serialize_activity_summary),
-            ("planned_tomorrow", lambda: get_calendar_range(tomorrow, tomorrow), _calendar_rows),
+            ("planned_tomorrow", lambda: calendar_rows(tomorrow, tomorrow), list),
         ]
     else:  # weekly
         window_from = anchor - timedelta(days=6)

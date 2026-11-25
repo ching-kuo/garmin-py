@@ -322,6 +322,23 @@ class TestInteractiveMfa:
 
 class TestLoginCommandFailure:
 
+    def test_token_save_failure_is_a_session_save_error(self, mocker: Any, tmp_path: Path) -> None:
+        mock_garth = MagicMock()
+        mock_garth.save.side_effect = PermissionError("read-only file system")
+        mocker.patch("garmin_cli.commands.login.garth", mock_garth)
+
+        result = CliRunner(mix_stderr=False).invoke(
+            cli,
+            ["--json", "--garmin-home", str(tmp_path / "garth"), "login",
+             "--email", "a@example.com", "--password", "p"],
+            catch_exceptions=False,
+        )
+
+        payload = json.loads(result.stdout)
+        assert result.exit_code == 1
+        assert payload["error_code"] == "AUTH_FAILED"
+        assert "Authenticated, but saving the session" in payload["error"]
+
     def test_login_exits_one_on_auth_failure(
         self, mocker: Any, tmp_path: Path
     ) -> None:

@@ -1,13 +1,15 @@
 """Unit tests for the front-end-agnostic performance service layer.
 
 Exercises :func:`garmin_cli.services.performance.fetch_vo2max` directly with
-injected endpoint/serializer fakes, independent of the CLI and MCP
-front-ends (same style as tests/test_services/test_activities_service.py).
+its endpoint/serializer imports patched to fakes, independent of the CLI and
+MCP front-ends (same style as tests/test_services/test_activities_service.py).
 """
 from __future__ import annotations
 
 from datetime import date
 from typing import Any
+
+import pytest
 
 from garmin_cli.services.performance import fetch_vo2max
 
@@ -53,17 +55,21 @@ def _select_latest_dated_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]
     return [row for row in rows if row["date"] == latest]
 
 
+@pytest.fixture
+def recorder(mocker: Any) -> _Recorder:
+    fake = _Recorder()
+    service = "garmin_cli.services.performance"
+    mocker.patch(f"{service}.get_vo2max", fake.get_vo2max)
+    mocker.patch(f"{service}.get_latest_vo2max", fake.get_latest_vo2max)
+    mocker.patch(f"{service}.serialize_vo2max", _serialize_vo2max)
+    mocker.patch(f"{service}.select_latest_dated_rows", _select_latest_dated_rows)
+    return fake
+
+
 class TestFetchVo2max:
 
-    def test_explicit_date_routes_to_get_vo2max(self) -> None:
-        recorder = _Recorder()
-        result = fetch_vo2max(
-            date(2026, 3, 11),
-            get_vo2max=recorder.get_vo2max,
-            get_latest_vo2max=recorder.get_latest_vo2max,
-            serialize_vo2max=_serialize_vo2max,
-            select_latest_dated_rows=_select_latest_dated_rows,
-        )
+    def test_explicit_date_routes_to_get_vo2max(self, recorder: _Recorder) -> None:
+        result = fetch_vo2max(date(2026, 3, 11))
         assert recorder.vo2max_calls == [date(2026, 3, 11)]
         assert recorder.latest_calls == 0
         assert result == [
@@ -71,15 +77,8 @@ class TestFetchVo2max:
             {"date": "2026-03-11", "vo2max": 52.0, "sport": "generic"},
         ]
 
-    def test_no_date_routes_to_get_latest_vo2max_and_selects_latest(self) -> None:
-        recorder = _Recorder()
-        result = fetch_vo2max(
-            None,
-            get_vo2max=recorder.get_vo2max,
-            get_latest_vo2max=recorder.get_latest_vo2max,
-            serialize_vo2max=_serialize_vo2max,
-            select_latest_dated_rows=_select_latest_dated_rows,
-        )
+    def test_no_date_routes_to_get_latest_vo2max_and_selects_latest(self, recorder: _Recorder) -> None:
+        result = fetch_vo2max(None)
         assert recorder.vo2max_calls == []
         assert recorder.latest_calls == 1
         assert result == [

@@ -7,31 +7,26 @@ copy-pasted between :mod:`garmin_cli.commands.activities` and
 * the multisport laps fan-out (fetch laps for an activity, fanning out to
   child legs for multisport parents and stamping a 0-based ``leg_index``), and
 * capability-manifest assembly for an activity's detail projection.
-
-Endpoint and serializer callables are injected rather than imported directly.
-Each front-end module re-exports the relevant Garmin endpoint names (e.g.
-``get_activity_splits``) at module scope and the test suites monkeypatch those
-re-exports. Passing the front-end's own references through keeps those patch
-targets effective while the algorithm lives in exactly one place.
 """
 from __future__ import annotations
 
 import math
-from typing import Any, Callable
+from typing import Any
 
+from garmin_cli.endpoints.activities import (
+    activity_type_key,
+    get_activity_splits,
+    get_activity_typed_splits,
+    get_multisport_children,
+    is_multisport_parent,
+)
 from garmin_cli.metrics.registry import LAP_SWIM_TYPE_KEYS
 from garmin_cli.metrics.sport_profile import SportProfile, profile_for
-
-# Injected endpoint/serializer callable aliases. The concrete callables are
-# supplied by the caller so that per-front-end monkeypatching still applies.
-SplitsFn = Callable[[Any], Any]
-TypedSplitsFn = Callable[[Any], Any]
-ChildrenFn = Callable[[dict[str, Any]], list[dict[str, Any]]]
-IsMultisportFn = Callable[[dict[str, Any]], bool]
-ActivityTypeKeyFn = Callable[[dict[str, Any]], str | None]
-SerializeLapsFn = Callable[[dict[str, Any], Any, SportProfile], list[dict[str, Any]]]
-SerializeDetailFn = Callable[[dict[str, Any]], list[dict[str, Any]]]
-SerializeManifestFn = Callable[..., list[dict[str, Any]]]
+from garmin_cli.serializers import (
+    serialize_activity_detail,
+    serialize_activity_laps,
+    serialize_capability_manifest,
+)
 
 
 def downsample_rows(
@@ -48,11 +43,6 @@ def downsample_rows(
 def fetch_one_activity_laps(
     activity: dict[str, Any],
     activity_id: Any,
-    *,
-    activity_type_key: ActivityTypeKeyFn,
-    splits_fn: SplitsFn,
-    typed_splits_fn: TypedSplitsFn,
-    serialize_laps: SerializeLapsFn,
 ) -> tuple[list[dict[str, Any]], SportProfile]:
     """Fetch laps for a single (non-multisport) activity, auto-routing by sport.
 
@@ -63,23 +53,16 @@ def fetch_one_activity_laps(
     """
     profile = profile_for(activity_type_key(activity))
     if profile.type_keys & LAP_SWIM_TYPE_KEYS:
-        splits_payload = typed_splits_fn(activity_id)
+        splits_payload = get_activity_typed_splits(activity_id)
     else:
-        splits_payload = splits_fn(activity_id)
-    rows = serialize_laps(activity, splits_payload, profile)
+        splits_payload = get_activity_splits(activity_id)
+    rows = serialize_activity_laps(activity, splits_payload, profile)
     return rows, profile
 
 
 def fetch_laps_for_activity(
     activity: dict[str, Any],
     activity_id: Any,
-    *,
-    activity_type_key: ActivityTypeKeyFn,
-    is_multisport_parent: IsMultisportFn,
-    get_multisport_children: ChildrenFn,
-    splits_fn: SplitsFn,
-    typed_splits_fn: TypedSplitsFn,
-    serialize_laps: SerializeLapsFn,
     children: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], SportProfile]:
     """Fetch laps for an activity, handling multisport parents.
@@ -101,35 +84,18 @@ def fetch_laps_for_activity(
                 child_id = child.get("activityId")
                 if child_id is None:
                     continue
-                child_rows, _ = fetch_one_activity_laps(
-                    child,
-                    child_id,
-                    activity_type_key=activity_type_key,
-                    splits_fn=splits_fn,
-                    typed_splits_fn=typed_splits_fn,
-                    serialize_laps=serialize_laps,
-                )
+                child_rows, _ = fetch_one_activity_laps(child, child_id)
                 for row in child_rows:
                     row["leg_index"] = idx
                 all_rows.extend(child_rows)
             return all_rows, profile_for(activity_type_key(activity))
-    return fetch_one_activity_laps(
-        activity,
-        activity_id,
-        activity_type_key=activity_type_key,
-        splits_fn=splits_fn,
-        typed_splits_fn=typed_splits_fn,
-        serialize_laps=serialize_laps,
-    )
+    return fetch_one_activity_laps(activity, activity_id)
 
 
 def build_capability_manifest(
     activity: dict[str, Any],
     rows: list[dict[str, Any]],
     children: list[dict[str, Any]],
-    *,
-    serialize_detail: SerializeDetailFn,
-    serialize_manifest: SerializeManifestFn,
 ) -> list[dict[str, Any]]:
     """Assemble the capability manifest for an activity-detail projection.
 
@@ -141,11 +107,11 @@ def build_capability_manifest(
     if children:
         manifest: list[dict[str, Any]] = []
         for idx, child in enumerate(children):
-            child_row = serialize_detail(child)
+            child_row = serialize_activity_detail(child)
             child_projected = child_row[0] if child_row else None
             manifest.extend(
-                serialize_manifest(child, child_projected, leg_index=idx)
+                serialize_capability_manifest(child, child_projected, leg_index=idx)
             )
         return manifest
     projected = rows[0] if rows else None
-    return serialize_manifest(activity, projected)
+    return serialize_capability_manifest(activity, projected)

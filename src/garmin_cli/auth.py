@@ -187,11 +187,14 @@ def complete_mfa_login(config: CliConfig, mfa_code: str) -> None:
         _record_probe_ok(garth_home)
 
 
-def _persist_session(garth_home: str, client: Any) -> None:
-    """Save and publish a freshly authenticated client, reporting persistence failures."""
+def _persist_session(garth_home: str, client: Any, garth_client: Any | None = None) -> None:
+    """Save and publish a freshly authenticated client, reporting persistence failures.
+
+    Callers may pass their patched garth module, as with :func:`_probe_session`.
+    """
     try:
         os.makedirs(garth_home, mode=0o700, exist_ok=True)
-        garth.save(garth_home, client)
+        (garth_client or garth).save(garth_home, client)
     except Exception as exc:
         raise GarminCliError(
             error=f"Authenticated, but saving the session to {garth_home} failed: {exc}",

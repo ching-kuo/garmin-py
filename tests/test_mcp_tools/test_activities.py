@@ -348,13 +348,13 @@ class TestActivityTools:
             return_value={"activityId": 123, "activityType": {"typeKey": "running"}},
         )
         splits = mocker.patch(
-            "garmin_cli.mcp_tools.activities.get_activity_splits",
+            "garmin_cli.services.activities.get_activity_splits",
             return_value={"lapDTOs": [
                 {"duration": 480, "distance": 1000, "averageHR": 162, "avgGroundContactTime": 235},
                 {"duration": 470, "distance": 1000, "averageHR": 168, "avgGroundContactTime": 230},
             ]},
         )
-        typed = mocker.patch("garmin_cli.mcp_tools.activities.get_activity_typed_splits")
+        typed = mocker.patch("garmin_cli.services.activities.get_activity_typed_splits")
         server = create_mcp_server(_config())
         result = _call(server, "activity_laps", {"activity_id": 123})
         assert result["count"] == 2
@@ -369,9 +369,9 @@ class TestActivityTools:
             "garmin_cli.mcp_tools.activities.get_activity",
             return_value={"activityId": 456, "activityType": {"typeKey": "lap_swimming"}},
         )
-        splits = mocker.patch("garmin_cli.mcp_tools.activities.get_activity_splits")
+        splits = mocker.patch("garmin_cli.services.activities.get_activity_splits")
         typed = mocker.patch(
-            "garmin_cli.mcp_tools.activities.get_activity_typed_splits",
+            "garmin_cli.services.activities.get_activity_typed_splits",
             return_value={"lengthDTOs": [
                 {"duration": 25.0, "distance": 25.0, "swolf": 38, "swimStroke": "FREESTYLE", "strokes": 14},
                 {"duration": 26.0, "distance": 25.0, "swolf": 39, "swimStroke": "FREESTYLE", "strokes": 15},
@@ -393,10 +393,10 @@ class TestActivityTools:
             return_value={"activityId": 789, "activityType": {"typeKey": "open_water_swimming"}},
         )
         splits = mocker.patch(
-            "garmin_cli.mcp_tools.activities.get_activity_splits",
+            "garmin_cli.services.activities.get_activity_splits",
             return_value={"lapDTOs": [{"duration": 600, "distance": 1000, "averageHR": 140}]},
         )
-        typed = mocker.patch("garmin_cli.mcp_tools.activities.get_activity_typed_splits")
+        typed = mocker.patch("garmin_cli.services.activities.get_activity_typed_splits")
         server = create_mcp_server(_config())
         result = _call(server, "activity_laps", {"activity_id": 789})
         assert result["count"] == 1
@@ -421,7 +421,7 @@ class TestActivityTools:
             },
         )
         mocker.patch(
-            "garmin_cli.mcp_tools.activities.get_multisport_children",
+            "garmin_cli.services.activities.get_multisport_children",
             return_value=[
                 {"activityId": 101, "activityType": {"typeKey": "open_water_swimming"}},
                 {"activityId": 102, "activityType": {"typeKey": "cycling"}},
@@ -429,14 +429,14 @@ class TestActivityTools:
             ],
         )
         mocker.patch(
-            "garmin_cli.mcp_tools.activities.get_activity_splits",
+            "garmin_cli.services.activities.get_activity_splits",
             side_effect=[
                 {"lapDTOs": [{"duration": 600, "distance": 1000, "averageHR": 140}]},
                 {"lapDTOs": [{"duration": 1200, "distance": 8000, "averagePower": 220}]},
                 {"lapDTOs": [{"duration": 900, "distance": 3000, "avgGroundContactTime": 235}]},
             ],
         )
-        mocker.patch("garmin_cli.mcp_tools.activities.get_activity_typed_splits")
+        mocker.patch("garmin_cli.services.activities.get_activity_typed_splits")
         server = create_mcp_server(_config())
         result = _call(server, "activity_laps", {"activity_id": 100})
         assert result["count"] == 3
@@ -557,7 +557,7 @@ def test_activity_laps_pages_large_payload(mocker: Any) -> None:
         return_value={"activityId": 1, "activityType": {"typeKey": "running"}},
     )
     mocker.patch(
-        "garmin_cli.mcp_tools.activities.get_activity_splits",
+        "garmin_cli.services.activities.get_activity_splits",
         return_value={
             "lapDTOs": [
                 {"duration": 60, "distance": 1000}

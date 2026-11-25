@@ -205,7 +205,7 @@ class TestPerformanceTools:
     def test_performance_vo2max_with_date(self, mocker: Any) -> None:
 
         mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
-        mocker.patch("garmin_cli.mcp_tools.performance.get_vo2max", return_value=[{"calendarDate": "2026-01-01", "generic": {"vo2MaxValue": 48, "calendarDate": "2026-01-01"}}])
+        mocker.patch("garmin_cli.services.performance.get_vo2max", return_value=[{"calendarDate": "2026-01-01", "generic": {"vo2MaxValue": 48, "calendarDate": "2026-01-01"}}])
         server = create_mcp_server(_config())
         result = _call(server, "performance_vo2max", {"date": "2026-01-01"})
         assert result["count"] >= 1
@@ -213,7 +213,7 @@ class TestPerformanceTools:
     def test_performance_vo2max_latest(self, mocker: Any) -> None:
 
         mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
-        mocker.patch("garmin_cli.mcp_tools.performance.get_latest_vo2max", return_value=[
+        mocker.patch("garmin_cli.services.performance.get_latest_vo2max", return_value=[
             {"generic": {"vo2MaxValue": 48, "calendarDate": "2026-01-01"}},
             {"generic": {"vo2MaxValue": 49, "calendarDate": "2026-01-05"}},
         ])

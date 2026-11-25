@@ -23,9 +23,7 @@ from garmin_cli.endpoints.metrics import (
 from garmin_cli.endpoints.performance import (
     get_all_thresholds,
     get_lactate_threshold,
-    get_latest_vo2max,
     get_personal_records,
-    get_vo2max,
 )
 from garmin_cli.mcp_tools._shared import (
     Days,
@@ -38,13 +36,11 @@ from garmin_cli.mcp_tools._shared import (
 )
 from garmin_cli.mcp_tools._schemas import Envelope
 from garmin_cli.serializers import (
-    select_latest_dated_rows,
     serialize_endurance_score,
     serialize_hill_score,
     serialize_personal_records,
     serialize_race_predictions,
     serialize_thresholds,
-    serialize_vo2max,
     serialize_zones,
 )
 from garmin_cli.serializers.trends import (
@@ -91,18 +87,7 @@ def register_performance_tools(mcp: MCPServer, config: CliConfig) -> None:
     def performance_vo2max(date: str | None = None) -> Envelope:
         """Get VO2 max. Pass a date (YYYY-MM-DD) for a specific day, or omit for latest. Returns date, vo2max, sport."""
         target_date = _parse_date(date, "date") if date is not None else None
-        return _envelope(
-            _authenticated(
-                config,
-                lambda: fetch_vo2max(
-                    target_date,
-                    get_vo2max=get_vo2max,
-                    get_latest_vo2max=get_latest_vo2max,
-                    serialize_vo2max=serialize_vo2max,
-                    select_latest_dated_rows=select_latest_dated_rows,
-                ),
-            )
-        )
+        return _envelope(_authenticated(config, lambda: fetch_vo2max(target_date)))
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def performance_zones() -> Envelope:

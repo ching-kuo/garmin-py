@@ -598,10 +598,57 @@ class TestWorkoutDeleteCommand:
 
 class TestWorkoutScheduleCommand:
 
+    @pytest.fixture(autouse=True)
+    def _empty_calendar(self, mocker: Any) -> Any:
+        return mocker.patch("garmin_cli.services.schedule_writes.get_calendar_range", return_value=[])
+
+    def test_already_scheduled_is_no_op(self, mocker: Any, _empty_calendar: Any) -> None:
+        mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
+        _empty_calendar.return_value = [
+            {"id": 777, "itemType": "workout", "workoutId": 12345, "date": "2026-04-01"}
+        ]
+        schedule = mocker.patch("garmin_cli.services.workouts.schedule_workout")
+        result = CliRunner(mix_stderr=False).invoke(
+            cli, ["--json", "workout", "schedule", "12345", "2026-04-01"]
+        )
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["data"] == [
+            {"workout_schedule_id": 777, "date": "2026-04-01", "status": "no_op"}
+        ]
+        schedule.assert_not_called()
+
+    def test_date_with_other_workout_is_refused(self, mocker: Any, _empty_calendar: Any) -> None:
+        mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
+        _empty_calendar.return_value = [
+            {"id": 778, "itemType": "workout", "workoutId": 999, "date": "2026-04-01"}
+        ]
+        schedule = mocker.patch("garmin_cli.services.workouts.schedule_workout")
+        result = CliRunner(mix_stderr=False).invoke(
+            cli, ["--json", "workout", "schedule", "12345", "2026-04-01"]
+        )
+        assert result.exit_code == 1
+        assert "INVALID_INPUT" in result.output + result.stderr
+        schedule.assert_not_called()
+
+    def test_allow_multiple_schedules_next_to_other_workout(self, mocker: Any, _empty_calendar: Any) -> None:
+        mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
+        _empty_calendar.return_value = [
+            {"id": 778, "itemType": "workout", "workoutId": 999, "date": "2026-04-01"}
+        ]
+        schedule = mocker.patch(
+            "garmin_cli.services.workouts.schedule_workout", return_value=_SAMPLE_SCHEDULE_RESPONSE
+        )
+        result = CliRunner(mix_stderr=False).invoke(
+            cli, ["--json", "workout", "schedule", "12345", "2026-04-01", "--allow-multiple"]
+        )
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["data"][0]["status"] == "scheduled"
+        schedule.assert_called_once_with(12345, date(2026, 4, 1))
+
     def test_schedule_exit_code_0(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
         mocker.patch(
-            "garmin_cli.commands.workouts.schedule_workout",
+            "garmin_cli.services.workouts.schedule_workout",
             return_value=_SAMPLE_SCHEDULE_RESPONSE,
         )
         runner = CliRunner(mix_stderr=False)
@@ -611,7 +658,7 @@ class TestWorkoutScheduleCommand:
     def test_schedule_json_ok_true(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
         mocker.patch(
-            "garmin_cli.commands.workouts.schedule_workout",
+            "garmin_cli.services.workouts.schedule_workout",
             return_value=_SAMPLE_SCHEDULE_RESPONSE,
         )
         runner = CliRunner(mix_stderr=False)
@@ -622,12 +669,12 @@ class TestWorkoutScheduleCommand:
     def test_schedule_passes_correct_date(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
         mock_schedule = mocker.patch(
-            "garmin_cli.commands.workouts.schedule_workout",
+            "garmin_cli.services.workouts.schedule_workout",
             return_value=_SAMPLE_SCHEDULE_RESPONSE,
         )
         runner = CliRunner(mix_stderr=False)
         runner.invoke(cli, ["workout", "schedule", "12345", "2026-04-01"])
-        mock_schedule.assert_called_once_with("12345", date(2026, 4, 1))
+        mock_schedule.assert_called_once_with(12345, date(2026, 4, 1))
 
     def test_schedule_invalid_date_exit_1(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
@@ -638,7 +685,7 @@ class TestWorkoutScheduleCommand:
     def test_schedule_not_found_exit_1(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
         mocker.patch(
-            "garmin_cli.commands.workouts.schedule_workout",
+            "garmin_cli.services.workouts.schedule_workout",
             side_effect=GarminCliError(error="Not found", error_code="NOT_FOUND"),
         )
         runner = CliRunner(mix_stderr=False)
@@ -648,7 +695,7 @@ class TestWorkoutScheduleCommand:
     def test_schedule_response_has_schedule_id(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
         mocker.patch(
-            "garmin_cli.commands.workouts.schedule_workout",
+            "garmin_cli.services.workouts.schedule_workout",
             return_value=_SAMPLE_SCHEDULE_RESPONSE,
         )
         runner = CliRunner(mix_stderr=False)

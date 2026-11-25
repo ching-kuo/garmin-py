@@ -6,6 +6,7 @@ from collections import Counter
 from datetime import date
 from typing import Any
 
+from garmin_cli.services.plan_results import invalid_plan_result
 from garmin_cli.workout_schema import (
     NON_SCHEDULE_ITEM_TYPES,
     is_positive_id,
@@ -218,8 +219,16 @@ def is_schedule_row(row: dict[str, Any]) -> bool:
 
 
 def blocking_occupants(rows: list[dict[str, Any]], source_id: int | None) -> list[dict[str, Any]]:
-    """Scheduled workouts other than the entry's own source (a same-date replace)."""
-    return [row for row in rows if is_schedule_row(row) and row.get("workout_schedule_id") != source_id]
+    """Scheduled workouts other than the entry's own source (a same-date replace).
+
+    Only a known positive *source_id* exempts a row: a row without a schedule
+    id never matches an entry without a source.
+    """
+    return [
+        row
+        for row in rows
+        if is_schedule_row(row) and not (is_positive_id(source_id) and row.get("workout_schedule_id") == source_id)
+    ]
 
 
 def vacated_schedule_owners(plan: dict[str, Any], schedules: dict[int, dict[str, Any]]) -> dict[Any, str | None]:
@@ -250,13 +259,7 @@ def preview_training_plan(
     """Create a stable, read-only diff against current calendar state."""
     errors = validate_training_plan(plan)
     if errors:
-        return {
-            "complete": False,
-            "operations": [],
-            "errors": [{"error_code": "INVALID_INPUT", "message": error} for error in errors],
-            "conflicts": [],
-            "summary": {},
-        }
+        return invalid_plan_result(errors)
     schedules = source_by_schedule(calendar)
     vacated = vacated_schedule_owners(plan, schedules)
     operations: list[dict[str, Any]] = []

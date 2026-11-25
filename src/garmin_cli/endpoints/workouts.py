@@ -130,9 +130,14 @@ def _get_scheduled_by_period(start: date, end: date, *, strict: bool = False) ->
         reason = exc.error_code if isinstance(exc, GarminCliError) else type(exc).__name__
         logger.debug("workoutScheduleByPeriod unavailable (%s); calendar only", reason)
         return []
-    if strict and not isinstance(result, list):
+    if strict and not isinstance(result, list) and not _no_content(result):
         raise _unusable("workoutScheduleByPeriod lookup")
     return result if isinstance(result, list) else []
+
+
+def _no_content(payload: Any) -> bool:
+    """An HTTP 204 (an empty period): garminconnect returns {} for it."""
+    return payload is None or payload == {}
 
 
 def _unusable(what: str) -> GarminCliError:
@@ -171,7 +176,8 @@ def get_calendar_range_counted(start: date, end: date, *, strict: bool = False) 
     schedule id is already a schedule on the calendar, and the result is
     ordered by date. With *strict*, a failed ``workoutScheduleByPeriod``
     lookup or a page or lookup without a list of items raises instead of
-    reading as empty, so callers can trust an absence.
+    reading as empty, so callers can trust an absence; a no-content (HTTP
+    204) response still reads as empty.
     """
     all_items: list = []
     # Pages overlap only after a page without usable bounds.
@@ -184,11 +190,11 @@ def get_calendar_range_counted(start: date, end: date, *, strict: bool = False) 
             f"/calendar-service/year/{current.year}/month/{current.month - 1}"
             f"/day/{current.day}/start/1"
         )
-        response = _request(url)
+        raw_page = _request(url)
         pages += 1
-        response = response if isinstance(response, dict) else {}
+        response = raw_page if isinstance(raw_page, dict) else {}
         page_items = response.get("calendarItems")
-        if strict and not isinstance(page_items, list):
+        if strict and not isinstance(page_items, list) and not _no_content(raw_page):
             raise _unusable("calendar page")
         for item in page_items if isinstance(page_items, list) else []:
             if not _in_range(item, start, end):

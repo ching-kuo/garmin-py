@@ -178,7 +178,7 @@ class TestPerformanceVo2maxCommand:
     def test_vo2max_exit_code_0(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
         mocker.patch(
-            "garmin_cli.commands.performance.get_vo2max",
+            "garmin_cli.services.performance.get_vo2max",
             return_value={"vo2MaxValue": 52.0},
         )
         runner = CliRunner(mix_stderr=False)
@@ -190,7 +190,7 @@ class TestPerformanceVo2maxCommand:
     def test_vo2max_json_envelope(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
         mocker.patch(
-            "garmin_cli.commands.performance.get_vo2max",
+            "garmin_cli.services.performance.get_vo2max",
             return_value={"vo2MaxValue": 52.0},
         )
         runner = CliRunner(mix_stderr=False)
@@ -203,7 +203,7 @@ class TestPerformanceVo2maxCommand:
     def test_vo2max_default_to_today(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
         mock_latest = mocker.patch(
-            "garmin_cli.commands.performance.get_latest_vo2max",
+            "garmin_cli.services.performance.get_latest_vo2max",
             return_value=[{"generic": {"calendarDate": "2026-03-10", "vo2MaxValue": 52.0}}],
         )
         runner = CliRunner(mix_stderr=False)
@@ -224,7 +224,7 @@ class TestPerformanceVo2maxCommand:
     def test_vo2max_table_output_handles_list_payload(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
         mocker.patch(
-            "garmin_cli.commands.performance.get_vo2max",
+            "garmin_cli.services.performance.get_vo2max",
             return_value=[{"calendarDate": "2026-03-11", "vo2MaxValue": 52.0}],
         )
         runner = CliRunner(mix_stderr=False)
@@ -235,7 +235,7 @@ class TestPerformanceVo2maxCommand:
     def test_vo2max_default_limits_output_to_latest_day(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.performance.ensure_authenticated")
         mocker.patch(
-            "garmin_cli.commands.performance.get_latest_vo2max",
+            "garmin_cli.services.performance.get_latest_vo2max",
             return_value=[
                 {
                     "generic": {

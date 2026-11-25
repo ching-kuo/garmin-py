@@ -19,11 +19,9 @@ from garmin_cli.endpoints.workouts import (
     get_calendar_range,
     get_workout,
     list_workouts,
-    schedule_workout,
     unschedule_workout,
     update_workout,
 )
-from garmin_cli.exceptions import GarminCliError
 from garmin_cli.mcp_tools._audit import WriteLogEvent, _emit_audit, _write_audit
 from garmin_cli.mcp_tools._shared import (
     StrictId,
@@ -42,6 +40,7 @@ from garmin_cli.serializers import (
     serialize_workout_detail,
     serialize_workout_summary,
 )
+from garmin_cli.services.workouts import schedule_workout_once
 from garmin_cli.workout_builder import build_garmin_payload, merge_workout_payload
 from garmin_cli.workout_schema import validate_workout_input
 
@@ -145,61 +144,21 @@ def register_workout_tools(mcp: MCPServer, config: CliConfig) -> None:
             }])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
-    def workout_schedule(workout_id: StrictId, date: str) -> Envelope:
-        """Schedule a saved workout on a calendar date (YYYY-MM-DD).
+    def workout_schedule(workout_id: StrictId, date: str, allow_multiple: bool = False) -> Envelope:
+        """Schedule a saved workout on a date (YYYY-MM-DD). Destructive.
 
-        Destructive: a scheduled date is added to the user's training calendar.
-        Returns ``ok: True, action: "scheduled", workout_id,
-        workout_schedule_id, date`` on success.
+        Returns ok, action ("scheduled" or "no_op"), workout_id,
+        workout_schedule_id (may be null), date. Refuses a date with another
+        workout unless allow_multiple.
         """
         _validate_positive_id(workout_id, "workout_id")
         parsed_date = _parse_date(date, "date")
         base = WriteLogEvent(tool="workout_schedule", outcome="success", workout_id=workout_id)
         with _write_audit(base, _emit_write_log) as audit:
             ensure_authenticated(config)
-            calendar = get_calendar_range(parsed_date, parsed_date)
-            scheduled = serialize_calendar_workout({"calendarItems": calendar})
-            existing = next(
-                (
-                    row
-                    for row in scheduled
-                    if row.get("workout_id") == workout_id
-                ),
-                None,
-            )
-            if existing is not None:
-                audit.success()
-                return _envelope([{
-                    "ok": True,
-                    "action": "no_op",
-                    "workout_id": workout_id,
-                    "workout_schedule_id": existing.get("workout_schedule_id"),
-                    "date": parsed_date.isoformat(),
-                }])
-            if any(row.get("workout_id") is not None for row in scheduled):
-                raise GarminCliError(
-                    error="Target date already has a different scheduled workout.",
-                    error_code="INVALID_INPUT",
-                )
-            raw = schedule_workout(workout_id, parsed_date)
-            raw_dict = raw if isinstance(raw, dict) else {}
-            schedule_id = raw_dict.get("workoutScheduleId")
-            if not isinstance(schedule_id, int):
-                # Garmin occasionally omits the id from the write response;
-                # re-read the date so the caller can still unschedule later.
-                re_read = serialize_calendar_workout(
-                    {"calendarItems": get_calendar_range(parsed_date, parsed_date)}
-                )
-                match = next((row for row in re_read if row.get("workout_id") == workout_id), None)
-                schedule_id = match.get("workout_schedule_id") if match is not None else None
+            result = schedule_workout_once(workout_id, parsed_date, allow_multiple=allow_multiple)
             audit.success()
-            return _envelope([{
-                "ok": True,
-                "action": "scheduled",
-                "workout_id": workout_id,
-                "workout_schedule_id": schedule_id,
-                "date": raw_dict.get("calendarDate") or parsed_date.isoformat(),
-            }])
+            return _envelope([{"ok": True, **result}])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
     def workout_update(

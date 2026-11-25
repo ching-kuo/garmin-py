@@ -29,8 +29,6 @@ from garmin_cli.endpoints.activities import (
     get_activity,
     get_activity_details,
     get_activity_hr_in_timezones,
-    get_activity_splits,
-    get_activity_typed_splits,
     get_activity_weather,
     get_multisport_children,
     is_multisport_parent,
@@ -39,7 +37,6 @@ from garmin_cli.endpoints.activities import (
     set_activity_type,
     upload_activity,
 )
-from garmin_cli.metrics.sport_profile import SportProfile
 from garmin_cli.output import (
     echo_csv,
     echo_json,
@@ -67,13 +64,11 @@ from garmin_cli.serializers import (
     serialize_activity_detail,
     serialize_activity_download,
     serialize_activity_hr_zones,
-    serialize_activity_laps,
     serialize_activity_rename,
     serialize_activity_set_type,
     serialize_activity_summary,
     serialize_activity_upload,
     serialize_activity_weather,
-    serialize_capability_manifest,
     serialize_detail_metrics,
     serialize_metrics_descriptors,
     serialize_multisport_children,
@@ -132,35 +127,6 @@ def list_cmd(
     )
 
 
-def _fetch_laps_for_activity(
-    raw: dict[str, Any], activity_id: str, children: list[dict[str, Any]] | None = None
-) -> tuple[list[dict[str, Any]], SportProfile]:
-    """Fetch laps for an activity, handling multisport parents.
-
-    For multisport parents, iterates child legs, fetches each child's laps,
-    and stamps ``leg_index`` (0-based) onto every returned row. The returned
-    profile is the parent's profile (for table column hint); per-row
-    sport-specificity remains intact via the columns each row carries. Pass
-    an already-fetched ``children`` list to avoid a redundant
-    ``get_multisport_children`` round-trip when the caller fetched it already.
-
-    Thin wrapper over :func:`garmin_cli.services.activities.fetch_laps_for_activity`
-    that binds this module's endpoint/serializer references so test patches on
-    ``garmin_cli.commands.activities.*`` stay effective.
-    """
-    return fetch_laps_for_activity(
-        raw,
-        activity_id,
-        activity_type_key=activity_type_key,
-        is_multisport_parent=is_multisport_parent,
-        get_multisport_children=get_multisport_children,
-        splits_fn=get_activity_splits,
-        typed_splits_fn=get_activity_typed_splits,
-        serialize_laps=serialize_activity_laps,
-        children=children,
-    )
-
-
 @activity.command("get")
 @click.argument("activity_id")
 @click.option("--detail", "-d", is_flag=True, default=False)
@@ -203,19 +169,13 @@ def get_cmd(ctx: click.Context, activity_id: str, detail: bool, include_laps: bo
     laps_rows: list[dict[str, Any]] = []
     laps_profile = None
     if include_laps:
-        laps_rows, laps_profile = _fetch_laps_for_activity(raw, activity_id, children_raw)
+        laps_rows, laps_profile = fetch_laps_for_activity(raw, activity_id, children_raw)
 
     # Capability manifest: only when --detail is set. Multisport parent
     # envelopes union per-child manifests with leg_index attached.
     manifest: list[dict[str, Any]] = []
     if detail and not detail_csv:
-        manifest = build_capability_manifest(
-            raw,
-            data,
-            children_raw,
-            serialize_detail=serialize_activity_detail,
-            serialize_manifest=serialize_capability_manifest,
-        )
+        manifest = build_capability_manifest(raw, data, children_raw)
 
     if fmt == "json":
         envelope = make_envelope(command="activity get", data=data)
@@ -256,7 +216,7 @@ def laps_cmd(ctx: click.Context, activity_id: str) -> None:
     """Get lap-by-lap data for an activity (per-pool-length for pool swim)."""
     ensure_authenticated(ctx.obj["config"])
     raw = get_activity(activity_id)
-    rows, profile = _fetch_laps_for_activity(raw, activity_id)
+    rows, profile = fetch_laps_for_activity(raw, activity_id)
     columns = columns_for_lap(profile)
     render_output(ctx.obj["config"].output_format, "activity laps", rows, columns)
 

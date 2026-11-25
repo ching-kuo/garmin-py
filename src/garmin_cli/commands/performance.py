@@ -24,10 +24,8 @@ from garmin_cli.endpoints.metrics import (
 )
 from garmin_cli.endpoints.performance import (
     get_all_thresholds,
-    get_latest_vo2max,
     get_lactate_threshold,
     get_personal_records,
-    get_vo2max,
 )
 from garmin_cli.output import render_output
 from garmin_cli.serializers import (
@@ -38,13 +36,11 @@ from garmin_cli.serializers import (
     COLUMNS_THRESHOLDS,
     COLUMNS_VO2MAX,
     COLUMNS_ZONES,
-    select_latest_dated_rows,
     serialize_endurance_score,
     serialize_hill_score,
     serialize_personal_records,
     serialize_race_predictions,
     serialize_thresholds,
-    serialize_vo2max,
     serialize_zones,
 )
 from garmin_cli.serializers.trends import (
@@ -83,13 +79,7 @@ def thresholds_cmd(ctx: click.Context) -> None:
 def vo2max_cmd(ctx: click.Context, value_date: datetime | None) -> None:
     """Get VO2 max for a day."""
     ensure_authenticated(ctx.obj["config"])
-    data = fetch_vo2max(
-        value_date.date() if value_date else None,
-        get_vo2max=get_vo2max,
-        get_latest_vo2max=get_latest_vo2max,
-        serialize_vo2max=serialize_vo2max,
-        select_latest_dated_rows=select_latest_dated_rows,
-    )
+    data = fetch_vo2max(value_date.date() if value_date else None)
     render_output(ctx.obj["config"].output_format, "performance vo2max", data, COLUMNS_VO2MAX)
 
 

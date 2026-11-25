@@ -163,7 +163,7 @@ def test_plan_apply_records_the_plan_outcome(
     mocker: Any, lines: list[Any], server: Any, result: dict[str, Any], outcome: str
 ) -> None:
     mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
-    mocker.patch("garmin_cli.mcp_tools.training_plan._apply_plan", return_value=result)
+    mocker.patch("garmin_cli.mcp_tools.training_plan.apply_training_plan", return_value=result)
     _call(server, "training_plan_apply", {"plan": _PLAN})
     assert [(line["outcome"], line["plan_outcome"]) for line in lines] == [(outcome, result["outcome"])]
 

@@ -280,13 +280,13 @@ garmin-cli workout create   FILE [--dry-run]       # JSON or YAML file
 garmin-cli workout create   --stdin                # read JSON from stdin
 garmin-cli workout update   WORKOUT_ID FILE [--dry-run] # partial update (only fields provided change)
 garmin-cli workout delete   WORKOUT_ID [--confirm] # --confirm (--yes/-y) skips interactive prompt
-garmin-cli workout schedule WORKOUT_ID DATE        # DATE = YYYY-MM-DD
+garmin-cli workout schedule WORKOUT_ID DATE [--allow-multiple] # DATE = YYYY-MM-DD
 garmin-cli workout unschedule SCHEDULE_ID [--confirm] # removes a calendar entry; SCHEDULE_ID is the workout_schedule_id returned by schedule
 ```
 
 `--ahead N` shows the next N days of planned workouts (future-facing; the default is the next 7 days). `--days N` shows past N days.
 
-`--dry-run` validates the input and prints the Garmin payload without saving (`--json`: `data[0]` has `dry_run: true` and `wire_payload`). `workout create --dry-run` needs no login; `workout update --dry-run` still reads the existing workout to merge it. `workout schedule` reports the new entry as `workout_schedule_id`.
+`--dry-run` validates the input and prints the Garmin payload without saving (`--json`: `data[0]` has `dry_run: true` and `wire_payload`). `workout create --dry-run` needs no login; `workout update --dry-run` still reads the existing workout to merge it. `workout schedule` reports the new entry as `workout_schedule_id`; when the workout is already on that date it reports status `no_op` without writing, and a date holding a different workout is refused with `INVALID_INPUT` unless you pass `--allow-multiple` (logged activities on the date do not count). The id may be empty when Garmin returns none and the date cannot be re-read; `workout calendar` shows it later.
 
 YAML input is supported out of the box. See [SKILL.md](SKILL.md) for the full workout JSON schema reference and step/target types.
 

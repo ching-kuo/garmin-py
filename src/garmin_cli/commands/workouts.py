@@ -26,7 +26,6 @@ from garmin_cli.endpoints.workouts import (
     get_calendar_range,
     get_workout,
     list_workouts,
-    schedule_workout,
     unschedule_workout,
     update_workout,
 )
@@ -43,6 +42,7 @@ from garmin_cli.serializers import (
     serialize_workout_mutate,
     serialize_workout_summary,
 )
+from garmin_cli.services.workouts import schedule_workout_once
 from garmin_cli.workout_builder import build_garmin_payload, merge_workout_payload
 from garmin_cli.workout_schema import validate_workout_input
 
@@ -216,17 +216,26 @@ def delete_cmd(ctx: click.Context, workout_id: str, confirm: bool) -> None:
 @workout.command("schedule")
 @click.argument("workout_id")
 @click.argument("schedule_date", metavar="DATE", type=CLICK_DATE_TYPE)
+@click.option(
+    "--allow-multiple", is_flag=True, default=False,
+    help="Schedule even when the date already holds a different workout.",
+)
 @click.pass_context
-def schedule_cmd(ctx: click.Context, workout_id: str, schedule_date: datetime) -> None:
-    """Schedule a workout on a specific date (YYYY-MM-DD)."""
+def schedule_cmd(ctx: click.Context, workout_id: str, schedule_date: datetime, allow_multiple: bool) -> None:
+    """Schedule a workout on a specific date (YYYY-MM-DD).
+
+    Already scheduled there: reports status "no_op" without writing. A date
+    holding a different workout is refused unless --allow-multiple. The
+    schedule id may be empty when Garmin returns none.
+    """
+    validated_id = _validate_numeric_id(workout_id, "workout_id")
     ensure_authenticated(ctx.obj["config"])
-    raw = schedule_workout(workout_id, schedule_date.date())
-    raw_dict = raw if isinstance(raw, dict) else {}
+    result = schedule_workout_once(validated_id, schedule_date.date(), allow_multiple=allow_multiple)
     data: list[dict[str, Any]] = [
         {
-            "workout_schedule_id": raw_dict.get("workoutScheduleId"),
-            "date": raw_dict.get("calendarDate"),
-            "status": "scheduled",
+            "workout_schedule_id": result["workout_schedule_id"],
+            "date": result["date"],
+            "status": result["action"],
         }
     ]
     render_output(

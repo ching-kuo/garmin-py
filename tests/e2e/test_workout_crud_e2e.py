@@ -24,6 +24,11 @@ MINIMAL_WORKOUT: dict = {
 }
 
 
+def _schedule_args() -> list[str]:
+    """A far-future date clear of real training; --allow-multiple so a busy day cannot fail it."""
+    return [(date.today() + timedelta(days=90)).isoformat(), "--allow-multiple"]
+
+
 @pytest.mark.e2e
 def test_workout_create_schedule_delete(run_cli: Any, tmp_path: Any) -> None:
     """Full CRUD flow: create -> verify -> schedule -> delete."""
@@ -34,6 +39,7 @@ def test_workout_create_schedule_delete(run_cli: Any, tmp_path: Any) -> None:
     workout_file.write_text(json.dumps(workout_data))
 
     created_id = None
+    schedule_id = None
     try:
         # Create
         result, parsed = run_cli(["workout", "create", str(workout_file)])
@@ -42,12 +48,13 @@ def test_workout_create_schedule_delete(run_cli: Any, tmp_path: Any) -> None:
         created_id = parsed["data"][0].get("id") or parsed["data"][0].get("workoutId")
         assert created_id is not None
 
-        # Schedule for tomorrow
-        tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        result, parsed = run_cli(["workout", "schedule", str(created_id), tomorrow])
+        result, parsed = run_cli(["workout", "schedule", str(created_id), *_schedule_args()])
         assert_exit_ok(result)
         assert_envelope_ok(parsed)
+        schedule_id = parsed["data"][0].get("workout_schedule_id")
     finally:
+        if schedule_id:
+            run_cli(["workout", "unschedule", str(schedule_id), "--confirm"])
         if created_id:
             result, parsed = run_cli(
                 ["workout", "delete", str(created_id), "--confirm"]
@@ -139,18 +146,20 @@ def test_workout_schedule_returns_schedule_id(run_cli: Any, tmp_path: Any) -> No
     workout_file.write_text(json.dumps(workout_data))
 
     created_id = None
+    schedule_id = None
     try:
         result, parsed = run_cli(["workout", "create", str(workout_file)])
         assert_exit_ok(result)
         created_id = parsed["data"][0].get("id") or parsed["data"][0].get("workoutId")
 
-        tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        result, parsed = run_cli(["workout", "schedule", str(created_id), tomorrow])
+        result, parsed = run_cli(["workout", "schedule", str(created_id), *_schedule_args()])
         assert_exit_ok(result)
         assert_envelope_ok(parsed)
         row = parsed["data"][0]
         schedule_id = row.get("workout_schedule_id")
         assert schedule_id is not None
     finally:
+        if schedule_id:
+            run_cli(["workout", "unschedule", str(schedule_id), "--confirm"])
         if created_id:
             run_cli(["workout", "delete", str(created_id), "--confirm"])

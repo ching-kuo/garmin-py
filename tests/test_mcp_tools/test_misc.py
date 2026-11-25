@@ -381,7 +381,7 @@ class TestReportSnapshot:
         mocker.patch("garmin_cli.mcp_tools.misc.get_hrv", return_value={"hrvSummaries": []})
         mocker.patch("garmin_cli.mcp_tools.misc.get_training_readiness_range", return_value=[])
         mocker.patch("garmin_cli.mcp_tools.misc.get_body_battery_range", return_value=[])
-        cal = mocker.patch("garmin_cli.mcp_tools.misc.get_calendar_range", return_value=[])
+        cal = mocker.patch("garmin_cli.services.schedule_writes.get_calendar_range", return_value=[])
 
         result = _call(self._server(), "report_snapshot", {"kind": "morning", "date": "2026-06-12"})
 
@@ -390,14 +390,14 @@ class TestReportSnapshot:
         assert set(result["sections"]) == {"sleep", "hrv", "readiness", "body_battery", "planned_today"}
         assert len(result["sections"]["sleep"]) == 1
         # planned_today fetches the anchor day
-        cal.assert_called_once_with(date(2026, 6, 12), date(2026, 6, 12))
+        cal.assert_called_once_with(date(2026, 6, 12), date(2026, 6, 12), strict=False)
 
     def test_evening_planned_tomorrow_uses_next_day(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
         for fn in ("get_steps_range", "get_intensity_minutes_range", "get_stress_range", "get_body_battery_range"):
             mocker.patch(f"garmin_cli.mcp_tools.misc.{fn}", return_value=[])
         mocker.patch("garmin_cli.mcp_tools.misc.list_activities", return_value=[])
-        cal = mocker.patch("garmin_cli.mcp_tools.misc.get_calendar_range", return_value=[])
+        cal = mocker.patch("garmin_cli.services.schedule_writes.get_calendar_range", return_value=[])
 
         result = _call(self._server(), "report_snapshot", {"kind": "evening", "date": "2026-06-12"})
 
@@ -405,7 +405,7 @@ class TestReportSnapshot:
         assert set(result["sections"]) == {
             "steps", "intensity_minutes", "stress", "body_battery", "activities_today", "planned_tomorrow",
         }
-        cal.assert_called_once_with(date(2026, 6, 13), date(2026, 6, 13))
+        cal.assert_called_once_with(date(2026, 6, 13), date(2026, 6, 13), strict=False)
 
     def test_weekly_spans_seven_days(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
@@ -436,7 +436,7 @@ class TestReportSnapshot:
         )
         mocker.patch("garmin_cli.mcp_tools.misc.get_training_readiness_range", return_value=[])
         mocker.patch("garmin_cli.mcp_tools.misc.get_body_battery_range", return_value=[])
-        mocker.patch("garmin_cli.mcp_tools.misc.get_calendar_range", return_value=[])
+        mocker.patch("garmin_cli.services.schedule_writes.get_calendar_range", return_value=[])
 
         result = _call(self._server(), "report_snapshot", {"kind": "morning", "date": "2026-06-12"})
 
@@ -455,7 +455,7 @@ class TestReportSnapshot:
         mocker.patch("garmin_cli.mcp_tools.misc.get_hrv", return_value={"hrvSummaries": []})
         mocker.patch("garmin_cli.mcp_tools.misc.get_training_readiness_range", return_value=[])
         mocker.patch("garmin_cli.mcp_tools.misc.get_body_battery_range", return_value=[])
-        mocker.patch("garmin_cli.mcp_tools.misc.get_calendar_range", return_value=[])
+        mocker.patch("garmin_cli.services.schedule_writes.get_calendar_range", return_value=[])
         with pytest.raises(ToolError, match="rate limited"):
             _call(self._server(), "report_snapshot", {"kind": "morning", "date": "2026-06-12"})
 
@@ -468,7 +468,7 @@ class TestReportSnapshot:
         mocker.patch("garmin_cli.mcp_tools.misc.get_training_readiness_range", return_value=[])
         mocker.patch("garmin_cli.mcp_tools.misc.get_body_battery_range", return_value=[])
         mocker.patch(
-            "garmin_cli.mcp_tools.misc.get_calendar_range",
+            "garmin_cli.services.schedule_writes.get_calendar_range",
             side_effect=GarminCliError(error="upstream broke", error_code="SERVER_ERROR"),
         )
         with pytest.raises(ToolError, match="upstream broke"):
@@ -495,7 +495,7 @@ class TestReportSnapshot:
         mocker.patch("garmin_cli.mcp_tools.misc.get_hrv", return_value={"hrvSummaries": []})
         mocker.patch("garmin_cli.mcp_tools.misc.get_training_readiness_range", return_value=[])
         mocker.patch("garmin_cli.mcp_tools.misc.get_body_battery_range", side_effect=gate_opener)
-        mocker.patch("garmin_cli.mcp_tools.misc.get_calendar_range", return_value=[])
+        mocker.patch("garmin_cli.services.schedule_writes.get_calendar_range", return_value=[])
 
         result = _call(self._server(), "report_snapshot", {"kind": "morning", "date": "2026-06-12"})
 
@@ -527,7 +527,7 @@ class TestReportSnapshot:
         mocker.patch("garmin_cli.mcp_tools.misc.get_hrv", return_value={"hrvSummaries": []})
         mocker.patch("garmin_cli.mcp_tools.misc.get_training_readiness_range", return_value=[])
         mocker.patch("garmin_cli.mcp_tools.misc.get_body_battery_range", return_value=[])
-        mocker.patch("garmin_cli.mcp_tools.misc.get_calendar_range", return_value=[])
+        mocker.patch("garmin_cli.services.schedule_writes.get_calendar_range", return_value=[])
 
         result = _call(self._server(), "report_snapshot", {"kind": "morning"})
         assert result["date_range"] == {"from": "2026-06-12", "to": "2026-06-12"}

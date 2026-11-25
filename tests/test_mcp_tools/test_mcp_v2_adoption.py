@@ -120,8 +120,8 @@ def test_activity_laps_paging_validates_both_optional_paths(mocker: Any) -> None
     mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
     mocker.patch("garmin_cli.mcp_tools.activities.get_activity", return_value={})
     mocker.patch(
-        "garmin_cli.mcp_tools.activities._fetch_laps_rows_for_activity",
-        return_value=[{"id": value} for value in range(101)],
+        "garmin_cli.mcp_tools.activities.fetch_laps_for_activity",
+        return_value=([{"id": value} for value in range(101)], None),
     )
     server = create_mcp_server(_config())
 

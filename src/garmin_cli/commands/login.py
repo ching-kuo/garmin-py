@@ -11,7 +11,7 @@ import click
 from click.core import ParameterSource
 
 from garmin_cli import backend as garth
-from garmin_cli.auth import _secure_directory, resume_and_probe
+from garmin_cli.auth import _persist_session, _secure_directory, resume_and_probe
 from garmin_cli.backend import PendingMFA
 from garmin_cli.commands import _options
 from garmin_cli.commands._options import OutputGroup, output_options
@@ -143,10 +143,8 @@ def login(
                 ),
                 error_code="MFA_REQUIRED",
             )
-        # Kept inline rather than reusing auth._persist_session: tests patch
-        # this module's ``garth`` seam, and the helper would bypass it.
-        os.makedirs(garmin_home, mode=0o700, exist_ok=True)
-        garth.save(garmin_home, client)
+        # Pass this module's garth so tests patching it here stay effective.
+        _persist_session(garmin_home, client, garth)
     except GarminCliError:
         raise
     except Exception as exc:

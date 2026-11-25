@@ -45,11 +45,12 @@ class _FakeCalendar:
     def install(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
         mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
-        mocker.patch("garmin_cli.mcp_tools.training_plan.get_calendar_range", side_effect=self.get)
-        mocker.patch("garmin_cli.mcp_tools.training_plan.schedule_workout", side_effect=self.schedule)
-        mocker.patch("garmin_cli.mcp_tools.training_plan.unschedule_workout", side_effect=self.unschedule)
+        mocker.patch("garmin_cli.services.schedule_writes.get_calendar_range", side_effect=self.get)
+        for module in ("plan_apply", "plan_reschedule"):
+            mocker.patch(f"garmin_cli.services.{module}.schedule_workout", side_effect=self.schedule)
+            mocker.patch(f"garmin_cli.services.{module}.unschedule_workout", side_effect=self.unschedule)
         mocker.patch(
-            "garmin_cli.mcp_tools.training_plan.get_workout",
+            "garmin_cli.services.plan_apply.get_workout",
             return_value={"workoutName": "Run", "sportType": {"sportTypeKey": "running"}, "workoutSegments": []},
         )
 
@@ -292,8 +293,43 @@ def test_apply_does_not_vacate_a_source_that_moved_onto_the_destination(mocker: 
     assert fake.calls == []
 
 
+def test_apply_never_deletes_a_source_that_moved_to_a_third_date(mocker: Any) -> None:
+    fake = _FakeCalendar([("2026-07-07", 10, 1)])
+    fake.moves_after_first_read = {1: "2026-07-12"}  # moved elsewhere after the plan snapshot
+    fake.install(mocker)
+    plan = _plan()
+    plan["entries"][0].update({"move_from_schedule_id": 1, "expected_source_date": "2026-07-07"})
+
+    result = _apply(plan)
+
+    assert result["outcome"] == "compensated"
+    assert result["conflicts"] == [{"entry_id": "run-1", "reason": "source_schedule_changed"}]
+    assert ("unschedule", 1) not in fake.calls
+    assert fake.by_date() == {"2026-07-12": [10]}
+
+
+def test_apply_source_recheck_failure_deletes_nothing(mocker: Any) -> None:
+    fake = _FakeCalendar([("2026-07-07", 10, 1)])
+    fake.install(mocker)
+    plan = _plan()
+    plan["entries"][0].update({"move_from_schedule_id": 1, "expected_source_date": "2026-07-07"})
+    original_schedule = fake.schedule
+
+    def schedule_then_break_strict_reads(workout_id: int, day: Any) -> dict[str, Any]:
+        fake.incomplete = True
+        return original_schedule(workout_id, day)
+
+    mocker.patch("garmin_cli.services.plan_apply.schedule_workout", side_effect=schedule_then_break_strict_reads)
+
+    result = _apply(plan)
+
+    assert result["outcome"] == "compensated"
+    assert ("unschedule", 1) not in fake.calls
+    assert fake.by_date() == {"2026-07-07": [10]}
+
+
 def test_restore_continues_past_an_unparsable_source_date(mocker: Any) -> None:
-    from garmin_cli.mcp_tools.training_plan import _restore_sources
+    from garmin_cli.services.plan_apply import _restore_sources
 
     fake = _FakeCalendar([])
     fake.install(mocker)

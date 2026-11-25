@@ -6,6 +6,8 @@ from collections import Counter
 from datetime import date
 from typing import Any
 
+from garmin_cli.services.training_plan import is_schedule_row
+
 
 def _date_part(value: Any) -> str | None:
     return value[:10] if isinstance(value, str) and len(value) >= 10 else None
@@ -65,7 +67,7 @@ def reconcile_plan(
     scheduled = [
         row
         for row in calendar_rows
-        if row.get("workout_id") is not None
+        if is_schedule_row(row)
         and isinstance(row.get("date"), str)
         and start_iso <= row["date"] <= end_iso
     ]

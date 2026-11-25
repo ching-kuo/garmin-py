@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from garmin_cli.serializers import serialize_workout_detail
-from garmin_cli.services.training_plan import preview_training_plan, validate_training_plan
+from garmin_cli.services.training_plan import blocking_occupants, preview_training_plan, validate_training_plan
 from garmin_cli.workout_builder import build_garmin_payload
 
 
@@ -110,6 +110,18 @@ def test_preview_reports_keep_for_existing_schedule() -> None:
             "workout_schedule_id": 99,
         }
     ]
+
+
+def test_preview_occupant_without_schedule_id_blocks_an_entry_without_source() -> None:
+    # A missing schedule id (None) must not match the entry's missing source (None).
+    result = preview_training_plan(_plan(), [{"date": "2026-07-10", "workout_id": 20, "item_type": "workout"}], {20: None})
+    assert result["conflicts"] == [{"entry_id": "run-1", "reason": "destination_occupied"}]
+
+
+def test_blocking_occupants_exempts_only_the_named_positive_source() -> None:
+    rows = [{"workout_id": 20, "workout_schedule_id": 5}, {"workout_id": 30}]
+    assert blocking_occupants(rows, 5) == [{"workout_id": 30}]
+    assert blocking_occupants(rows, None) == rows
 
 
 def test_preview_detects_changed_source() -> None:

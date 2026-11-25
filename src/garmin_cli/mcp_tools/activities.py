@@ -10,12 +10,9 @@ from pydantic.json_schema import SkipJsonSchema
 
 from garmin_cli.config import CliConfig
 from garmin_cli.endpoints.activities import (
-    activity_type_key,
     get_activity,
     get_activity_details,
     get_activity_hr_in_timezones,
-    get_activity_splits,
-    get_activity_typed_splits,
     get_activity_weather,
     get_multisport_children,
     is_multisport_parent,
@@ -38,10 +35,8 @@ from garmin_cli.mcp_tools._schemas import (
 from garmin_cli.serializers import (
     serialize_activity_detail,
     serialize_activity_hr_zones,
-    serialize_activity_laps,
     serialize_activity_summary,
     serialize_activity_weather,
-    serialize_capability_manifest,
     serialize_detail_metrics,
     serialize_metrics_descriptors,
     serialize_multisport_children,
@@ -80,27 +75,6 @@ def _auto_max_samples(rows: list[dict[str, Any]]) -> int:
     return max(100, min(1000, _AUTO_CELL_BUDGET // columns))
 
 
-def _fetch_laps_rows_for_activity(activity: dict[str, Any], activity_id: Any) -> list[dict[str, Any]]:
-    """Fetch laps; for multisport parents, fan out to children with leg_index.
-
-    Thin wrapper over :func:`garmin_cli.services.activities.fetch_laps_for_activity`
-    that binds this module's endpoint/serializer references so test patches on
-    ``garmin_cli.mcp_tools.activities.*`` stay effective. The service returns a
-    ``(rows, profile)`` pair; the MCP front-end uses only the rows.
-    """
-    rows, _profile = fetch_laps_for_activity(
-        activity,
-        activity_id,
-        activity_type_key=activity_type_key,
-        is_multisport_parent=is_multisport_parent,
-        get_multisport_children=get_multisport_children,
-        splits_fn=get_activity_splits,
-        typed_splits_fn=get_activity_typed_splits,
-        serialize_laps=serialize_activity_laps,
-    )
-    return rows
-
-
 def _activity_get_result(activity_id: int, detail: bool = False) -> ActivityGetEnvelope:
     """Build the shared activity-get payload used by tools and resources."""
     raw = get_activity(activity_id)
@@ -113,13 +87,7 @@ def _activity_get_result(activity_id: int, detail: bool = False) -> ActivityGetE
             children = fetched
             result["children"] = serialize_multisport_children(fetched)
     if detail:
-        manifest = build_capability_manifest(
-            raw,
-            rows,
-            children,
-            serialize_detail=serialize_activity_detail,
-            serialize_manifest=serialize_capability_manifest,
-        )
+        manifest = build_capability_manifest(raw, rows, children)
         if manifest:
             result["unavailable"] = manifest
     return result
@@ -186,7 +154,7 @@ def register_activity_tools(mcp: MCPServer, config: CliConfig) -> None:
         return _authenticated(
             config,
             lambda: _envelope(
-                _fetch_laps_rows_for_activity(get_activity(activity_id), activity_id),
+                fetch_laps_for_activity(get_activity(activity_id), activity_id)[0],
                 cap=100,
                 offset=offset,
             ),

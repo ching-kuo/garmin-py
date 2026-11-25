@@ -273,7 +273,7 @@ garmin-cli --json workout schedule 12345678901 2026-04-01
 
 `workout delete` output fields: `id, status`
 
-`workout schedule` output fields: `workout_schedule_id, date, status`
+`workout schedule` output fields: `workout_schedule_id, date, status` (`status` is `scheduled`, or `no_op` when that workout is already on the date; a date holding a different workout fails with `INVALID_INPUT` unless `--allow-multiple`; logged activities on the date are ignored; `workout_schedule_id` is null when Garmin returns no id and the date cannot be re-read)
 
 ---
 
@@ -430,6 +430,7 @@ Formula: `speed_ms = 1000 / (pace_min * 60)`
 | Code | Context | Meaning |
 |------|---------|---------|
 | `INVALID_INPUT` | `workout create/update` | JSON schema validation failed — check required fields and enum values |
+| `INVALID_INPUT` | `workout schedule` | Invalid workout id; the date already holds a different workout (pick another date or pass `--allow-multiple`); or this workout is already on the date but Garmin returned no schedule id (check `workout calendar`; `--allow-multiple` does not override this) |
 | `NOT_FOUND` | `workout update/delete/schedule` | Workout ID does not exist |
 | `AUTH_FAILED` | Any write command | Session expired (401) or insufficient permissions (403) — re-login |
 
@@ -638,7 +639,7 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `workout_get` | `workout_id` | `{count, rows}` |
 | `workout_calendar` | `start_date`, `end_date` | `{count, rows}` — scheduled workouts plus races/events. Rows retain compatibility `id` and add `workout_id` for template/activity joins plus `workout_schedule_id` for unscheduling. Includes Garmin Coach (adaptive plan) sessions that Garmin's calendar pages omit. |
 | `workout_create` | `workout`, `dry_run?` | `{count, rows}` — `ok: true, action: "created", workout_id` on success; `ok: true, dry_run: true, wire_payload, validation_report` on dry-run; `ok: false, error_code: "INVALID_INPUT", errors` on validation failure. Dry-run skips all Garmin contact. |
-| `workout_schedule` | `workout_id`, `date` | `{count, rows}` — `ok: true, action: "scheduled", workout_id, workout_schedule_id, date`. **Destructive.** |
+| `workout_schedule` | `workout_id`, `date`, `allow_multiple?` | `{count, rows}` — `ok: true, action: "scheduled", workout_id, workout_schedule_id, date` (`workout_schedule_id` may be null when Garmin returns none); `action: "no_op"` without writing when the workout is already scheduled that day. A date holding a different workout is refused (`INVALID_INPUT`) unless `allow_multiple=true`; the same workout already on the date without a schedule id is always refused; logged activities do not count. **Destructive.** |
 | `workout_update` | `workout_id`, `workout`, `dry_run?` | `{count, rows}` — `ok: true, action: "updated", workout_id` on success; dry-run returns the merged wire payload (one Garmin read, no write). Merge semantics preserve `workoutId`/`ownerId`/`createdDate`/`atpPlanId`. **Destructive.** |
 | `workout_delete` | `workout_id` | `{count, rows}` — `ok: true, action: "deleted", workout_id`. **Destructive.** |
 | `workout_unschedule` | `schedule_id` | `{count, rows}` — `ok: true, action: "unscheduled", schedule_id`. Removes a calendar entry (the workout template is preserved); `schedule_id` is the `workout_schedule_id` returned by `workout_schedule`, not the workout id. **Destructive.** |

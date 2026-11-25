@@ -330,7 +330,13 @@ class TestCalendarWeekWalk:
 
     @pytest.mark.parametrize(
         ("page", "by_period"),
-        [({"calendarItems": None}, []), ({}, []), (None, []), ({"calendarItems": []}, None), ({"calendarItems": []}, {})],
+        [
+            ({"calendarItems": None}, []),
+            ({"startDate": "2026-11-16"}, []),
+            ("oops", []),
+            ({"calendarItems": []}, {"message": "oops"}),
+            ({"calendarItems": []}, "oops"),
+        ],
     )
     def test_strict_read_rejects_unusable_responses(self, mocker: Any, page: Any, by_period: Any) -> None:
         mock_garth = MagicMock()
@@ -341,6 +347,18 @@ class TestCalendarWeekWalk:
             get_calendar_range(date(2026, 11, 18), date(2026, 11, 18), strict=True)
         # Non-strict reads still treat them as empty.
         assert get_calendar_range(date(2026, 11, 18), date(2026, 11, 18)) == []
+
+    @pytest.mark.parametrize(
+        ("page", "by_period"),
+        [({}, []), (None, []), ({"calendarItems": []}, {}), ({"calendarItems": []}, None)],
+    )
+    def test_strict_read_takes_no_content_as_an_empty_period(self, mocker: Any, page: Any, by_period: Any) -> None:
+        # garminconnect turns an HTTP 204 into {} (or the request helper into None).
+        mock_garth = MagicMock()
+        mock_garth.connectapi.side_effect = lambda path, **kwargs: by_period if "ByPeriod" in path else page
+        mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
+
+        assert get_calendar_range(date(2026, 11, 18), date(2026, 11, 18), strict=True) == []
 
     def test_request_count_reports_pages_plus_lookup(self, mocker: Any) -> None:
         self._patch(mocker, [])

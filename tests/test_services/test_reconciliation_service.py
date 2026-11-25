@@ -40,6 +40,14 @@ def test_exact_workout_association_wins_over_date_sport() -> None:
     assert row["actual"]["activity_id"] == 1
 
 
+def test_activity_calendar_item_with_workout_id_is_not_a_plan() -> None:
+    result = _reconcile(
+        [{"date": "2026-07-10", "workout_id": 10, "type": "running", "item_type": "activity"}],
+        [{"id": 1, "date": "2026-07-10T08:00:00", "type": "running", "workout_id": 10}],
+    )
+    assert [row["state"] for row in result["entries"]] == ["unplanned_activity"]
+
+
 def test_same_day_multiple_candidates_remain_ambiguous() -> None:
     result = _reconcile(
         [{"date": "2026-07-10", "workout_id": 10, "type": "running"}],

@@ -456,7 +456,7 @@ class TestActivityGetCommand:
                 "childIds": [101, 102],
             },
         )
-        mocker.patch(
+        detail = mocker.patch(
             "garmin_cli.commands.activities.serialize_activity_detail",
             return_value=[{
                 "id": 100, "date": "2026-04-06T06:00:00", "name": "Tri",
@@ -469,6 +469,8 @@ class TestActivityGetCommand:
                 "tss": None, "intensity_factor": None,
             }],
         )
+        # The manifest serializes each child through the service's import.
+        mocker.patch("garmin_cli.services.activities.serialize_activity_detail", detail)
         mocker.patch(
             "garmin_cli.commands.activities.get_multisport_children",
             return_value=[
@@ -505,7 +507,7 @@ class TestActivityGetCommand:
                 "childIds": [101],
             },
         )
-        mocker.patch(
+        detail = mocker.patch(
             "garmin_cli.commands.activities.serialize_activity_detail",
             return_value=[{
                 "id": 100, "date": "2026-04-06T06:00:00", "name": "Tri",
@@ -518,6 +520,7 @@ class TestActivityGetCommand:
                 "tss": None, "intensity_factor": None,
             }],
         )
+        mocker.patch("garmin_cli.services.activities.serialize_activity_detail", detail)
         mocker.patch(
             "garmin_cli.commands.activities.get_multisport_children",
             return_value=[{"activityId": 101, "activityName": "Run", "activityType": {"typeKey": "running"}}],
@@ -847,14 +850,14 @@ class TestActivityLapsCommand:
             return_value={"activityId": 1, "activityType": {"typeKey": "cycling"}},
         )
         splits_mock = mocker.patch(
-            "garmin_cli.commands.activities.get_activity_splits",
+            "garmin_cli.services.activities.get_activity_splits",
             return_value={"lapDTOs": [
                 {"duration": 600, "distance": 5000, "averageHR": 145, "averagePower": 220},
                 {"duration": 540, "distance": 4500, "averageHR": 152, "averagePower": 230},
             ]},
         )
         typed_splits_mock = mocker.patch(
-            "garmin_cli.commands.activities.get_activity_typed_splits",
+            "garmin_cli.services.activities.get_activity_typed_splits",
         )
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["--json", "activity", "laps", "1"])
@@ -872,10 +875,10 @@ class TestActivityLapsCommand:
             return_value={"activityId": 1, "activityType": {"typeKey": "lap_swimming"}},
         )
         splits_mock = mocker.patch(
-            "garmin_cli.commands.activities.get_activity_splits",
+            "garmin_cli.services.activities.get_activity_splits",
         )
         typed_splits_mock = mocker.patch(
-            "garmin_cli.commands.activities.get_activity_typed_splits",
+            "garmin_cli.services.activities.get_activity_typed_splits",
             return_value={"lengthDTOs": [
                 {"duration": 25.0, "distance": 25.0, "swolf": 38, "swimStroke": "FREESTYLE"},
             ]},
@@ -896,11 +899,11 @@ class TestActivityLapsCommand:
             return_value={"activityId": 1, "activityType": {"typeKey": "open_water_swimming"}},
         )
         splits_mock = mocker.patch(
-            "garmin_cli.commands.activities.get_activity_splits",
+            "garmin_cli.services.activities.get_activity_splits",
             return_value={"lapDTOs": [{"duration": 600, "distance": 1000}]},
         )
         typed_splits_mock = mocker.patch(
-            "garmin_cli.commands.activities.get_activity_typed_splits",
+            "garmin_cli.services.activities.get_activity_typed_splits",
         )
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["--json", "activity", "laps", "1"])
@@ -921,7 +924,7 @@ class TestActivityLapsCommand:
             return_value={"activityId": 1, "activityType": {"typeKey": "cycling"}, "averagePower": 200},
         )
         mocker.patch(
-            "garmin_cli.commands.activities.get_activity_splits",
+            "garmin_cli.services.activities.get_activity_splits",
             return_value={"lapDTOs": [{"duration": 600, "distance": 5000, "averageHR": 145}]},
         )
         runner = CliRunner(mix_stderr=False)
@@ -945,7 +948,7 @@ class TestActivityLapsCommand:
             },
         )
         mocker.patch(
-            "garmin_cli.commands.activities.get_multisport_children",
+            "garmin_cli.services.activities.get_multisport_children",
             return_value=[
                 {"activityId": 101, "activityType": {"typeKey": "open_water_swimming"}},
                 {"activityId": 102, "activityType": {"typeKey": "cycling"}},
@@ -954,14 +957,14 @@ class TestActivityLapsCommand:
         )
         # OWS and cycling and running all use raw splits (only lap_swimming uses typed)
         mocker.patch(
-            "garmin_cli.commands.activities.get_activity_splits",
+            "garmin_cli.services.activities.get_activity_splits",
             side_effect=[
                 {"lapDTOs": [{"duration": 600, "distance": 1000, "averageHR": 140}]},  # OWS
                 {"lapDTOs": [{"duration": 1200, "distance": 8000, "averagePower": 220}]},  # bike
                 {"lapDTOs": [{"duration": 900, "distance": 3000, "avgGroundContactTime": 235}]},  # run
             ],
         )
-        mocker.patch("garmin_cli.commands.activities.get_activity_typed_splits")
+        mocker.patch("garmin_cli.services.activities.get_activity_typed_splits")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["--json", "activity", "laps", "100"])
         assert result.exit_code == 0
@@ -991,17 +994,19 @@ class TestActivityLapsCommand:
             ],
         )
         mocker.patch(
-            "garmin_cli.commands.activities.get_activity_splits",
+            "garmin_cli.services.activities.get_activity_splits",
             side_effect=[
                 {"lapDTOs": [{"duration": 600, "distance": 1000, "averageHR": 140}]},
                 {"lapDTOs": [{"duration": 1200, "distance": 8000, "averagePower": 220}]},
             ],
         )
-        mocker.patch("garmin_cli.commands.activities.get_activity_typed_splits")
+        mocker.patch("garmin_cli.services.activities.get_activity_typed_splits")
+        service_children = mocker.patch("garmin_cli.services.activities.get_multisport_children")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["--json", "activity", "get", "100", "--detail", "--laps"])
         assert result.exit_code == 0
         children_mock.assert_called_once()
+        service_children.assert_not_called()
         parsed = json.loads(result.output)
         assert len(parsed["children"]) == 2
         leg_indices = {row["leg_index"] for row in parsed["laps"]}

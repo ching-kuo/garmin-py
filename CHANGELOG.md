@@ -32,6 +32,9 @@
 - `health sleep` no longer accepts `--ahead`.
 - `--limit` must be 1-100 (`activity list`, `workout list`); values above 100 were sent to Garmin.
 - CLI `workout schedule` reports `workout_schedule_id` instead of `workoutScheduleId`, matching the MCP tool and `workout calendar`.
+- CLI `workout schedule` checks the date first, like MCP `workout_schedule`: a workout already scheduled there reports status `no_op` without writing, a date holding a different workout fails with `INVALID_INPUT` unless the new `--allow-multiple` flag is passed, and a missing schedule id in Garmin's response is recovered by re-reading the date (left empty when that read fails). If the pre-write calendar read is incomplete, nothing is scheduled.
+- MCP `workout_schedule` refuses to write when its pre-write calendar read is incomplete (Garmin's schedule lookup failed), and reports `workout_schedule_id: null` instead of failing when the post-write id recovery read fails.
+- `workout schedule` / `workout_schedule` refuse, even with `--allow-multiple` / `allow_multiple`, when the same workout is already on the date but Garmin returned no schedule id ("this workout is already scheduled on that date but Garmin returned no schedule id").
 - `doctor --format` accepts `csv` like every other command; it used to fall back to a table.
 - MCP row-returning tools publish a plain `{"type": "object"}` output schema instead of the shared count/rows/paging schema, and generated `title` fields are dropped from every tool schema; `tools/list` shrinks by about 30% (66k to 46k characters). Only `activity_get`, `activity_detail_metrics`, `login_status`, and `submit_mfa_code` keep typed output schemas. Clients that validated `structuredContent` against the old envelope schema must stop relying on it.
 - MCP `workout_create`, `workout_update`, `training_plan_preview`, and `training_plan_apply` publish typed input schemas; a wrong type, unknown key, unknown sport/step/target type, or a string id now fails as a tool error naming the field path (for example `workout.steps.0.type`) before the tool runs, instead of an `INVALID_INPUT` result row (rule violations such as zone limits or one entry per date still return that row).
@@ -42,6 +45,7 @@
 
 ### Added
 
+- `workout schedule --allow-multiple` and MCP `workout_schedule(allow_multiple=true)` schedule a workout on a date that already holds a different one (Garmin allows several per day).
 - `--json` and `--format` also work after the subcommand (`garmin-cli health sleep --days 7 --json`); the subcommand's value wins over a global one.
 - `workout create --dry-run` and `workout update --dry-run` validate the input and print the Garmin payload without saving (`--json`: `data[0]` has `dry_run` and `wire_payload`; `--format csv` is rejected); create needs no login, and the update preview is the exact PUT body.
 - `workout calendar --date DATE` shows a single day.
@@ -120,6 +124,14 @@
 - `workout get` maps Garmin's `cadence` target key back to `cadence.zone`, so cadence workouts get a `write_projection`.
 - CSV output no longer prefixes negative numbers with a tab; only text cells that start with a formula character are escaped.
 - Once a command's options are parsed, errors (including date-range usage errors) follow the parsed output format, so an option value that happens to be `--json` (for example a search term) no longer switches errors to JSON; JSON error envelopes then name the full command (for example `login status`). Before parsing, a subcommand's `--format` overrides a global `--json`, and a repeated `--format` follows click's last-wins rule.
+- `training_plan_reconcile` no longer counts a calendar activity, weight, or nap item that carries a `workoutId` as a planned workout.
+- `workout schedule` / `workout_schedule` ignore logged activities on the date: an activity done from the same workout no longer turns the call into a `no_op`, and one from another workout no longer blocks it; `no_op` now requires a known schedule id.
+- `training_plan_reschedule` reports an unexpected (non-Garmin) failure while removing the source or cleaning up the new schedule as a failed or `unknown` operation with `INTERNAL_ERROR`, instead of escaping as an internal tool error; cleanup operations name the new `schedule_id` and, when cleanup fails, its `error_code`.
+- `training_plan_reschedule` keeps the source when the read that verifies the new schedule fails: it removes the new schedule (`compensated`) or, when Garmin returned no id, reports `unknown` with the destination date, with the read's error in `errors`. A compact `expected_date` such as `20260705` no longer reports `source_schedule_changed`.
+- `training_plan_apply` re-reads each source's expected date just before deleting it at the end of a plan: a source that moved meanwhile is a `source_schedule_changed` conflict, and a failed read deletes nothing; both roll back the plan's new schedules instead of deleting the source on its new date.
+- `training_plan_preview` / `training_plan_apply` treat a scheduled workout without a schedule id as occupying the date for an entry that names no source (it used to pass as the entry's own source), read workout templates only for scheduled rows (not logged activities), and skip a template Garmin no longer has instead of failing the plan.
+- Strict calendar reads (plan rechecks, `workout_schedule`) read a no-content (HTTP 204) calendar page or schedule lookup as an empty period instead of failing.
+- A failure to save the session tokens after a successful `garmin-cli login` reports "Authenticated, but saving the session ... failed" (`AUTH_FAILED`) instead of "Garmin login failed".
 
 ## [2.13.0] - 2026-11-09
 
