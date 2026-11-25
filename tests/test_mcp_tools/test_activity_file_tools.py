@@ -307,9 +307,9 @@ class TestMcpActivityDownload:
         root = tmp_path / "root"
         monkeypatch.setenv("GARMIN_MCP_FILE_ROOT", str(root))
 
-        row, _ = self._download(mocker, {"fmt": "pdf"})
+        with pytest.raises(ToolError, match="Input should be 'original'"):
+            self._download(mocker, {"fmt": "pdf"})
 
-        assert row["ok"] is False
         assert not root.exists()
 
     def test_failed_exclusive_write_leaves_no_partial_file(
@@ -391,21 +391,27 @@ class TestMcpActivityDownload:
             assert stat.S_IMODE(root.stat().st_mode) == 0o700
             assert stat.S_IMODE(target.stat().st_mode) == 0o600
 
-    def test_unknown_format_returns_validation_envelope(self, mocker: Any, tmp_path: Path) -> None:
+    def test_unknown_format_is_rejected_by_the_input_schema(self, mocker: Any, tmp_path: Path) -> None:
         mocker.patch(f"{_MODULE}.ensure_authenticated")
         download = mocker.patch(f"{_MODULE}.download_activity")
         mocker.patch(f"{_MODULE}._emit_write_log")
         server = create_mcp_server(_config())
 
-        result = _call(
-            server,
-            "activity_download",
-            {"activity_id": 1, "fmt": "pdf", "output_path": str(tmp_path / "x.pdf")},
-        )
-        row = result["rows"][0]
-        assert row["ok"] is False
-        assert row["error_code"] == "INVALID_INPUT"
+        with pytest.raises(ToolError, match="fmt"):
+            _call(
+                server,
+                "activity_download",
+                {"activity_id": 1, "fmt": "pdf", "output_path": str(tmp_path / "x.pdf")},
+            )
         download.assert_not_called()
+
+    def test_download_formats_match_the_endpoint_table(self) -> None:
+        from typing import get_args
+
+        from garmin_cli.endpoints.activities import _DOWNLOAD_FORMAT_MAP
+        from garmin_cli.mcp_tools.activities_write import DownloadFormat
+
+        assert set(get_args(DownloadFormat)) == set(_DOWNLOAD_FORMAT_MAP)
 
     def test_missing_output_dir_returns_validation_envelope(self, mocker: Any, tmp_path: Path) -> None:
         mocker.patch(f"{_MODULE}.ensure_authenticated")

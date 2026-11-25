@@ -174,9 +174,11 @@ class TestWeatherRemap:
 
     def test_maps_real_keys(self) -> None:
         row = serialize_activity_weather(self.RAW)[0]
-        assert row["temperature"] == 74
-        assert row["apparent_temp"] == 74
-        assert row["dew_point"] == 66
+        # Garmin sends Fahrenheit even for metric accounts (live probe 2026-11-25).
+        assert row["temp_c"] == 23.3
+        assert row["apparent_temp_c"] == 23.3
+        assert row["dew_point_c"] == 18.9
+        assert "temperature" not in row
         assert row["humidity"] == 72
         assert row["wind_speed"] == 2
         assert row["wind_direction"] == 158
@@ -185,8 +187,13 @@ class TestWeatherRemap:
 
     def test_condition_missing_weather_type_dto(self) -> None:
         row = serialize_activity_weather({"temp": 50})[0]
-        assert row["temperature"] == 50
+        assert row["temp_c"] == 10.0
+        assert row["apparent_temp_c"] is None
         assert row["condition"] is None
+
+    @pytest.mark.parametrize("bad", ["74", True, float("nan")])
+    def test_non_numeric_temperature_is_null(self, bad: object) -> None:
+        assert serialize_activity_weather({"temp": bad})[0]["temp_c"] is None
 
     def test_empty_payload_yields_no_rows(self) -> None:
         assert serialize_activity_weather({}) == []

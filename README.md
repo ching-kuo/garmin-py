@@ -107,6 +107,7 @@ garmin-cli health sleep --days 1
 | `GARMIN_CLI_RETRY_DELAYS` | `2,4,8` | Comma-separated retry delay sequence in seconds (e.g. `1,2,4`); invalid values fall back to `2,4,8` |
 | `GARMIN_CLI_AUTH_PROBE_TTL` | `600` | Seconds to cache a successful auth probe in the MCP server (float); `0` disables caching and probes on every call |
 | `GARMIN_CLI_DAILY_CALL_DELAY` | `0.5` | Delay in seconds (float) between request submissions for endpoints that fan out one request per day (e.g. `endurance-score`); invalid or negative values fall back to `0.5` |
+| `GARMIN_MCP_READ_ONLY` | unset | `1`/`true` starts `mcp-server` without write tools (same as `--read-only`) |
 | `GARMIN_CLI_FETCH_CONCURRENCY` | `4` | Worker cap for concurrent fan-out fetches (per-day ranges, report snapshot sections, multisport children); invalid or non-positive values fall back to `4` |
 
 ### Custom session directory
@@ -216,7 +217,7 @@ garmin-cli activity list             [--limit N] [--type TYPE] [--search TEXT] [
 garmin-cli activity get              ACTIVITY_ID [--detail] [--laps]  # --detail/-d shows sport-aware metrics; --laps appends lap data (table/JSON; for CSV use activity laps)
 garmin-cli activity laps             ACTIVITY_ID  # per-lap rows (run/bike: HR, power, cadence, start_time_gmt/local) or per-pool-length rows (lap_swimming)
 garmin-cli activity zones            ACTIVITY_ID  # HR time-in-zone breakdown
-garmin-cli activity weather          ACTIVITY_ID  # temperature, apparent temp, dew point, humidity, wind, condition
+garmin-cli activity weather          ACTIVITY_ID  # temp_c, apparent_temp_c, dew_point_c (Celsius), humidity, wind, condition
 garmin-cli activity metrics-describe ACTIVITY_ID  # metric descriptors: key, unit, metricsIndex
 garmin-cli activity detail-metrics   ACTIVITY_ID [--metric KEY]...  # raw per-sample time series (one row per sample)
 garmin-cli activity download         ACTIVITY_ID [--fmt original|tcx|gpx|kml|csv] [--output PATH] [--force]
@@ -384,8 +385,8 @@ garmin-cli --json activity list --limit 5
 
 | Code | Meaning |
 |------|---------|
-| `AUTH_MISSING` | No credentials found (no session and no env vars) |
-| `AUTH_FAILED` | Credentials rejected by Garmin |
+| `AUTH_MISSING` | No credentials found (no session and no env vars). In MCP errors the recovery hint covers MCP login (Claude Desktop extension settings, then `submit_mfa_code` for a challenge pending in that server) and terminal login (`garmin-cli login`); when `retry_after_seconds` is set the hint starts with the wait. A rejected MFA code instead says to wait, retry the original call for a new code, and submit that |
+| `AUTH_FAILED` | Credentials or session rejected by Garmin (MCP recovery hint as for `AUTH_MISSING`), or an unsafe or unusable Garmin home or token file (the hint then points at `GARMIN_HOME` and `garmin-cli doctor`, not at logging in) |
 | `MFA_REQUIRED` | Garmin sent a one-time MFA code; submit it to finish the login (MCP: `submit_mfa_code` tool, CLI: `garmin-cli login` at a terminal; `--mfa-code` / `GARMIN_MFA_CODE` only for authenticator-app codes) |
 | `NOT_FOUND` | API endpoint unavailable (404) |
 | `RATE_LIMITED` | 429 (or SSO 427) after 3 retries |
@@ -416,7 +417,9 @@ MCP clients can preload two resources:
 - `garmin://server/manifest` describes the runtime tool inventory, annotations, error recovery contracts, envelopes, and response limits.
 - `garmin://athlete/profile` returns a cached, bounded thresholds, latest VO2max, race-prediction, and 7/28-day load snapshot. An unauthenticated read returns a structured unauthenticated body. A snapshot with a rate-limited, server or network failure is not cached, and a new login drops the cached snapshot.
 
-The server also publishes connection-time instructions with the authentication, response, error, limit, and write-approval contracts. Every typed tool envelope advertises the same contract through its machine-readable `outputSchema`.
+The server also publishes connection-time instructions with the authentication, response, error, limit, and write-approval contracts. To keep `tools/list` small, row-returning tools publish a plain `{"type": "object"}` `outputSchema`; only `activity_get`, `activity_detail_metrics`, `login_status`, and `submit_mfa_code` publish typed outer fields. Structured inputs are typed: `workout_create`/`workout_update` publish the workout schema (sport, steps, repeat steps, duration, target) and `training_plan_preview`/`training_plan_apply` publish the plan schema, so a wrong type or unknown key is rejected before the tool runs, with the failing field path in the error. Enum-like parameters (`report_snapshot.kind`, `training_plan_reconcile.detail`, `activity_download.fmt`) are published as enums.
+
+Health and performance range tools accept `start_date` or `days` (1-90); `end_date` is optional and defaults to today in the athlete's Garmin profile timezone. `activity_list` pages with `offset` (the pre-3.0 `start` argument is rejected with an error) and returns `truncated` plus `next_offset` when a full page came back (Garmin reports no total).
 
 Two URI templates expose the most-read entities without a tool round trip:
 
@@ -426,6 +429,14 @@ Two URI templates expose the most-read entities without a tool round trip:
 Four content-only prompts guide common workflows: `weekly_training_review`, `recovery_check`, `compare_recent_activities`, and `plan_next_week`. The planning prompt explicitly requires human confirmation before invoking destructive apply tools.
 
 Large MCP reads are bounded. `activity_laps(activity_id, offset=0)` returns at most 100 rows and supplies `total`, `truncated`, and `next_offset` paging metadata. `activity_detail_metrics(activity_id, metrics="", max_samples=0)` deterministically samples the whole stream by stride, reporting `samples_total`, `samples_returned`, and `stride`. Rows carry all requested metrics, so channels stay timestamp-aligned in a single call. The default `max_samples=0` auto-sizes the sample count to the channel count (a ~2400-value budget, clamped to 100–1000 samples) so multi-channel pulls fit MCP client response limits; pass an explicit 100–5000 to override.
+
+### Read-only mode
+
+`garmin-cli mcp-server --read-only` (or `GARMIN_MCP_READ_ONLY=1`, or the "Read-only mode" setting of the Claude Desktop extension) registers no write tools: `workout_create`, `workout_update`, `workout_delete`, `workout_schedule`, `workout_unschedule`, `activity_upload`, `activity_delete`, `activity_rename`, `activity_set_type`, `activity_download`, `training_plan_apply`, and `training_plan_reschedule` are left out of `tools/list`. Read tools, `training_plan_preview`, and `submit_mfa_code` stay; the server instructions and the `plan_next_week` prompt stop at the preview. `server_doctor` reports the server's mode under `write_surface`; `garmin-cli doctor` can only see `GARMIN_MCP_READ_ONLY` (not a `--read-only` flag on a running server) and fails the check for a value that is not a boolean such as `1`/`0` or `true`/`false`, which `mcp-server` also refuses at start-up. In the Claude Desktop extension, an unfilled setting placeholder is treated as off.
+
+### Write audit log
+
+Each MCP write tool call (including `training_plan_apply`, `training_plan_reschedule`, and `submit_mfa_code`) logs exactly one JSON object per line to stderr on the `garmin_cli.audit` logger at INFO, for example `{"activity_id": 5, "name_len": 11, "outcome": "success", "tool": "activity_rename"}`. Caller free text (names, descriptions, paths, MFA codes, an activity type key Garmin has not accepted) is never logged, only its length. `outcome` is `success`, `dry-run`, `conflict` (a plan result refused by conflicts or the live recheck before any write), `rejected` (Garmin declined an upload, e.g. a duplicate), `failed-validation` (including calls rejected by the input schema or id checks, which log only `tool` and `outcome`), `failed-auth`, or `failed-upstream` (also used for unexpected errors); plan tools add `plan_outcome`. Hosts can configure the `garmin_cli.audit` logger themselves (handlers, level, destination); if it has no handlers and the root logger has some, the lines propagate to the root handlers; only in an unconfigured process does the server add its own stderr handler (one line per event, no propagation). The MCP SDK's own logger is held at WARNING, so failed tool calls never log their error text (which can contain caller arguments) at INFO.
 
 ### File access
 
@@ -523,7 +534,7 @@ SSE (for clients that require it):
 garmin-cli mcp-server --transport sse --port 8000
 ```
 
-Optional HTTP flags: `--sse-path`, `--message-path` (SSE only), `--streamable-http-path`, `--stateless-http`, `--json-response` (streamable-http only).
+Optional HTTP flags: `--sse-path`, `--message-path` (SSE only), `--streamable-http-path`, `--stateless-http`, `--json-response` (streamable-http only). `--read-only` works with every transport (see [Read-only mode](#read-only-mode)).
 
 #### Bearer-token gate
 

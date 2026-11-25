@@ -62,6 +62,33 @@ class TestMcpServerCommand:
         assert result.exit_code == 0
         fake_server.run.assert_called_once_with(transport="stdio")
 
+    @pytest.mark.parametrize(
+        ("args", "env", "expected"),
+        [
+            ([], {}, False),
+            (["--read-only"], {}, True),
+            ([], {"GARMIN_MCP_READ_ONLY": "1"}, True),
+            ([], {"GARMIN_MCP_READ_ONLY": "false"}, False),
+        ],
+    )
+    def test_read_only_flag_and_env_reach_the_server(
+        self, mocker: Any, args: list[str], env: dict[str, str], expected: bool
+    ) -> None:
+        _, captured = _install_fake_mcp_module(mocker)
+        result = CliRunner(mix_stderr=False).invoke(cli, ["mcp-server", *args], env=env, catch_exceptions=False)
+
+        assert result.exit_code == 0
+        assert captured["kwargs"]["read_only"] is expected
+
+    def test_non_boolean_read_only_env_refuses_to_start(self, mocker: Any) -> None:
+        fake_server, _ = _install_fake_mcp_module(mocker)
+        env = {"GARMIN_MCP_READ_ONLY": "${user_config.garmin_read_only}"}
+        result = CliRunner(mix_stderr=False).invoke(cli, ["mcp-server"], env=env)
+
+        assert result.exit_code != 0
+        assert "not a valid boolean" in _combined_output(result)
+        fake_server.run.assert_not_called()
+
     def test_mcp_server_accepts_explicit_stdio_transport(self, mocker: Any) -> None:
         fake_server, _ = _install_fake_mcp_module(mocker)
         runner = CliRunner(mix_stderr=False)

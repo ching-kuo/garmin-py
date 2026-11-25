@@ -4,8 +4,11 @@ from __future__ import annotations
 from mcp.server.mcpserver import MCPServer
 
 
-def register_prompts(mcp: MCPServer) -> None:
-    """Register the four stable coaching workflow prompts."""
+def register_prompts(mcp: MCPServer, *, read_only: bool = False) -> None:
+    """Register the four stable coaching workflow prompts.
+
+    In ``read_only`` mode ``plan_next_week`` stops at the preview.
+    """
 
     @mcp.prompt()
     def weekly_training_review(date: str | None = None) -> str:
@@ -45,10 +48,18 @@ def register_prompts(mcp: MCPServer) -> None:
     def plan_next_week(week_start: str | None = None) -> str:
         """Guide a preview-first training-plan workflow."""
         anchor = week_start or "the next calendar week"
-        return (
+        context = (
             f"Build a proposed plan for {anchor}. Use `coach_snapshot` and "
             "`training_plan_reconcile` for current context, construct the plan, "
-            "and call `training_plan_preview` first. Present the live diff and "
-            "validation results. `training_plan_apply` is destructive: call it "
-            "only after explicit human confirmation of the exact preview."
+            "and call `training_plan_preview`. Present the live diff and "
+            "validation results. "
+        )
+        if read_only:
+            return context + (
+                "This server is read-only, so stop at the preview: the user applies "
+                "the plan in Garmin Connect or another client."
+            )
+        return context + (
+            "`training_plan_apply` is destructive: call it only after explicit "
+            "human confirmation of the exact preview."
         )

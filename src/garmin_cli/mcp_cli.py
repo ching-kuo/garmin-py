@@ -8,12 +8,12 @@ import click
 
 from garmin_cli.bearer_token import BEARER_ENV, validate_bearer_token
 from garmin_cli.exceptions import GarminCliError
+from garmin_cli.read_only import READ_ONLY_ENV
 
 _MCP_SERVER_TRANSPORTS = ("stdio", "sse", "streamable-http")
 _MCP_DEFAULT_LOOPBACK_HOST = "127.0.0.1"
 _MCP_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _MCP_INSTALL_HINT = 'pip install "garmin-py[mcp]"'
-
 
 def _validate_http_path_option(value: str | None, option_name: str) -> str | None:
     if value is None:
@@ -234,6 +234,12 @@ def _resolve_mcp_auth(host: str, port: int | None) -> tuple[Any, Any]:
     is_flag=True,
     help="Return JSON HTTP responses when supported by streamable-http clients.",
 )
+@click.option(
+    "--read-only",
+    is_flag=True,
+    envvar=READ_ONLY_ENV,
+    help=f"Register no write tools (workout, activity, and plan writes). Also set by {READ_ONLY_ENV}=1.",
+)
 @click.pass_context
 def mcp_server_cmd(
     ctx: click.Context,
@@ -246,6 +252,7 @@ def mcp_server_cmd(
     streamable_http_path: str | None,
     stateless_http: bool,
     json_response: bool,
+    read_only: bool,
 ) -> None:
     """Start the Garmin MCP server for Claude Code integration."""
     try:
@@ -279,5 +286,6 @@ def mcp_server_cmd(
         config,
         token_verifier=token_verifier,
         auth=auth_settings,
+        read_only=read_only,
     )
     server.run(**run_kwargs)

@@ -1,43 +1,33 @@
-"""Typed MCP response schemas for the stable, locally-owned result shapes."""
+"""MCP output schemas: typed only where the outer fields carry meaning."""
 
 from typing import Any, NotRequired, TypedDict
 
+# Generic row-returning tools publish a minimal ``{"type": "object"}`` output
+# schema: the shared count/rows/paging contract is described once in the
+# server instructions instead of being repeated on every tool.
+Envelope = dict[str, Any]
 
-class Envelope(TypedDict):
-    """Common response envelope used by list and row-oriented tools."""
+
+class ActivityGetEnvelope(TypedDict):
+    """Activity response with optional multisport and capability metadata."""
 
     count: int
     rows: list[dict[str, Any]]
     # Optional keys must also be nullable: the MCP SDK dumps the generated output
     # model without exclude_none, so omitted optional keys reach the wire as null
     # and strict clients reject them unless the schema permits null.
-    total: NotRequired[int | None]
-    truncated: NotRequired[bool | None]
-    next_offset: NotRequired[int | None]
-
-
-class ActivityGetEnvelope(Envelope):
-    """Activity response with optional multisport and capability metadata."""
-
     children: NotRequired[list[dict[str, Any]] | None]
     unavailable: NotRequired[list[dict[str, Any]] | None]
 
 
-class ActivityDetailMetricsEnvelope(Envelope):
+class ActivityDetailMetricsEnvelope(TypedDict):
     """Activity metric stream response with sampling metadata."""
 
+    count: int
+    rows: list[dict[str, Any]]
     samples_total: int
     samples_returned: int
     stride: int
-
-
-class WriteEnvelope(Envelope):
-    """Envelope for write results and validation rows.
-
-    Write operations intentionally keep row payloads open: each operation has
-    a different locally-owned success shape, while all validation failures
-    share the same ``ok``/``error_code``/``errors`` convention.
-    """
 
 
 class SessionStatus(TypedDict):

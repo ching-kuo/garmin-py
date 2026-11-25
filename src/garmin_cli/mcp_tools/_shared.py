@@ -9,18 +9,17 @@ inline at their own module scope instead.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from concurrent.futures import Future
-from contextlib import contextmanager
-from dataclasses import dataclass, replace
-from datetime import date
-from typing import Annotated, Any, Literal, cast
+from datetime import date, timedelta
+from typing import Annotated, Any
 
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 
 from garmin_cli.auth import ensure_authenticated
 from garmin_cli.config import CliConfig
+from garmin_cli.date_utils import today
 from garmin_cli.endpoints._base import (
     _bounded_thread_pool,
     _cancel_futures_on_error,
@@ -28,7 +27,7 @@ from garmin_cli.endpoints._base import (
 )
 from garmin_cli.error_contracts import error_contract
 from garmin_cli.exceptions import GarminCliError
-from garmin_cli.mcp_tools._schemas import Envelope, WriteEnvelope
+from garmin_cli.mcp_tools._schemas import Envelope
 from garmin_cli.workout_schema import is_positive_id
 
 _MAX_DAYS = 90
@@ -36,6 +35,13 @@ _MAX_DAYS = 90
 # Tool id parameter type: strict, so JSON true, 1.0 and "1" fail schema
 # validation instead of being coerced to 1 and reaching a (destructive) handler.
 StrictId = Annotated[int, Field(strict=True)]
+
+# Range-tool parameters: start_date or days, end_date defaulting to today.
+EndDate = Annotated[str | None, Field(description="YYYY-MM-DD; default today")]
+Days = Annotated[
+    int | None,
+    Field(strict=True, ge=1, le=_MAX_DAYS, description="last N days ending end_date; instead of start_date"),
+]
 
 
 def _parse_date(value: str, name: str) -> date:
@@ -45,15 +51,48 @@ def _parse_date(value: str, name: str) -> date:
         raise ToolError(f"Invalid date format for {name}: expected YYYY-MM-DD, got '{value}'") from exc
 
 
-def _parse_date_range(start_date: str, end_date: str) -> tuple[date, date]:
-    start = _parse_date(start_date, "start_date")
-    end = _parse_date(end_date, "end_date")
+def _check_range(start: date, end: date) -> tuple[date, date]:
     if start > end:
         raise ToolError(f"start_date must be on or before end_date: {start} > {end}")
     span = (end - start).days + 1
     if span > _MAX_DAYS:
         raise ToolError(f"Date range cannot exceed {_MAX_DAYS} days (got {span} days)")
     return start, end
+
+
+def _parse_date_range(start_date: str, end_date: str) -> tuple[date, date]:
+    return _check_range(_parse_date(start_date, "start_date"), _parse_date(end_date, "end_date"))
+
+
+def _date_window(
+    start_date: str | None, end_date: str | None, days: int | None
+) -> Callable[[], tuple[date, date]]:
+    """Validate a range given as start_date or days, with end_date defaulting to today.
+
+    Explicit dates are checked now (before auth). The returned thunk resolves
+    the window; call it after auth so a defaulted end_date is today in the
+    athlete's Garmin profile timezone.
+    """
+    # The Days schema already holds days to a strict 1-90 integer.
+    if days is not None and start_date is not None:
+        raise ToolError("Pass either start_date or days, not both")
+    if days is None and start_date is None:
+        raise ToolError("Pass start_date or days")
+    start = _parse_date(start_date, "start_date") if start_date is not None else None
+
+    def resolve(last: date) -> tuple[date, date]:
+        if start is not None:
+            return _check_range(start, last)
+        try:
+            # days is set whenever start is None (checked above).
+            return _check_range(last - timedelta(days=(days or 1) - 1), last)
+        except OverflowError as exc:
+            raise ToolError(f"days={days} ending {last} reaches before 0001-01-01") from exc
+
+    if end_date is not None:
+        window = resolve(_parse_date(end_date, "end_date"))
+        return lambda: window
+    return lambda: resolve(today())
 
 
 def _validate_positive_id(value: int, name: str) -> int:
@@ -95,12 +134,56 @@ def _identity_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
+# MCP users often configure credentials in the Claude Desktop extension rather
+# than a terminal, so MCP login hints name both routes.
+_MCP_LOGIN_HINT = (
+    "MCP: enter or correct the Garmin email and password in the Claude Desktop extension settings, "
+    "then retry; if Garmin asks for a one-time code, submit it with submit_mfa_code (it completes "
+    "only a login challenge pending in this server). Terminal: run garmin-cli login, then retry."
+)
+# Logging in again does not fix an unsafe or unusable Garmin home.
+_LOCAL_CONFIG_HINT = (
+    "Fix the Garmin home directory (GARMIN_HOME): it must be a real directory owned by this user, "
+    "not reached through a symlink, holding a regular token file; garmin-cli doctor names the failing check."
+)
+_MFA_REJECTED_HINT = (
+    "Retry the original tool call to have Garmin send a new code, then submit that code with submit_mfa_code."
+)
+
+
+def mcp_recovery_hint(
+    error_code: str,
+    *,
+    local_config: bool = False,
+    mfa_rejected: bool = False,
+    retry_after_seconds: float | None = None,
+) -> str:
+    """Recovery hint for MCP callers (the manifest's error inventory uses it too)."""
+    if local_config:
+        hint = _LOCAL_CONFIG_HINT
+    elif mfa_rejected:
+        hint = _MFA_REJECTED_HINT
+    elif error_code in ("AUTH_MISSING", "AUTH_FAILED"):
+        hint = _MCP_LOGIN_HINT
+    else:
+        hint = error_contract(error_code)["recovery_hint"]
+    if retry_after_seconds is not None and not hint.startswith("Wait"):
+        hint = f"Wait {retry_after_seconds:g} seconds first. {hint}"
+    return hint
+
+
 def _error_text(exc: GarminCliError) -> str:
     """Serialize the stable Garmin error contract for MCP text channels."""
     contract = error_contract(exc.error_code)
     retry_after_seconds: float | None = exc.retry_after_seconds
     if retry_after_seconds is None and exc.error_code == "RATE_LIMITED":
         retry_after_seconds = _resolve_retry_delays()[0]
+    contract["recovery_hint"] = mcp_recovery_hint(
+        exc.error_code,
+        local_config=exc.local_config,
+        mfa_rejected=exc.mfa_rejected,
+        retry_after_seconds=retry_after_seconds,
+    )
     # MCP's ToolError is text-only in the bundled SDK. A JSON object in that
     # text channel preserves a stable machine-readable contract while keeping
     # the existing human-readable message available to older clients.
@@ -145,113 +228,8 @@ def _run_tool(
     return _envelope(serialize(_authenticated(config, fetch)))
 
 
-# --- Write-tool audit ------------------------------------------------------
-#
-# Shared by every write tool (workout create/schedule/update/delete, activity
-# download/upload/delete/rename/set-type). Each domain module keeps its own
-# module-level ``_emit_write_log`` (so tests patch it per domain and the log
-# channel name stays domain-specific) and passes it into ``_write_audit``.
-
-WriteOutcome = Literal[
-    "success",
-    "dry-run",
-    "failed-validation",
-    "failed-auth",
-    "failed-upstream",
-]
-
-EmitWriteLog = Callable[["WriteLogEvent"], None]
-
-
-@dataclass(frozen=True)
-class WriteLogEvent:
-    """Structured payload for a single write-tool invocation log line.
-
-    Only metadata is captured -- free-text fields (workout/activity ``name``,
-    ``description``, filesystem paths) are reduced to length-only integers so
-    PII never lands in logs. Bearer tokens are never read into this struct.
-    """
-
-    tool: str
-    outcome: WriteOutcome
-    dry_run: bool = False
-    workout_id: int | None = None
-    activity_id: int | None = None
-    errors_count: int | None = None
-    name_len: int | None = None
-    description_len: int | None = None
-    fmt: str | None = None
-    size_bytes: int | None = None
-    path_len: int | None = None
-    type_key: str | None = None
-
-
-def _write_envelope(rows: list[dict[str, Any]]) -> WriteEnvelope:
-    """Preserve the common envelope while advertising the write result type."""
-    return cast(WriteEnvelope, _envelope(rows))
-
-
-def _validation_envelope(errors: list[str]) -> WriteEnvelope:
-    return _write_envelope(
-        [{"ok": False, "error_code": "INVALID_INPUT", "errors": list(errors)}]
-    )
-
-
-def _classify_garmin_error(exc: GarminCliError) -> WriteOutcome:
-    if exc.error_code in ("AUTH_MISSING", "AUTH_FAILED", "MFA_REQUIRED"):
-        return "failed-auth"
-    if exc.error_code == "INVALID_INPUT":
-        # Rejected input (e.g. unknown activity type key surfaced by the live
-        # type lookup) is a validation failure, not a Garmin/transport fault.
-        return "failed-validation"
-    return "failed-upstream"
-
-
-class _WriteAudit:
-    """Records exactly one structured log event for a write-tool invocation.
-
-    Holds the invocation's invariant metadata as a base :class:`WriteLogEvent`;
-    each terminal helper emits that base with the outcome (and any per-outcome
-    field) filled in via the caller-supplied ``emit`` function. A single
-    ``_done`` guard ensures one and only one log line per invocation.
-    """
-
-    def __init__(self, base: WriteLogEvent, emit: EmitWriteLog) -> None:
-        self._base = base
-        self._emit_fn = emit
-        self._done = False
-
-    def _emit(self, **overrides: Any) -> None:
-        self._emit_fn(replace(self._base, **overrides))
-        self._done = True
-
-    def fail_validation(self, errors_count: int) -> None:
-        self._emit(outcome="failed-validation", errors_count=errors_count)
-
-    def dry_run(self) -> None:
-        self._emit(outcome="dry-run")
-
-    def success(self, **overrides: Any) -> None:
-        self._emit(outcome="success", **overrides)
-
-
-@contextmanager
-def _write_audit(base: WriteLogEvent, emit: EmitWriteLog) -> Iterator[_WriteAudit]:
-    """Own the write-audit logging lifecycle for a single write tool.
-
-    Yields a :class:`_WriteAudit` for terminal outcomes (validation failure,
-    dry-run, success). If a :class:`GarminCliError` escapes the ``with`` body
-    and no event has been recorded yet, the classified ``failed-auth`` /
-    ``failed-upstream`` outcome is logged before the error is converted to the
-    caller-facing :class:`ToolError` (same translation as the read tools).
-    """
-    audit = _WriteAudit(base, emit)
-    try:
-        yield audit
-    except GarminCliError as exc:
-        if not audit._done:
-            audit._emit(outcome=_classify_garmin_error(exc))
-        raise _handle_error(exc) from exc
+def _validation_envelope(errors: list[str]) -> Envelope:
+    return _envelope([{"ok": False, "error_code": "INVALID_INPUT", "errors": list(errors)}])
 
 
 # Only NOT_FOUND degrades to a per-section gap (the metric simply has no data

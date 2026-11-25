@@ -7,6 +7,7 @@ lifecycle mutation (download/upload/delete) result rows.
 """
 from __future__ import annotations
 
+import math
 from datetime import timedelta
 from typing import Any
 
@@ -56,9 +57,9 @@ COLUMNS_MULTISPORT_CHILDREN = (
     "calories",
 )
 COLUMNS_ACTIVITY_WEATHER = (
-    "temperature",
-    "apparent_temp",
-    "dew_point",
+    "temp_c",
+    "apparent_temp_c",
+    "dew_point_c",
     "humidity",
     "wind_speed",
     "wind_gust",
@@ -127,15 +128,24 @@ def serialize_activity_detail(raw: Any) -> list[dict[str, Any]]:
 # --- Activity weather -------------------------------------------------------
 # Garmin's /activity/{id}/weather payload uses ``temp`` / ``relativeHumidity``
 # / ``windDirection`` and nests the condition under ``weatherTypeDTO``. The
-# response carries no precipitation-probability or icon-code field. Temperature
-# values are returned in the Garmin account's display unit (often Fahrenheit).
+# response carries no precipitation-probability or icon-code field and no unit
+# key. Live probe (2026-11-25, metric account): temp / apparentTemp / dewPoint
+# are Fahrenheit regardless of the account's unit setting.
+
+
+def _fahrenheit_to_c(value: Any) -> float | None:
+    """Fahrenheit to Celsius rounded to 0.1; None for anything but a finite number."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return round((value - 32) * 5 / 9, 1)
 
 
 def serialize_activity_weather(raw: Any) -> list[dict[str, Any]]:
     """Map the raw activity-weather payload to stable output keys.
 
     Renames Garmin's wire keys (``temp``, ``relativeHumidity``,
-    ``windDirection``, ...) to the output schema and pulls the textual
+    ``windDirection``, ...) to the output schema, converts the Fahrenheit
+    temperatures to Celsius (``*_c``), and pulls the textual
     condition out of ``weatherTypeDTO``. Returns an empty list for a missing
     or empty payload.
     """
@@ -145,9 +155,9 @@ def serialize_activity_weather(raw: Any) -> list[dict[str, Any]]:
     condition = weather_type.get("desc") if isinstance(weather_type, dict) else None
     return [
         {
-            "temperature": raw.get("temp"),
-            "apparent_temp": raw.get("apparentTemp"),
-            "dew_point": raw.get("dewPoint"),
+            "temp_c": _fahrenheit_to_c(raw.get("temp")),
+            "apparent_temp_c": _fahrenheit_to_c(raw.get("apparentTemp")),
+            "dew_point_c": _fahrenheit_to_c(raw.get("dewPoint")),
             "humidity": raw.get("relativeHumidity"),
             "wind_speed": raw.get("windSpeed"),
             "wind_gust": raw.get("windGust"),

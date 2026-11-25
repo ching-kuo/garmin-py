@@ -187,6 +187,52 @@ def test_write_surface_reports_bearer_token_state(monkeypatch: Any) -> None:
     assert "Bearer token configured: true" in with_token.detail
 
 
+def test_write_surface_reports_read_only_mode(monkeypatch: Any) -> None:
+    monkeypatch.delenv(BEARER_ENV, raising=False)
+    monkeypatch.setenv("GARMIN_MCP_READ_ONLY", "1")
+    from_env = check_write_surface(CliConfig())
+    monkeypatch.delenv("GARMIN_MCP_READ_ONLY")
+
+    assert "read-only" in from_env.detail
+    assert "--read-only flag" in from_env.detail
+    assert "write tools are enabled" in check_write_surface(CliConfig()).detail
+    assert "read-only" in check_write_surface(CliConfig(), read_only=True).detail
+
+
+def test_read_only_vocabulary_matches_click() -> None:
+    import click
+
+    from garmin_cli.read_only import READ_ONLY_FALSE, READ_ONLY_TRUE
+
+    states = getattr(click.types.BoolParamType(), "bool_states", None)
+    if states is None:
+        pytest.skip("this click version does not expose bool_states")
+    assert {word for word, value in states.items() if value} == READ_ONLY_TRUE
+    assert {word for word, value in states.items() if not value} == READ_ONLY_FALSE
+
+
+def test_write_surface_flags_an_invalid_read_only_value(monkeypatch: Any) -> None:
+    monkeypatch.delenv(BEARER_ENV, raising=False)
+    monkeypatch.setenv("GARMIN_MCP_READ_ONLY", "maybe")
+    result = check_write_surface(CliConfig())
+
+    assert result.ok is False
+    assert result.error_code == "INVALID_INPUT"
+    assert "GARMIN_MCP_READ_ONLY" in result.detail
+
+
+def test_write_surface_reports_both_read_only_and_bearer_problems(monkeypatch: Any) -> None:
+    monkeypatch.setenv("GARMIN_MCP_READ_ONLY", "maybe")
+    monkeypatch.setenv(BEARER_ENV, "x" * (MIN_BEARER_TOKEN_LENGTH - 1))
+    result = check_write_surface(CliConfig())
+
+    assert result.ok is False
+    assert "GARMIN_MCP_READ_ONLY" in result.detail
+    assert f"at least {MIN_BEARER_TOKEN_LENGTH}" in result.detail
+    assert BEARER_ENV in (result.recovery_hint or "")
+    assert "GARMIN_MCP_READ_ONLY" in (result.recovery_hint or "")
+
+
 def test_write_surface_flags_short_bearer_token(monkeypatch: Any) -> None:
     monkeypatch.setenv(BEARER_ENV, "x" * (MIN_BEARER_TOKEN_LENGTH - 1))
     short = check_write_surface(CliConfig())

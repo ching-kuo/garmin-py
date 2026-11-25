@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import Future
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -67,6 +67,9 @@ def register_coaching_tools(mcp: MCPServer, config: CliConfig) -> None:
     ) -> dict[str, Any]:
         """Return bounded recovery, load, execution, and plan facts.
 
+        Use when advising on training (recent days against baselines, load,
+        upcoming plan); use report_snapshot for a fixed daily/weekly report.
+
         Baselines use prior calendar days only. The default 9-day daily window
         leaves slack over the 7-sample baseline minimum for days without data
         and is also the maximum ``recent_daily_days``.
@@ -95,7 +98,7 @@ def register_coaching_tools(mcp: MCPServer, config: CliConfig) -> None:
     def training_plan_reconcile(
         start_date: str,
         end_date: str,
-        detail: str = "summary",
+        detail: Literal["summary", "targets"] = "summary",
         max_activities: int = 50,
     ) -> dict[str, Any]:
         """Compare scheduled workouts with completed activities in a bounded range.
@@ -110,8 +113,6 @@ def register_coaching_tools(mcp: MCPServer, config: CliConfig) -> None:
             raise ToolError("start_date must be on or before end_date")
         if (end - start).days + 1 > 28:
             raise ToolError("reconciliation date range cannot exceed 28 days")
-        if detail not in {"summary", "targets"}:
-            raise ToolError("detail must be 'summary' or 'targets'")
         if max_activities < 1 or max_activities > 100:
             raise ToolError("max_activities must be between 1 and 100")
 

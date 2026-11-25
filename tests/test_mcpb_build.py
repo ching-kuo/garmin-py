@@ -17,6 +17,11 @@ assert _spec is not None and _spec.loader is not None
 build_mcpb = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(build_mcpb)
 
+_launcher_spec = importlib.util.spec_from_file_location("mcpb_main", build_mcpb.REPO_ROOT / "mcpb" / "main.py")
+assert _launcher_spec is not None and _launcher_spec.loader is not None
+launcher = importlib.util.module_from_spec(_launcher_spec)
+_launcher_spec.loader.exec_module(launcher)
+
 
 class TestBuildMcpb:
 
@@ -40,6 +45,29 @@ class TestBuildMcpb:
         assert f"Requires Python {minimum}+" in manifest["long_description"]
         assert f'MIN_PYTHON = "{minimum}"' in main_py
         assert "__GARMIN_PY_" not in json.dumps(manifest) + main_py
+
+    def test_read_only_toggle_is_wired_with_a_false_default(self) -> None:
+        manifest = json.loads((build_mcpb.REPO_ROOT / "mcpb" / "manifest.json").read_text())
+        setting = manifest["user_config"]["garmin_read_only"]
+        assert setting["type"] == "boolean" and setting["default"] is False
+        env = manifest["server"]["mcp_config"]["env"]
+        assert env["GARMIN_MCP_READ_ONLY"] == launcher._READ_ONLY_PLACEHOLDER
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("${user_config.garmin_read_only}", "false"),
+            ("true", "true"),
+            ("${user_config.other}", "${user_config.other}"),  # the server refuses this
+        ],
+    )
+    def test_launcher_defaults_only_the_unfilled_read_only_placeholder(
+        self, capsys: pytest.CaptureFixture[str], value: str, expected: str
+    ) -> None:
+        environ = {"GARMIN_MCP_READ_ONLY": value}
+        launcher._resolve_read_only_setting(environ)
+        assert environ["GARMIN_MCP_READ_ONLY"] == expected
+        assert ("not filled in" in capsys.readouterr().err) is (value == launcher._READ_ONLY_PLACEHOLDER)
 
     def test_min_python_parses_lower_bound(self) -> None:
         assert build_mcpb.min_python(">=3.12") == "3.12"

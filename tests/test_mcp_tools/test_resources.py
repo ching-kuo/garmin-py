@@ -15,6 +15,7 @@ from garmin_cli import login_backoff  # noqa: E402
 from garmin_cli.auth import SessionProbeResult  # noqa: E402
 from garmin_cli.mcp_server import create_mcp_server  # noqa: E402
 from garmin_cli.mcp_tools import resources as resources_module  # noqa: E402
+from garmin_cli.mcp_tools._shared import mcp_recovery_hint  # noqa: E402
 from tests.test_mcp_tools.support import _config  # noqa: E402
 
 
@@ -173,6 +174,22 @@ def test_template_auth_error_keeps_json_error_contract(mocker: Any) -> None:
     assert payload["error_code"] == "AUTH_MISSING"
 
 
+def test_template_on_a_symlinked_home_gets_the_local_hint(tmp_path: Any) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    server = create_mcp_server(_config(garth_home=str(link)))
+
+    with pytest.raises(Exception) as exc_info:
+        asyncio.run(server.read_resource("garmin://activity/123"))
+
+    payload = json.loads(str(exc_info.value))
+    assert payload["error_code"] == "AUTH_FAILED"
+    assert "GARMIN_HOME" in payload["recovery_hint"]
+    assert "login" not in payload["recovery_hint"]
+
+
 def test_template_probe_outage_is_not_reported_as_unauthenticated(mocker: Any) -> None:
     mocker.patch(
         "garmin_cli.mcp_tools.resources._auth_state",
@@ -212,6 +229,9 @@ def test_manifest_inventory_matches_registered_tools(
     assert manifest["limits"]["activity_detail_metrics_auto_cell_budget"] == 2400
     assert manifest["limits"]["reconciliation_target_streams_per_call"] == 10
     assert manifest["error_codes"]["RATE_LIMITED"]["retry_after_seconds"] == 2
+    for code in ("AUTH_MISSING", "AUTH_FAILED"):
+        assert manifest["error_codes"][code]["recovery_hint"] == mcp_recovery_hint(code)
+        assert "Claude Desktop" in manifest["error_codes"][code]["recovery_hint"]
     assert {
         resource["uri"] for resource in manifest["resources"]["templates"]
     } == {

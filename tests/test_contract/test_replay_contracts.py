@@ -81,7 +81,8 @@ def test_mcp_activity_contracts_replay_list_detail_and_laps(
     detail = _call(server, "activity_get", {"activity_id": 2001, "detail": True})
     laps = _call(server, "activity_laps", {"activity_id": 2001})
 
-    assert set(listing) == {"count", "rows"}
+    assert set(listing) == {"count", "rows", "truncated"}
+    assert listing["truncated"] is False
     assert listing["count"] == 2
     assert {"id", "date", "type", "distance_km", "duration_min"} <= set(
         listing["rows"][0]

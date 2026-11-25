@@ -25,7 +25,7 @@ from garmin_cli.endpoints.performance import (
 from garmin_cli.endpoints.metrics import get_race_predictions
 from garmin_cli.error_contracts import ERROR_CODE_TABLE
 from garmin_cli.exceptions import TRANSIENT_ERROR_CODES, GarminCliError
-from garmin_cli.mcp_tools._shared import _envelope, _error_text
+from garmin_cli.mcp_tools._shared import _envelope, _error_text, mcp_recovery_hint
 from garmin_cli.mcp_tools.activities import _AUTO_CELL_BUDGET, _activity_get_result
 from garmin_cli.mcp_tools.coaching import TARGET_SAMPLE_BUDGET, TARGET_STREAM_LIMIT
 from garmin_cli.token_store import token_file_identity
@@ -55,11 +55,14 @@ def _auth_state(config: CliConfig) -> tuple[str, dict[str, Any]]:
         }
     probe = probe_session_status(config)
     state = "authenticated" if probe.authenticated else "unauthenticated"
-    return state, {
+    auth: dict[str, Any] = {
         "state": state,
         "latency_ms": probe.latency_ms,
         "error_code": probe.error_code,
     }
+    if probe.local_config:
+        auth["local_config"] = True  # an unusable Garmin home: fix it locally, not by logging in
+    return state, auth
 
 
 def _tool_domain(name: str) -> str:
@@ -88,6 +91,7 @@ def _error_inventory() -> dict[str, dict[str, Any]]:
     return {
         code: {
             **contract,
+            "recovery_hint": mcp_recovery_hint(code),
             "retry_after_seconds": retry_after if code == "RATE_LIMITED" else None,
         }
         for code, contract in sorted(ERROR_CODE_TABLE.items())
@@ -252,14 +256,17 @@ def _require_resource_auth(config: CliConfig) -> None:
     if state == "authenticated":
         return
     error_code = auth.get("error_code") or "AUTH_MISSING"
-    if error_code == "AUTH_MISSING":
+    local_config = bool(auth.get("local_config"))
+    if local_config:
+        message = "The Garmin session path is not usable"
+    elif error_code == "AUTH_MISSING":
         message = "No usable saved session found"
     elif error_code in TRANSIENT_ERROR_CODES:
         message = "Could not check the Garmin session: Garmin throttled, failed, or was unreachable"
     else:
         message = "Garmin session is not authenticated"
     raise ResourceError(
-        _error_text(GarminCliError(error=message, error_code=error_code))
+        _error_text(GarminCliError(error=message, error_code=error_code, local_config=local_config))
     )
 
 
@@ -305,7 +312,10 @@ def register_resources(mcp: MCPServer, config: CliConfig) -> None:
                     "required": ["count", "rows"],
                     "count": "number of returned rows",
                     "rows": "serialized result rows",
-                    "output_schema": "The same contract is machine-readable via each tool's outputSchema.",
+                    "output_schema": (
+                        "Row tools publish a plain object outputSchema; activity_get, activity_detail_metrics, "
+                        "login_status, and submit_mfa_code publish typed outer fields."
+                    ),
                 },
                 "write_validation": {
                     "required": ["count", "rows"],

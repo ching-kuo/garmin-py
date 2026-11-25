@@ -6,6 +6,7 @@ from typing import Any, cast
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
+from pydantic.json_schema import SkipJsonSchema
 
 from garmin_cli.config import CliConfig
 from garmin_cli.endpoints.activities import (
@@ -52,10 +53,7 @@ from garmin_cli.services.activities import (
 )
 
 
-def _validate_start_offset(value: int) -> int:
-    if value < 0:
-        raise ToolError(f"start offset must be >= 0, got {value}")
-    return value
+_NOT_GIVEN: Any = object()  # default of the retired activity_list `start` argument
 
 
 def _validate_offset(value: int) -> int:
@@ -133,37 +131,50 @@ def register_activity_tools(mcp: MCPServer, config: CliConfig) -> None:
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def activity_list(
         limit: int = 20,
-        start: int = 0,
+        offset: int = 0,
         activity_type: str | None = None,
         search: str | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
+        # Unpublished: catches callers still sending the pre-3.0 name, which the
+        # SDK would otherwise drop silently (paging from 0 again).
+        start: SkipJsonSchema[Any] = _NOT_GIVEN,
     ) -> Envelope:
-        """List recent activities, optionally filtered by date range (YYYY-MM-DD). Returns id, date, name, type, distance_km, duration_min, avg_hr, training_load (per-activity Garmin training load)."""
+        """List activities newest first, optionally filtered by date range (YYYY-MM-DD). Returns id, date, name, type, distance_km, duration_min, avg_hr, training_load (per-activity Garmin training load).
+
+        ``offset`` skips that many newest activities. ``truncated`` is true when a full page came back; pass ``next_offset`` as ``offset`` for the next page. ``activity_type`` is a Garmin activity typeKey such as running, cycling, swimming, walking, hiking, strength_training, or multi_sport.
+        """
+        if start is not _NOT_GIVEN:  # even an explicit null
+            raise ToolError("activity_list has no 'start' parameter since 3.0; use offset")
         _validate_limit(limit)
-        _validate_start_offset(start)
+        _validate_offset(offset)
         parsed_start = None
         parsed_end = None
         if (start_date is None) != (end_date is None):
             raise ToolError("start_date and end_date must be provided together")
         if start_date is not None and end_date is not None:
             parsed_start, parsed_end = _parse_date_range(start_date, end_date)
-        return _run_tool(
+        result = _run_tool(
             config,
-            lambda: list_activities(limit, start, activity_type, search, parsed_start, parsed_end),
+            lambda: list_activities(limit, offset, activity_type, search, parsed_start, parsed_end),
             serialize_activity_summary,
         )
+        # Garmin reports no total, so a full page is the only "maybe more" signal.
+        result["truncated"] = result["count"] == limit
+        if result["truncated"]:
+            result["next_offset"] = offset + limit
+        return result
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def activity_get(activity_id: StrictId, detail: bool = False) -> ActivityGetEnvelope:
-        """Get a single activity by ID. For multisport activities (triathlon etc.), includes child activities with per-sport details. Returns compact activity fields by default, or extended sport-aware metrics including elapsed_time_min (total wall-clock time incl. stops; duration_min is moving time), running dynamics (GCT, vertical oscillation/ratio, stride length), cycling power suite (avg/max/normalized power, TSS, IF) and cadence, swim aggregates (SWOLF, strokes), and training response (aerobic/anaerobic training effect, training_effect_label, training_load, vO2max, recovery time) when detail=True. detail=True also returns workout_id: the scheduled structured workout this activity was executed from (null for free activities), linking back to workout_calendar/workout_get for prescribed-vs-actual comparison. When detail=True, the response carries an additional ``unavailable`` array (when non-empty) annotating which registry-known metrics are not applicable to this sport (``not_applicable_to_sport``) or unexpectedly absent (``absent_in_response``)."""
+        """Get a single activity by ID. Use when you need whole-activity totals and averages; use activity_detail_metrics for per-sample time series. Multisport parents include their child legs in ``children``. detail=true adds sport-aware metrics (elapsed_time_min incl. stops vs moving duration_min, running dynamics, cycling power/TSS/IF and cadence, swim SWOLF/strokes, training effect/load, VO2max, recovery time), workout_id (the scheduled workout it executed, else null), and an ``unavailable`` list of metrics not applicable to the sport or absent upstream."""
         _validate_positive_id(activity_id, "activity_id")
 
         return _authenticated(config, lambda: _activity_get_result(activity_id, detail))
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def activity_weather(activity_id: StrictId) -> Envelope:
-        """Get weather for an activity. Returns temperature, apparent_temp, dew_point, humidity, wind_speed, wind_gust, wind_direction, wind_direction_compass, and condition. Temperature fields are in the Garmin account's display unit (often Fahrenheit). Garmin's activity-weather feed has no precipitation-probability or icon-code field."""
+        """Get weather for an activity. Returns temp_c, apparent_temp_c, dew_point_c (Celsius), humidity (%), wind_speed, wind_gust, wind_direction (degrees), wind_direction_compass, and condition. No precipitation-probability field."""
         _validate_positive_id(activity_id, "activity_id")
         return _run_tool(config, lambda: get_activity_weather(activity_id), serialize_activity_weather)
 
@@ -199,7 +210,7 @@ def register_activity_tools(mcp: MCPServer, config: CliConfig) -> None:
         metrics: str = "",
         max_samples: int = 0,
     ) -> ActivityDetailMetricsEnvelope:
-        """Get a deterministic stride sample of an activity metric stream. Every row carries all requested metrics keyed by metric key (e.g. directTimestamp, directHeartRate, directPower, directSpeed), so channels are always timestamp-aligned at any stride — fetch ALL channels you need in ONE call; never split channels across calls and stitch. Response size scales with samples x metrics: the default ``max_samples=0`` auto-sizes the sample count to the column count (~2400 total values, clamped to 100..1000 samples) so multi-channel pulls fit client response limits; pass 100..5000 to override, lowering it rather than dropping channels when a response is too large. Pass ``metrics`` as a comma-separated key list to reduce columns; use activity_metrics_describe to discover available keys."""
+        """Get a deterministic stride sample of an activity metric stream. Use when you need per-sample time series (HR, power, pace over time); use activity_get for whole-activity totals. Every row carries all requested metrics keyed by metric key (e.g. directTimestamp, directHeartRate, directPower, directSpeed), so channels are always timestamp-aligned at any stride — fetch ALL channels you need in ONE call; never split channels across calls and stitch. Response size scales with samples x metrics: the default ``max_samples=0`` auto-sizes the sample count to the column count (~2400 total values, clamped to 100..1000 samples) so multi-channel pulls fit client response limits; pass 100..5000 to override, lowering it rather than dropping channels when a response is too large. Pass ``metrics`` as a comma-separated key list to reduce columns; use activity_metrics_describe to discover available keys."""
         _validate_positive_id(activity_id, "activity_id")
         _validate_max_samples(max_samples)
         wanted = tuple(m.strip() for m in metrics.split(",") if m.strip()) or None

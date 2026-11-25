@@ -129,9 +129,9 @@ class TestMcpWorkoutCreate:
         assert event.errors_count == len(row["errors"])
 
     def test_validation_warmupp_typo(self, mocker: Any) -> None:
-        """AE5: a step with type='warmupp' is rejected by the validator."""
+        """AE5: a step with type='warmupp' is rejected by the input schema, naming the path."""
         mocker.patch("garmin_cli.mcp_tools.workouts.ensure_authenticated")
-        mocker.patch("garmin_cli.mcp_tools.workouts.create_workout")
+        create = mocker.patch("garmin_cli.mcp_tools.workouts.create_workout")
         mocker.patch("garmin_cli.mcp_tools.workouts._emit_write_log")
         server = create_mcp_server(_config())
 
@@ -146,11 +146,9 @@ class TestMcpWorkoutCreate:
                 }
             ],
         }
-        result = _call(server, "workout_create", {"workout": bad})
-        row = result["rows"][0]
-        assert row["ok"] is False
-        assert row["error_code"] == "INVALID_INPUT"
-        assert any("warmupp" in e for e in row["errors"])
+        with pytest.raises(ToolError, match=r"workout\.steps\.0\.type(.|\n)*warmupp"):
+            _call(server, "workout_create", {"workout": bad})
+        create.assert_not_called()
 
     def test_dry_run_with_validation_errors(self, mocker: Any) -> None:
         """dry_run=True does not bypass validation."""
@@ -626,7 +624,8 @@ class TestMcpWorkoutUnschedule:
         event = log.call_args.args[0]
         assert event.tool == "workout_unschedule"
         assert event.outcome == "success"
-        assert event.workout_id == 555
+        assert event.schedule_id == 555
+        assert event.workout_id is None
 
     def test_destructive_annotation(self) -> None:
         server = create_mcp_server(_config())

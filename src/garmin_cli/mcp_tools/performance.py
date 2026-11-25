@@ -28,10 +28,12 @@ from garmin_cli.endpoints.performance import (
     get_vo2max,
 )
 from garmin_cli.mcp_tools._shared import (
+    Days,
+    EndDate,
     _authenticated,
+    _date_window,
     _envelope,
     _parse_date,
-    _parse_date_range,
     _run_tool,
 )
 from garmin_cli.mcp_tools._schemas import Envelope
@@ -69,16 +71,16 @@ def register_performance_tools(mcp: MCPServer, config: CliConfig) -> None:
         return _run_tool(config, get_personal_records, serialize_personal_records)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def performance_endurance_score(start_date: str, end_date: str) -> Envelope:
+    def performance_endurance_score(start_date: str | None = None, end_date: EndDate = None, days: Days = None) -> Envelope:
         """Get endurance score for a date range (YYYY-MM-DD). Returns date, overall_score, endurance_classification."""
-        start, end = _parse_date_range(start_date, end_date)
-        return _run_tool(config, lambda: get_endurance_score_range(start, end), serialize_endurance_score)
+        window = _date_window(start_date, end_date, days)
+        return _run_tool(config, lambda: get_endurance_score_range(*window()), serialize_endurance_score)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def performance_hill_score(start_date: str, end_date: str) -> Envelope:
+    def performance_hill_score(start_date: str | None = None, end_date: EndDate = None, days: Days = None) -> Envelope:
         """Get hill score for a date range (YYYY-MM-DD). Returns date, overall_score, endurance_score, strength_score."""
-        start, end = _parse_date_range(start_date, end_date)
-        return _run_tool(config, lambda: get_hill_score_range(start, end), serialize_hill_score)
+        window = _date_window(start_date, end_date, days)
+        return _run_tool(config, lambda: get_hill_score_range(*window()), serialize_hill_score)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def performance_thresholds() -> Envelope:
@@ -109,36 +111,43 @@ def register_performance_tools(mcp: MCPServer, config: CliConfig) -> None:
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def performance_ftp_history(
-        start_date: str, end_date: str, sport: FtpHistorySport = "cycling"
+        start_date: str | None = None,
+        end_date: EndDate = None,
+        days: Days = None,
+        sport: FtpHistorySport = "cycling",
     ) -> Envelope:
         """Get daily functional threshold power (FTP) for a date range (YYYY-MM-DD). Returns date, sport, ftp_watts."""
-        start, end = _parse_date_range(start_date, end_date)
-        return _run_tool(config, lambda: get_ftp_history(start, end, sport), serialize_ftp_history)
+        window = _date_window(start_date, end_date, days)
+        return _run_tool(config, lambda: get_ftp_history(*window(), sport), serialize_ftp_history)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def performance_acclimation(start_date: str, end_date: str) -> Envelope:
+    def performance_acclimation(start_date: str | None = None, end_date: EndDate = None, days: Days = None) -> Envelope:
         """Get daily heat and altitude acclimation for a date range (YYYY-MM-DD). Returns date, heat_acclimation_pct, heat_trend, altitude_acclimation, altitude_trend, current_altitude."""
-        start, end = _parse_date_range(start_date, end_date)
-        return _run_tool(config, lambda: get_acclimation_range(start, end), serialize_acclimation)
+        window = _date_window(start_date, end_date, days)
+        return _run_tool(config, lambda: get_acclimation_range(*window()), serialize_acclimation)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def performance_cycling_ability(start_date: str, end_date: str) -> Envelope:
+    def performance_cycling_ability(start_date: str | None = None, end_date: EndDate = None, days: Days = None) -> Envelope:
         """Get daily cycling ability scores for a date range (YYYY-MM-DD). Returns date, aerobic_endurance, aerobic_capacity, anaerobic_capacity (0-100 scores), profile_type, and a Garmin feedback key per score."""
-        start, end = _parse_date_range(start_date, end_date)
-        return _run_tool(config, lambda: get_cycling_ability_range(start, end), serialize_cycling_ability)
+        window = _date_window(start_date, end_date, days)
+        return _run_tool(config, lambda: get_cycling_ability_range(*window()), serialize_cycling_ability)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def performance_power_curve(
-        start_date: str, end_date: str, sport: PowerCurveSport = "cycling"
+        start_date: str | None = None,
+        end_date: EndDate = None,
+        days: Days = None,
+        sport: PowerCurveSport = "cycling",
     ) -> Envelope:
         """Get the power curve (best average power per duration) across activities in a date range (YYYY-MM-DD). Returns duration_s, power_w, activity_id, activity_date. Garmin supports cycling and rowing only."""
-        start, end = _parse_date_range(start_date, end_date)
-        return _run_tool(config, lambda: get_power_curve(start, end, sport), serialize_power_curve)
+        window = _date_window(start_date, end_date, days)
+        return _run_tool(config, lambda: get_power_curve(*window(), sport), serialize_power_curve)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def performance_fastest_splits(
-        start_date: str,
-        end_date: str,
+        start_date: str | None = None,
+        end_date: EndDate = None,
+        days: Days = None,
         sport: FastestSplitsSport = "running",
         bests_per_distance: int = 1,
     ) -> Envelope:
@@ -147,9 +156,9 @@ def register_performance_tools(mcp: MCPServer, config: CliConfig) -> None:
             raise ToolError(
                 f"bests_per_distance must be between 1 and {MAX_FASTEST_SPLITS_BESTS}, got {bests_per_distance}"
             )
-        start, end = _parse_date_range(start_date, end_date)
+        window = _date_window(start_date, end_date, days)
         return _run_tool(
             config,
-            lambda: get_fastest_splits(start, end, sport, bests_per_distance),
+            lambda: get_fastest_splits(*window(), sport, bests_per_distance),
             serialize_fastest_splits,
         )

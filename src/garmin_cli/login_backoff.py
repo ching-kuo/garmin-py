@@ -78,6 +78,7 @@ def record_failure(
         error=_MFA_REJECTED.format(seconds=wait) if _failure.mfa_rejected else error.error,
         error_code=error.error_code,
         retry_after_seconds=wait,
+        mfa_rejected=_failure.mfa_rejected,
     )
 
 
@@ -110,6 +111,7 @@ def raise_if_backing_off(config: CliConfig) -> None:
             error=failure.message(remaining),
             error_code=failure.error_code,
             retry_after_seconds=remaining,
+            mfa_rejected=failure.mfa_rejected,
         )
 
 

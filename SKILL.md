@@ -164,8 +164,8 @@ garmin-cli --json activity laps 12345678901
 # HR time-in-zone breakdown -- fields: zone, zone_low_bpm, zone_high_bpm, seconds_in_zone, minutes_in_zone
 garmin-cli --json activity zones 12345678901
 
-# Weather for an activity -- fields: temperature, apparent_temp, dew_point, humidity, wind_speed, wind_gust, wind_direction, wind_direction_compass, condition
-# Temperature fields are in the Garmin account's display unit (often Fahrenheit). No precipitation-probability or icon-code field.
+# Weather for an activity -- fields: temp_c, apparent_temp_c, dew_point_c, humidity, wind_speed, wind_gust, wind_direction, wind_direction_compass, condition
+# Temperatures are Celsius (Garmin sends Fahrenheit whatever the account's units). No precipitation-probability or icon-code field.
 garmin-cli --json activity weather 12345678901
 
 # Metric descriptors for an activity's detail stream -- fields: key, unit, metricsIndex
@@ -615,21 +615,21 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 
 | Tool | Parameters | Returns |
 |------|-----------|---------|
-| `health_sleep` | `start_date`, `end_date` | `{count, rows}` |
-| `health_hrv` | `start_date`, `end_date` | `{count, rows}` |
-| `health_weight` | `start_date`, `end_date` | `{count, rows}` |
-| `health_daily_summary` | `start_date`, `end_date` | `{count, rows}` — steps, floors, intensity minutes, calories, resting HR (one request for the whole range) |
-| `health_steps` | `start_date`, `end_date` | `{count, rows}` — steps, distance, step goal (native range API; one request per 28 days) |
-| `health_intensity_minutes` | `start_date`, `end_date` | `{count, rows}` — moderate/vigorous minutes, weekly goal (native range API; one request per 31 days) |
-| `health_body_battery` | `start_date`, `end_date` | `{count, rows}` — `date`, `start_level`, `end_level`, `max_level` (intraday peak); single ranged API call |
-| `health_stress` | `start_date`, `end_date` | `{count, rows}` |
-| `health_spo2` | `start_date`, `end_date` | `{count, rows}` |
-| `health_resting_hr` | `start_date`, `end_date` | `{count, rows}` |
-| `health_readiness` | `start_date`, `end_date` | `{count, rows}` |
+| `health_sleep` | `start_date?` or `days?`, `end_date?` | `{count, rows}` |
+| `health_hrv` | `start_date?` or `days?`, `end_date?` | `{count, rows}` |
+| `health_weight` | `start_date?` or `days?`, `end_date?` | `{count, rows}` |
+| `health_daily_summary` | `start_date?` or `days?`, `end_date?` | `{count, rows}` — steps, floors, intensity minutes, calories, resting HR (one request for the whole range) |
+| `health_steps` | `start_date?` or `days?`, `end_date?` | `{count, rows}` — steps, distance, step goal (native range API; one request per 28 days) |
+| `health_intensity_minutes` | `start_date?` or `days?`, `end_date?` | `{count, rows}` — moderate/vigorous minutes, weekly goal (native range API; one request per 31 days) |
+| `health_body_battery` | `start_date?` or `days?`, `end_date?` | `{count, rows}` — `date`, `start_level`, `end_level`, `max_level` (intraday peak); single ranged API call |
+| `health_stress` | `start_date?` or `days?`, `end_date?` | `{count, rows}` |
+| `health_spo2` | `start_date?` or `days?`, `end_date?` | `{count, rows}` |
+| `health_resting_hr` | `start_date?` or `days?`, `end_date?` | `{count, rows}` |
+| `health_readiness` | `start_date?` or `days?`, `end_date?` | `{count, rows}` |
 | `health_training_status` | `date` | `{count, rows}` — training status plus acute/chronic load, ACWR, load tunnel, monthly load-focus buckets and targets, load-balance status |
-| `activity_list` | `limit?`, `start?`, `activity_type?`, `search?`, `start_date?`, `end_date?` | `{count, rows}` — `start_date`/`end_date` (YYYY-MM-DD) must be provided together |
+| `activity_list` | `limit?`, `offset?`, `activity_type?`, `search?`, `start_date?`, `end_date?` | `{count, rows, truncated, next_offset?}` — newest first; `truncated` is true when a full page came back, then pass `next_offset` as `offset` (the pre-3.0 `start` argument is rejected). `start_date`/`end_date` (YYYY-MM-DD) must be provided together; `activity_type` is a Garmin typeKey (e.g. `running`, `cycling`) |
 | `activity_get` | `activity_id`, `detail?` | `{count, rows, children?, unavailable?}` — `detail=true` projects sport-aware metrics (running dynamics, cycling power, swim aggregates, training response) under a stable union schema and adds an `unavailable[]` capability manifest when non-empty |
-| `activity_weather` | `activity_id` | `{count, rows}` |
+| `activity_weather` | `activity_id` | `{count, rows}` — `temp_c`, `apparent_temp_c`, `dew_point_c` in Celsius |
 | `activity_laps` | `activity_id`, `offset?` | `{count, rows, total, truncated, next_offset?}` — at most 100 per-lap rows (run/bike) or per-pool-length rows (lap_swimming). Use `offset=next_offset` to continue. Auto-routes pool swim to typed_splits backend method. Multisport parents fan out to each child leg's laps with a 0-based `leg_index` stamped on every row |
 | `activity_hr_zones` | `activity_id` | `{count, rows}` — one row per HR zone with `zone`, `zone_low_bpm`, `zone_high_bpm`, `seconds_in_zone`, `minutes_in_zone` |
 | `activity_metrics_describe` | `activity_id` | `{count, rows}` — descriptors for the metric stream: `key`, `unit`, `metricsIndex`. Use to discover what metrics a watch recorded for a specific activity |
@@ -653,24 +653,24 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `activity_rename` | `activity_id`, `name` | `{count, rows}` — `ok: true, action: "renamed", activity_id, name`. **Destructive** (replaces the stored title). |
 | `activity_set_type` | `activity_id`, `type_key` | `{count, rows}` — `ok: true, action: "type-updated", activity_id, type`. `type_key` is resolved against Garmin's live sport-type table; unknown keys are rejected before any write. **Destructive** (replaces the sport classification). |
 | `performance_race_predictions` | *(none)* | `{count, rows}` — predicted times for 5K, 10K, half marathon, marathon |
-| `performance_endurance_score` | `start_date`, `end_date` | `{count, rows}` — endurance score and classification (one API call per day) |
-| `performance_hill_score` | `start_date`, `end_date` | `{count, rows}` — hill score, endurance score, strength score (one API call per day) |
+| `performance_endurance_score` | `start_date?` or `days?`, `end_date?` | `{count, rows}` — endurance score and classification (one API call per day) |
+| `performance_hill_score` | `start_date?` or `days?`, `end_date?` | `{count, rows}` — hill score, endurance score, strength score (one API call per day) |
 | `performance_thresholds` | *(none)* | `{count, rows}` |
 | `performance_vo2max` | `date?` | `{count, rows}` |
 | `performance_zones` | *(none)* | `{count, rows}` |
 | `performance_personal_records` | *(none)* | `{count, rows}` — all-time PRs with human-readable `label` (null for unmapped typeIds) |
-| `performance_ftp_history` | `start_date`, `end_date`, `sport?` (`cycling`\|`running`) | `{count, rows}` — daily `date`, `sport`, `ftp_watts` |
-| `performance_acclimation` | `start_date`, `end_date` | `{count, rows}` — daily heat acclimation %, acclimated altitude (m), trend labels, current altitude |
-| `performance_cycling_ability` | `start_date`, `end_date` | `{count, rows}` — daily aerobic endurance / aerobic capacity / anaerobic capacity scores, `profile_type`, and Garmin feedback keys |
-| `performance_power_curve` | `start_date`, `end_date`, `sport?` (`cycling`\|`rowing`) | `{count, rows}` — `duration_s`, `power_w`, and the `activity_id`/`activity_date` that set it |
-| `performance_fastest_splits` | `start_date`, `end_date`, `sport?` (`running`\|`cycling`), `bests_per_distance?` (1-10) | `{count, rows}` — `distance_m`, `time_s`, `activity_id`, `activity_date` |
+| `performance_ftp_history` | `start_date?` or `days?`, `end_date?`, `sport?` (`cycling`\|`running`) | `{count, rows}` — daily `date`, `sport`, `ftp_watts` |
+| `performance_acclimation` | `start_date?` or `days?`, `end_date?` | `{count, rows}` — daily heat acclimation %, acclimated altitude (m), trend labels, current altitude |
+| `performance_cycling_ability` | `start_date?` or `days?`, `end_date?` | `{count, rows}` — daily aerobic endurance / aerobic capacity / anaerobic capacity scores, `profile_type`, and Garmin feedback keys |
+| `performance_power_curve` | `start_date?` or `days?`, `end_date?`, `sport?` (`cycling`\|`rowing`) | `{count, rows}` — `duration_s`, `power_w`, and the `activity_id`/`activity_date` that set it |
+| `performance_fastest_splits` | `start_date?` or `days?`, `end_date?`, `sport?` (`running`\|`cycling`), `bests_per_distance?` (1-10) | `{count, rows}` — `distance_m`, `time_s`, `activity_id`, `activity_date` |
 | `device_list` | *(none)* | `{count, rows}` — registered devices with type and last sync |
 | `login_status` | *(none)* | `{authenticated, garmin_home, error_code?, detail?}` — `error_code` (`RATE_LIMITED` / `SERVER_ERROR` / `NETWORK_ERROR`) is set when Garmin could not be asked, so `authenticated: false` does not mean logged out |
 | `server_doctor` | `fast?` | `{count, rows}` — non-raising Python, package-version, config, token-store, session, and MCP write-surface diagnostics. `fast=true` skips the network probe. **Read-only.** |
 | `submit_mfa_code` | `mfa_code` | `{authenticated, garmin_home}` — completes a login that failed with `MFA_REQUIRED`; ask the user for the one-time code Garmin sent them. Codes are single-use: on failure, retry the original tool call to trigger a fresh code |
 | `report_snapshot` | `kind` (`morning`\|`evening`\|`weekly`), `date?` | `{kind, date_range, sections, unavailable?}` — one composite call that fans out the day's (or week's) reads server-side. `sections` maps section name → rows (same shapes as the per-domain tools). Sections with no data are empty and listed in `unavailable` with a `reason` (`not_found`\|`no_data`). `date` (YYYY-MM-DD) defaults to today in the athlete's Garmin profile timezone (not the server host's); `weekly` covers the anchor day and the six prior days. |
 
-Dates use `YYYY-MM-DD` format. Max primitive date range: 90 days. Garmin failures surface as MCP ToolError text containing a JSON object with `error_code`, `category`, `message`, `recovery_hint`, and `retry_after_seconds` so clients can branch without parsing prose. The retry delay is populated for `RATE_LIMITED` and `null` otherwise.
+Dates use `YYYY-MM-DD` format. Max primitive date range: 90 days. Health and performance range tools take `start_date` or `days` (1-90, not both); `end_date` defaults to today in the athlete's Garmin profile timezone. `workout_create`, `workout_update`, `training_plan_preview`, and `training_plan_apply` publish typed input schemas: a wrong type or unknown key fails as a ToolError naming the field path before the tool runs, while rule violations (zone limits, one entry per date) still return the `INVALID_INPUT` result. `mcp-server --read-only` (or `GARMIN_MCP_READ_ONLY=1`) leaves out every write tool. Garmin failures surface as MCP ToolError text (prefixed by the SDK with `Error executing tool <name>: `; parse from the first `{`) containing a JSON object with `error_code`, `category`, `message`, `recovery_hint`, and `retry_after_seconds` so clients can branch without parsing prose. The retry delay is populated for `RATE_LIMITED` and `null` otherwise.
 
 #### AI-coaching tool sequence
 

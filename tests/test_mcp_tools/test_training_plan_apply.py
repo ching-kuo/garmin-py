@@ -44,6 +44,7 @@ class _FakeCalendar:
 
     def install(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+        mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
         mocker.patch("garmin_cli.mcp_tools.training_plan.get_calendar_range", side_effect=self.get)
         mocker.patch("garmin_cli.mcp_tools.training_plan.schedule_workout", side_effect=self.schedule)
         mocker.patch("garmin_cli.mcp_tools.training_plan.unschedule_workout", side_effect=self.unschedule)

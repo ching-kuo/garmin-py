@@ -14,6 +14,7 @@ from garmin_cli.auth import probe_session_status
 from garmin_cli.config import CliConfig
 from garmin_cli.error_contracts import error_contract
 from garmin_cli.bearer_token import BEARER_ENV, validate_bearer_token
+from garmin_cli.read_only import READ_ONLY_ENV, READ_ONLY_FALSE, READ_ONLY_TRUE
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.token_store import (
     TOKEN_FILE_NAME,
@@ -232,7 +233,19 @@ def check_session(config: CliConfig) -> CheckResult:
     return _failure("session", detail, probe.error_code or "AUTH_FAILED")
 
 
-def check_write_surface(_config: CliConfig) -> CheckResult:
+def check_write_surface(_config: CliConfig, read_only: bool | None = None) -> CheckResult:
+    """``read_only`` is a running server's mode; None reads the environment."""
+    problems: list[tuple[str, str]] = []  # (detail, hint); every problem is reported
+    note = ""
+    if read_only is None:
+        raw = os.environ.get(READ_ONLY_ENV, "").strip().lower()
+        if raw not in READ_ONLY_TRUE | READ_ONLY_FALSE:
+            problems.append((
+                f"{READ_ONLY_ENV} must be a boolean such as 1/0 or true/false.",
+                f"Set {READ_ONLY_ENV} to 1 or true for a read-only server, or unset it.",
+            ))
+        read_only = raw in READ_ONLY_TRUE
+        note = " (Read from the environment: a --read-only flag passed to a running server is not visible here.)"
     # The bind host is a per-invocation CLI flag with no config fallback, so
     # only the bearer-token state can be diagnosed ahead of time.
     # Present-but-blank is a misconfiguration (HTTP binds refuse to start),
@@ -242,14 +255,21 @@ def check_write_surface(_config: CliConfig) -> CheckResult:
         try:
             validate_bearer_token(raw_token)
         except ValueError as exc:
-            return _failure(
-                "write_surface",
-                str(exc),
-                "INVALID_INPUT",
-                f"Set {BEARER_ENV} to a valid token, or unset it for stdio-only use.",
-            )
+            problems.append((str(exc), f"Set {BEARER_ENV} to a valid token, or unset it for stdio-only use."))
+    if problems:
+        return _failure(
+            "write_surface",
+            " ".join(detail for detail, _ in problems),
+            "INVALID_INPUT",
+            " ".join(hint for _, hint in problems),
+        )
+    mode = (
+        f"MCP server is read-only ({READ_ONLY_ENV} or --read-only): write tools are not registered."
+        if read_only
+        else "MCP write tools are enabled."
+    ) + note
     detail = (
-        "MCP write tools are enabled. Stdio is trusted; HTTP binds enforce the "
+        f"{mode} Stdio is trusted; HTTP binds enforce the "
         f"bearer token ({BEARER_ENV}) whenever it is present, and non-loopback "
         "HTTP binds require it. "
         f"Bearer token configured: {str(raw_token is not None).lower()}."
@@ -273,8 +293,12 @@ def run_checks(
     *,
     fast: bool = False,
     include_mcp_extra: bool = True,
+    read_only: bool | None = None,
 ) -> list[CheckResult]:
-    """Run all requested checks, capturing every unexpected failure."""
+    """Run all requested checks, capturing every unexpected failure.
+
+    ``read_only`` is passed to :func:`check_write_surface`.
+    """
     results: list[CheckResult] = []
     for check in _CHECKS:
         if check is check_mcp_extra and not include_mcp_extra:
@@ -283,7 +307,7 @@ def run_checks(
             results.append(CheckResult("session", True, "Skipped network probe (--fast)."))
             continue
         try:
-            results.append(check(config))
+            results.append(check_write_surface(config, read_only) if check is check_write_surface else check(config))
         except Exception:
             results.append(
                 _failure(

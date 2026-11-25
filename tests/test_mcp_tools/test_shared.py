@@ -44,7 +44,7 @@ def test_id_parameters_reject_coercible_non_ints_at_schema_validation(
 ) -> None:
     # A coerced id must never reach auth or a (destructive) handler.
     reached = RuntimeError("handler reached")
-    for module in ("_shared", "workouts", "activities_write"):
+    for module in ("_shared", "workouts", "activities_write", "training_plan"):
         mocker.patch(f"garmin_cli.mcp_tools.{module}.ensure_authenticated", side_effect=reached)
     server = create_mcp_server(_config())
 
@@ -225,11 +225,11 @@ class TestInputValidation:
         with pytest.raises(ToolError, match="positive"):
             _call(server, "activity_get", {"activity_id": 0})
 
-    def test_negative_start_offset(self) -> None:
+    def test_negative_offset(self) -> None:
 
         server = self._server()
-        with pytest.raises(ToolError, match="start"):
-            _call(server, "activity_list", {"start": -1})
+        with pytest.raises(ToolError, match="offset"):
+            _call(server, "activity_list", {"offset": -1})
 
 
 class TestErrorPropagation:
@@ -282,13 +282,65 @@ class TestErrorPropagation:
         payload = json.loads(str(exc_info.value).split(": ", 1)[1])
         assert payload["retry_after_seconds"] == 42
 
-    def test_auth_failed_no_login_hint(self, mocker: Any) -> None:
+    @pytest.mark.parametrize("code", ["AUTH_MISSING", "AUTH_FAILED"])
+    def test_auth_hint_names_desktop_settings_cli_login_and_mfa(self, mocker: Any, code: str) -> None:
+        mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated", side_effect=GarminCliError(error="no session", error_code=code))
+        server = create_mcp_server(_config())
+        with pytest.raises(ToolError) as exc_info:
+            _call(server, "health_sleep", {"start_date": "2026-01-01", "end_date": "2026-01-01"})
+        hint = json.loads(str(exc_info.value).split(": ", 1)[1])["recovery_hint"]
+        assert "Claude Desktop" in hint
+        assert "Terminal: run garmin-cli login" in hint
+        assert "submit_mfa_code" in hint
 
-        mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated", side_effect=GarminCliError(error="garth_home path is a symlink", error_code="AUTH_FAILED"))
+    def test_rejected_mfa_code_hint_says_wait_then_new_code(self, mocker: Any) -> None:
+        from garmin_cli import login_backoff
+
+        login_backoff.clear()
+        config = _config()
+        error = login_backoff.record_failure(config, GarminCliError("bad code", "AUTH_FAILED"), mfa=True)
+        mocker.patch("garmin_cli.mcp_tools.misc.complete_mfa_login", side_effect=error)
+        server = create_mcp_server(config)
+        try:
+            with pytest.raises(ToolError) as exc_info:
+                _call(server, "submit_mfa_code", {"mfa_code": "123456"})
+            with pytest.raises(GarminCliError) as cached:
+                login_backoff.raise_if_backing_off(config)
+        finally:
+            login_backoff.clear()
+        hint = json.loads(str(exc_info.value).split(": ", 1)[1])["recovery_hint"]
+        assert hint.startswith("Wait 60 seconds")
+        assert "new code" in hint and "submit_mfa_code" in hint
+        assert "password" not in hint
+        assert cached.value.mfa_rejected is True
+
+    def test_retry_after_leads_the_hint_with_waiting(self, mocker: Any) -> None:
+        mocker.patch(
+            "garmin_cli.mcp_tools._shared.ensure_authenticated",
+            side_effect=GarminCliError("Authentication failed.", "AUTH_FAILED", retry_after_seconds=42),
+        )
+        with pytest.raises(ToolError) as exc_info:
+            _call(create_mcp_server(_config()), "health_sleep", {"start_date": "2026-01-01", "end_date": "2026-01-01"})
+        assert json.loads(str(exc_info.value).split(": ", 1)[1])["recovery_hint"].startswith("Wait 42 seconds")
+
+    def test_local_config_auth_failure_gives_no_login_advice(self, mocker: Any, tmp_path: Any) -> None:
+        from garmin_cli.token_store import validate_garmin_home
+
+        real = tmp_path / "real"
+        real.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(real)
+        mocker.patch(
+            "garmin_cli.mcp_tools._shared.ensure_authenticated",
+            side_effect=lambda _config: validate_garmin_home(str(link)),
+        )
         server = create_mcp_server(_config())
         with pytest.raises(ToolError, match="symlink") as exc_info:
             _call(server, "health_sleep", {"start_date": "2026-01-01", "end_date": "2026-01-01"})
-        assert "garmin-cli login" not in str(exc_info.value)
+        payload = json.loads(str(exc_info.value).split(": ", 1)[1])
+        assert payload["error_code"] == "AUTH_FAILED"
+        assert "login" not in payload["recovery_hint"]
+        assert "GARMIN_HOME" in payload["recovery_hint"]
 
 
 class TestEnvelopeShape:
@@ -311,7 +363,7 @@ class TestEnvelopeShape:
         mocker.patch("garmin_cli.mcp_tools.activities.list_activities", return_value=[])
         server = create_mcp_server(_config())
         result = _call(server, "activity_list", {"limit": 10})
-        assert result == {"count": 0, "rows": []}
+        assert result == {"count": 0, "rows": [], "truncated": False}
 
 
 class TestConfigPassthrough:

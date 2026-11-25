@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import venv
+from collections.abc import MutableMapping
 from pathlib import Path
 
 # Replaced with the real release version by scripts/build_mcpb.py.
@@ -86,6 +87,21 @@ def _install_if_missing(venv_dir: Path) -> None:
             shutil.rmtree(sibling, ignore_errors=True)
 
 
+_READ_ONLY_ENV = "GARMIN_MCP_READ_ONLY"
+_READ_ONLY_PLACEHOLDER = "${user_config.garmin_read_only}"
+
+
+def _resolve_read_only_setting(environ: MutableMapping[str, str]) -> None:
+    """Map an unfilled read-only placeholder to the manifest default (false).
+
+    Only this exact placeholder is defaulted; any other non-boolean value is
+    passed on and the server refuses to start with a configuration error.
+    """
+    if environ.get(_READ_ONLY_ENV) == _READ_ONLY_PLACEHOLDER:
+        _log("The read-only setting was not filled in; using its default (off, write tools enabled).")
+        environ[_READ_ONLY_ENV] = "false"
+
+
 def main() -> int:
     if VERSION.startswith("__"):
         _log(
@@ -101,6 +117,8 @@ def main() -> int:
             "and restart Claude Desktop."
         )
         return 1
+
+    _resolve_read_only_setting(os.environ)
 
     py_tag = f"{sys.version_info.major}.{sys.version_info.minor}"
     venv_dir = Path.home() / ".garmin-py" / "mcpb" / f"venv-{VERSION}-py{py_tag}"

@@ -19,7 +19,7 @@ from garmin_cli.endpoints.health import (
     get_training_status,
     get_weight,
 )
-from garmin_cli.mcp_tools._shared import _parse_date, _parse_date_range, _run_tool
+from garmin_cli.mcp_tools._shared import Days, EndDate, _date_window, _parse_date, _run_tool
 from garmin_cli.mcp_tools._schemas import Envelope
 from garmin_cli.serializers import (
     serialize_body_battery,
@@ -41,70 +41,70 @@ def register_health_tools(mcp: MCPServer, config: CliConfig) -> None:
     """Register the health-domain read tools on ``mcp``."""
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def health_sleep(start_date: str, end_date: str) -> Envelope:
+    def health_sleep(start_date: str | None = None, end_date: EndDate = None, days: Days = None) -> Envelope:
         """Get sleep data for a date range (YYYY-MM-DD). Returns date, bedtime/wake_time (local ISO), duration_hours, deep/light/rem/awake minutes, and sleep score."""
-        start, end = _parse_date_range(start_date, end_date)
-        return _run_tool(config, lambda: get_sleep(start, end), serialize_sleep)
+        window = _date_window(start_date, end_date, days)
+        return _run_tool(config, lambda: get_sleep(*window()), serialize_sleep)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def health_hrv(start_date: str, end_date: str) -> Envelope:
+    def health_hrv(start_date: str | None = None, end_date: EndDate = None, days: Days = None) -> Envelope:
         """Get HRV data for a date range (YYYY-MM-DD). Returns date, weekly_avg, last_night, status."""
-        start, end = _parse_date_range(start_date, end_date)
-        return _run_tool(config, lambda: get_hrv(start, end), serialize_hrv)
+        window = _date_window(start_date, end_date, days)
+        return _run_tool(config, lambda: get_hrv(*window()), serialize_hrv)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def health_weight(start_date: str, end_date: str) -> Envelope:
+    def health_weight(start_date: str | None = None, end_date: EndDate = None, days: Days = None) -> Envelope:
         """Get weight data for a date range (YYYY-MM-DD). Returns date, weight_kg, bmi, body_fat_pct."""
-        start, end = _parse_date_range(start_date, end_date)
-        return _run_tool(config, lambda: get_weight(start, end), serialize_weight)
+        window = _date_window(start_date, end_date, days)
+        return _run_tool(config, lambda: get_weight(*window()), serialize_weight)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def health_daily_summary(start_date: str, end_date: str) -> Envelope:
-        """Get daily summary data for a date range (YYYY-MM-DD). Returns date, total_steps, distance_km, calories, floors, intensity minutes, and resting heart rate. One request covers the whole range."""
-        start, end = _parse_date_range(start_date, end_date)
-        return _run_tool(config, lambda: get_daily_summary_range(start, end), serialize_daily_summary)
+    def health_daily_summary(start_date: str | None = None, end_date: EndDate = None, days: Days = None) -> Envelope:
+        """Get daily summary data for a date range (YYYY-MM-DD). Returns date, total_steps, distance_km, calories, floors, intensity minutes, and resting heart rate. One request covers the whole range. Use when you need several daily totals at once; use the individual health_* tools for detail such as sleep stages, HRV status, or stress."""
+        window = _date_window(start_date, end_date, days)
+        return _run_tool(config, lambda: get_daily_summary_range(*window()), serialize_daily_summary)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def health_steps(start_date: str, end_date: str) -> Envelope:
+    def health_steps(start_date: str | None = None, end_date: EndDate = None, days: Days = None) -> Envelope:
         """Get steps data for a date range (YYYY-MM-DD). Returns date, total_steps, total_distance, step_goal."""
-        start, end = _parse_date_range(start_date, end_date)
-        return _run_tool(config, lambda: get_steps_range(start, end), serialize_steps)
+        window = _date_window(start_date, end_date, days)
+        return _run_tool(config, lambda: get_steps_range(*window()), serialize_steps)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def health_intensity_minutes(start_date: str, end_date: str) -> Envelope:
+    def health_intensity_minutes(start_date: str | None = None, end_date: EndDate = None, days: Days = None) -> Envelope:
         """Get intensity minutes for a date range (YYYY-MM-DD). Returns date, moderate_value, vigorous_value, weekly_goal."""
-        start, end = _parse_date_range(start_date, end_date)
-        return _run_tool(config, lambda: get_intensity_minutes_range(start, end), serialize_intensity_minutes)
+        window = _date_window(start_date, end_date, days)
+        return _run_tool(config, lambda: get_intensity_minutes_range(*window()), serialize_intensity_minutes)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def health_body_battery(start_date: str, end_date: str) -> Envelope:
+    def health_body_battery(start_date: str | None = None, end_date: EndDate = None, days: Days = None) -> Envelope:
         """Get body battery for a date range (YYYY-MM-DD). Returns date, start_level, end_level, max_level (intraday peak). Fetched in a single ranged call."""
-        start, end = _parse_date_range(start_date, end_date)
-        return _run_tool(config, lambda: get_body_battery_range(start, end), serialize_body_battery)
+        window = _date_window(start_date, end_date, days)
+        return _run_tool(config, lambda: get_body_battery_range(*window()), serialize_body_battery)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def health_stress(start_date: str, end_date: str) -> Envelope:
+    def health_stress(start_date: str | None = None, end_date: EndDate = None, days: Days = None) -> Envelope:
         """Get stress data for a date range (YYYY-MM-DD). Returns date, avg_stress, max_stress. Note: large ranges may be slow (one API call per day)."""
-        start, end = _parse_date_range(start_date, end_date)
-        return _run_tool(config, lambda: get_stress_range(start, end), serialize_stress)
+        window = _date_window(start_date, end_date, days)
+        return _run_tool(config, lambda: get_stress_range(*window()), serialize_stress)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def health_spo2(start_date: str, end_date: str) -> Envelope:
+    def health_spo2(start_date: str | None = None, end_date: EndDate = None, days: Days = None) -> Envelope:
         """Get SpO2 data for a date range (YYYY-MM-DD). Returns date, avg_spo2, lowest_spo2. Note: large ranges may be slow (one API call per day)."""
-        start, end = _parse_date_range(start_date, end_date)
-        return _run_tool(config, lambda: get_spo2_range(start, end), serialize_spo2)
+        window = _date_window(start_date, end_date, days)
+        return _run_tool(config, lambda: get_spo2_range(*window()), serialize_spo2)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def health_resting_hr(start_date: str, end_date: str) -> Envelope:
+    def health_resting_hr(start_date: str | None = None, end_date: EndDate = None, days: Days = None) -> Envelope:
         """Get resting heart rate for a date range (YYYY-MM-DD). Returns date, resting_hr. Note: large ranges may be slow (one API call per day)."""
-        start, end = _parse_date_range(start_date, end_date)
-        return _run_tool(config, lambda: get_resting_hr_range(start, end), serialize_resting_hr)
+        window = _date_window(start_date, end_date, days)
+        return _run_tool(config, lambda: get_resting_hr_range(*window()), serialize_resting_hr)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def health_readiness(start_date: str, end_date: str) -> Envelope:
+    def health_readiness(start_date: str | None = None, end_date: EndDate = None, days: Days = None) -> Envelope:
         """Get training readiness for a date range (YYYY-MM-DD). Returns date, score, level. Note: large ranges may be slow (one API call per day)."""
-        start, end = _parse_date_range(start_date, end_date)
-        return _run_tool(config, lambda: get_training_readiness_range(start, end), serialize_training_readiness)
+        window = _date_window(start_date, end_date, days)
+        return _run_tool(config, lambda: get_training_readiness_range(*window()), serialize_training_readiness)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def health_training_status(date: str) -> Envelope:

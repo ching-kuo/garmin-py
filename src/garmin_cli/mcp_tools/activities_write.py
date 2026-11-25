@@ -2,18 +2,17 @@
 
 Kept separate from the activity read tools so the write-audit surface (which
 mirrors the workout write tools) stays isolated. The generic audit machinery
-lives in :mod:`garmin_cli.mcp_tools._shared`; this module owns only its
+lives in :mod:`garmin_cli.mcp_tools._audit`; this module owns only its
 ``_emit_write_log`` sink and the per-tool registrations.
 """
 from __future__ import annotations
 
 import contextlib
-import logging
 import os
 import stat
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.mcpserver import MCPServer
 from mcp_types import ToolAnnotations
@@ -21,7 +20,6 @@ from mcp_types import ToolAnnotations
 from garmin_cli.auth import ensure_authenticated
 from garmin_cli.config import CliConfig
 from garmin_cli.endpoints.activities import (
-    _DOWNLOAD_FORMAT_MAP,
     delete_activity,
     download_activity,
     extension_for_format,
@@ -30,25 +28,24 @@ from garmin_cli.endpoints.activities import (
     upload_activity,
 )
 from garmin_cli.exceptions import GarminCliError
+from garmin_cli.mcp_tools._audit import WriteLogEvent, _emit_audit, _write_audit
 from garmin_cli.mcp_tools._shared import (
     StrictId,
-    WriteLogEvent,
+    _envelope,
     _validate_positive_id,
     _validation_envelope,
-    _write_envelope,
-    _write_audit,
 )
-from garmin_cli.mcp_tools._schemas import WriteEnvelope
-
-_logger = logging.getLogger(__name__)
+from garmin_cli.mcp_tools._schemas import Envelope
 
 _FILE_ROOT_ENV = "GARMIN_MCP_FILE_ROOT"
 _DEFAULT_FILE_ROOT = "~/Downloads/garmin-py"
 _UPLOAD_UNAVAILABLE = f"File not available under {_FILE_ROOT_ENV}"
 
+# Module-level so tests can patch the sink per domain.
+_emit_write_log = _emit_audit
 
-def _emit_write_log(event: WriteLogEvent) -> None:
-    _logger.info("activity_write", extra={"event": event.__dict__})
+# Keys of endpoints.activities._DOWNLOAD_FORMAT_MAP (drift-guarded by a test).
+DownloadFormat = Literal["original", "tcx", "gpx", "kml", "csv"]
 
 
 def _file_root() -> Path:
@@ -182,51 +179,37 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
     )
     def activity_download(
         activity_id: StrictId,
-        fmt: str = "original",
+        fmt: DownloadFormat = "original",
         output_path: str | None = None,
         overwrite: bool = False,
-    ) -> WriteEnvelope:
-        """Download an activity file to disk and report the written path.
+    ) -> Envelope:
+        """Download an activity file (fmt original = FIT inside a ZIP) and report its path, never its bytes.
 
-        ``fmt`` is one of original (FIT inside a ZIP), tcx, gpx, kml, csv.
-        Files are confined to the ``GARMIN_MCP_FILE_ROOT`` directory (default
-        ``~/Downloads/garmin-py``, created 0700 on first use). ``output_path``
-        is optional; a relative path is taken under that root, and paths that
-        escape it, contain ``..``, or pass through a symlink are rejected. It defaults
-        to ``activity_<id><ext>`` in the root. The raw file bytes are never
-        returned in the response -- only the path, byte size, and format.
-        Refuses to overwrite an existing file unless ``overwrite=True``.
-
-        On invalid input (unknown format, path outside the root, existing
-        file without overwrite, missing output directory) returns one row with
-        ``ok: False, error_code: "INVALID_INPUT", errors: [...]``. On success
-        returns ``ok: True, action: "downloaded", activity_id, format, path,
-        size_bytes``.
+        Files stay inside GARMIN_MCP_FILE_ROOT (default ~/Downloads/garmin-py);
+        output_path is relative to it (default activity_<id><ext>), and escapes,
+        ``..`` or symlinks are rejected. An existing file is kept unless
+        overwrite=true. Bad paths return ok=false, error_code INVALID_INPUT;
+        success returns ok=true, action "downloaded", activity_id, format,
+        path, size_bytes.
         """
         _validate_positive_id(activity_id, "activity_id")
-        fmt_norm = fmt.lower()
         base = WriteLogEvent(
             tool="activity_download",
             outcome="success",
             activity_id=activity_id,
-            fmt=fmt_norm,
+            fmt=fmt,
         )
         with _write_audit(base, _emit_write_log) as audit:
-            # The default name needs a valid format, so check that first.
-            target = (
-                _download_target(
-                    output_path or f"activity_{activity_id}{extension_for_format(fmt_norm)}",
-                    overwrite,
-                )
-                if fmt_norm in _DOWNLOAD_FORMAT_MAP
-                else f"Invalid format '{fmt}'. Allowed: {', '.join(sorted(_DOWNLOAD_FORMAT_MAP))}."
+            target = _download_target(
+                output_path or f"activity_{activity_id}{extension_for_format(fmt)}",
+                overwrite,
             )
             if isinstance(target, str):
                 audit.fail_validation(1)
                 return _validation_envelope([target])
 
             ensure_authenticated(config)
-            payload = download_activity(activity_id, fmt_norm)
+            payload = download_activity(activity_id, fmt)
             try:
                 _write_confined(target, payload, overwrite=overwrite)
             except OSError as exc:
@@ -239,26 +222,22 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
                     error_code="INTERNAL_ERROR",
                 ) from exc
             audit.success(path_len=len(str(target)), size_bytes=len(payload))
-            return _write_envelope([{
+            return _envelope([{
                 "ok": True,
                 "action": "downloaded",
                 "activity_id": activity_id,
-                "format": fmt_norm,
+                "format": fmt,
                 "path": str(target),
                 "size_bytes": len(payload),
             }])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
-    def activity_upload(file_path: str) -> WriteEnvelope:
-        """Upload an activity file (FIT, GPX, or TCX) to Garmin Connect.
+    def activity_upload(file_path: str) -> Envelope:
+        """Upload a FIT, GPX, or TCX file from inside GARMIN_MCP_FILE_ROOT (relative paths resolve there).
 
-        ``file_path`` must resolve inside ``GARMIN_MCP_FILE_ROOT`` (default
-        ``~/Downloads/garmin-py``); a relative path is taken under that root.
-        A missing file, a path outside the root, a symlink, or a non-file all
-        return the same row: ``ok: False, error_code: "INVALID_INPUT"``. On
-        success returns ``ok: True, action: "uploaded", status, activity_id``
-        (``status`` is ``rejected`` when Garmin declines the import, e.g. a
-        duplicate).
+        Any unusable path returns ok=false, error_code INVALID_INPUT. Success
+        returns ok=true, action "uploaded", status (``rejected`` when Garmin
+        declines it, e.g. a duplicate), activity_id.
         """
         base = WriteLogEvent(
             tool="activity_upload",
@@ -280,8 +259,11 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
             ensure_authenticated(config)
             raw = upload_activity(str(path))
             activity_id, status = _extract_upload_result(raw)
-            audit.success(activity_id=activity_id)
-            return _write_envelope([{
+            if status == "rejected":
+                audit.rejected(activity_id=activity_id)
+            else:
+                audit.success(activity_id=activity_id)
+            return _envelope([{
                 "ok": True,
                 "action": "uploaded",
                 "status": status,
@@ -289,7 +271,7 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
             }])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
-    def activity_delete(activity_id: StrictId) -> WriteEnvelope:
+    def activity_delete(activity_id: StrictId) -> Envelope:
         """Delete an activity by ID.
 
         Destructive: the activity is permanently removed. Returns
@@ -303,14 +285,14 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
             ensure_authenticated(config)
             delete_activity(activity_id)
             audit.success()
-            return _write_envelope([{
+            return _envelope([{
                 "ok": True,
                 "action": "deleted",
                 "activity_id": activity_id,
             }])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
-    def activity_rename(activity_id: StrictId, name: str) -> WriteEnvelope:
+    def activity_rename(activity_id: StrictId, name: str) -> Envelope:
         """Rename an activity. The name must be non-empty.
 
         Destructive: the activity's stored title is replaced. On an empty name
@@ -332,7 +314,7 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
             ensure_authenticated(config)
             set_activity_name(activity_id, name)
             audit.success()
-            return _write_envelope([{
+            return _envelope([{
                 "ok": True,
                 "action": "renamed",
                 "activity_id": activity_id,
@@ -340,15 +322,11 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
             }])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
-    def activity_set_type(activity_id: StrictId, type_key: str) -> WriteEnvelope:
-        """Set an activity's sport type from a Garmin ``typeKey`` (e.g. running).
+    def activity_set_type(activity_id: StrictId, type_key: str) -> Envelope:
+        """Set an activity's sport type from a Garmin typeKey (e.g. running), checked against Garmin's live type table before any write.
 
-        The key is resolved against Garmin's live sport-type table, so any key
-        the account recognizes is accepted; an unknown key is rejected as
-        invalid input before any write.
-        Destructive: the activity's sport classification is replaced. On an
-        empty key returns ``ok: False, error_code: "INVALID_INPUT"``. On success
-        returns ``ok: True, action: "type-updated", activity_id, type``.
+        An empty key returns ok=false, error_code INVALID_INPUT. Success
+        returns ok=true, action "type-updated", activity_id, type.
         """
         _validate_positive_id(activity_id, "activity_id")
         key_norm = type_key.strip().lower() if isinstance(type_key, str) else ""
@@ -356,7 +334,8 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
             tool="activity_set_type",
             outcome="success",
             activity_id=activity_id,
-            type_key=key_norm or None,
+            # Caller free text: only its length until Garmin accepts the key.
+            type_key_len=len(key_norm),
         )
         with _write_audit(base, _emit_write_log) as audit:
             if not key_norm:
@@ -365,8 +344,8 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
 
             ensure_authenticated(config)
             set_activity_type(activity_id, key_norm)
-            audit.success()
-            return _write_envelope([{
+            audit.success(type_key=key_norm, type_key_len=None)
+            return _envelope([{
                 "ok": True,
                 "action": "type-updated",
                 "activity_id": activity_id,

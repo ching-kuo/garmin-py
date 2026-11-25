@@ -60,6 +60,7 @@ def validate_garmin_home(path: str) -> Path:
         raise GarminCliError(
             error=f"garmin_home path '{directory}' passes through symlink '{link}' — refusing for security",
             error_code="AUTH_FAILED",
+            local_config=True,
         )
     if directory.suffix.casefold() == ".json" or (directory.exists() and not directory.is_dir()):
         raise GarminCliError(

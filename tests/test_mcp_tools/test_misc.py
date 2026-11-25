@@ -369,7 +369,7 @@ class TestReportSnapshot:
         return create_mcp_server(_config())
 
     def test_invalid_kind_raises(self) -> None:
-        with pytest.raises(ToolError, match="kind must be one of"):
+        with pytest.raises(ToolError, match="Input should be 'morning', 'evening' or 'weekly'"):
             _call(self._server(), "report_snapshot", {"kind": "yearly"})
 
     def test_morning_sections_and_single_day_range(self, mocker: Any) -> None:

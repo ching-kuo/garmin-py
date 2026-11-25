@@ -87,7 +87,7 @@ def test_preview_calendar_read_includes_expected_source_date(mocker: Any) -> Non
 
 
 def test_apply_schedules_then_verifies_before_returning_success(mocker: Any) -> None:
-    mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+    mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch(
         "garmin_cli.mcp_tools.training_plan.get_calendar_range",
         side_effect=[[], [], [{"date": "2026-07-10", "workoutId": 10, "workoutScheduleId": 99}]],
@@ -118,7 +118,7 @@ def test_apply_schedules_then_verifies_before_returning_success(mocker: Any) -> 
 
 
 def test_apply_cleans_returned_schedule_when_verification_fails(mocker: Any) -> None:
-    mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+    mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch(
         "garmin_cli.mcp_tools.training_plan.get_calendar_range",
         side_effect=[[], [], []],
@@ -144,7 +144,7 @@ def test_apply_failed_write_that_may_have_landed_is_unknown(
 ) -> None:
     from garmin_cli.exceptions import GarminCliError
 
-    mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+    mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch("garmin_cli.mcp_tools.training_plan.get_calendar_range", return_value=[])
     mocker.patch(
         "garmin_cli.mcp_tools.training_plan.create_workout", return_value={"workoutId": 10}
@@ -195,7 +195,7 @@ def test_apply_keeps_template_whose_schedule_may_exist(
 ) -> None:
     from garmin_cli.exceptions import GarminCliError
 
-    mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+    mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch("garmin_cli.mcp_tools.training_plan.get_calendar_range", return_value=[])
     mocker.patch("garmin_cli.mcp_tools.training_plan.create_workout", return_value={"workoutId": 10})
     mocker.patch(
@@ -212,7 +212,7 @@ def test_apply_keeps_template_whose_schedule_may_exist(
 
 
 def test_apply_local_payload_error_is_not_an_ambiguous_write(mocker: Any) -> None:
-    mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+    mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch("garmin_cli.mcp_tools.training_plan.get_calendar_range", return_value=[])
     mocker.patch(
         "garmin_cli.mcp_tools.training_plan.build_garmin_payload", side_effect=RuntimeError("bug")
@@ -228,7 +228,7 @@ def test_apply_local_payload_error_is_not_an_ambiguous_write(mocker: Any) -> Non
 def test_reschedule_failed_schedule_that_may_have_landed_is_unknown(mocker: Any) -> None:
     from garmin_cli.exceptions import GarminCliError
 
-    mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+    mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch(
         "garmin_cli.mcp_tools.training_plan.get_calendar_range",
         side_effect=[[{"date": "2026-07-08", "workoutId": 10, "id": 99, "itemType": "workout"}], []],
@@ -253,7 +253,7 @@ def test_reschedule_failed_schedule_that_may_have_landed_is_unknown(mocker: Any)
 def test_apply_keeps_new_template_if_schedule_cleanup_fails(mocker: Any) -> None:
     from garmin_cli.exceptions import GarminCliError
 
-    mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+    mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch(
         "garmin_cli.mcp_tools.training_plan.get_calendar_range",
         side_effect=[[], [], []],
@@ -296,7 +296,7 @@ def test_apply_keeps_new_template_if_schedule_cleanup_fails(mocker: Any) -> None
 
 
 def test_apply_equivalent_inline_workout_is_a_no_op(mocker: Any) -> None:
-    mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+    mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     inline = {
         "name": "Easy Run",
         "sport": "running",
@@ -359,7 +359,7 @@ def test_apply_equivalent_inline_workout_is_a_no_op(mocker: Any) -> None:
 
 
 def test_reschedule_existing_destination_removes_source(mocker: Any) -> None:
-    mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+    mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch(
         "garmin_cli.mcp_tools.training_plan.get_calendar_range",
         side_effect=[
@@ -399,7 +399,7 @@ def test_reschedule_existing_destination_rechecks_a_failed_unschedule(
 ) -> None:
     from garmin_cli.exceptions import GarminCliError
 
-    mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+    mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch(
         "garmin_cli.mcp_tools.training_plan.get_calendar_range",
         side_effect=[
@@ -442,7 +442,7 @@ def test_reschedule_negative_id_gets_the_positive_integer_message() -> None:
 
 
 def test_reschedule_ignores_a_logged_activity_on_the_destination(mocker: Any) -> None:
-    mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+    mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch(
         "garmin_cli.mcp_tools.training_plan.get_calendar_range",
         side_effect=[
@@ -468,7 +468,7 @@ def test_reschedule_ignores_a_logged_activity_on_the_destination(mocker: Any) ->
 
 
 def test_reschedule_cleans_unverified_destination(mocker: Any) -> None:
-    mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+    mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch(
         "garmin_cli.mcp_tools.training_plan.get_calendar_range",
         side_effect=[
@@ -499,7 +499,7 @@ def test_reschedule_cleans_unverified_destination(mocker: Any) -> None:
 
 
 def test_reschedule_keeps_source_when_destination_id_is_unavailable(mocker: Any) -> None:
-    mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+    mocker.patch("garmin_cli.mcp_tools.training_plan.ensure_authenticated")
     mocker.patch(
         "garmin_cli.mcp_tools.training_plan.get_calendar_range",
         side_effect=[

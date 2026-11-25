@@ -25,7 +25,8 @@
       "env": {
         "GARMIN_EMAIL": "${user_config.garmin_email}",
         "GARMIN_PASSWORD": "${user_config.garmin_password}",
-        "GARMIN_MCP_FILE_ROOT": "${user_config.garmin_file_root}"
+        "GARMIN_MCP_FILE_ROOT": "${user_config.garmin_file_root}",
+        "GARMIN_MCP_READ_ONLY": "${user_config.garmin_read_only}"
       },
       "platform_overrides": {
         "win32": {
@@ -53,6 +54,13 @@
       "title": "Activity file folder",
       "description": "The only folder activity downloads are written to and uploads are read from. Must be an absolute path. Leave empty for the default, ~/Downloads/garmin-py.",
       "required": false
+    },
+    "garmin_read_only": {
+      "type": "boolean",
+      "title": "Read-only mode",
+      "description": "Hide every tool that changes Garmin data or writes files (workouts, activities, training plans).",
+      "required": false,
+      "default": false
     }
   },
   "compatibility": {

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import date
-from typing import Any
+from typing import Any, cast
 
 from mcp.server.mcpserver import MCPServer
 from mcp_types import ToolAnnotations
 
+from garmin_cli.auth import ensure_authenticated
 from garmin_cli.config import CliConfig
 from garmin_cli.endpoints.workouts import (
     create_workout,
@@ -19,6 +20,8 @@ from garmin_cli.endpoints.workouts import (
     unschedule_workout,
 )
 from garmin_cli.exceptions import TRANSIENT_ERROR_CODES, GarminCliError
+from garmin_cli.mcp_tools._inputs import TrainingPlan
+from garmin_cli.mcp_tools._audit import WriteLogEvent, _emit_audit, _write_audit
 from garmin_cli.mcp_tools._shared import StrictId, _authenticated, _parse_date, _validate_positive_id
 from garmin_cli.serializers import serialize_calendar_workout, serialize_workout_detail
 from garmin_cli.services.training_plan import (
@@ -35,6 +38,9 @@ from garmin_cli.workout_builder import build_garmin_payload
 from garmin_cli.workout_schema import is_positive_id
 
 Rows = list[dict[str, Any]]
+
+# Module-level so tests can patch the sink per domain.
+_emit_write_log = _emit_audit
 
 
 def _extract_id(raw: Any, key: str) -> int | None:
@@ -432,24 +438,30 @@ def register_training_plan_tools(mcp: MCPServer, config: CliConfig) -> None:
     """Register state-free plan preview, apply, and source-verified moves."""
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def training_plan_preview(plan: dict[str, Any]) -> dict[str, Any]:
+    def training_plan_preview(plan: TrainingPlan) -> dict[str, Any]:
         """Read live state and return a normalized plan diff without writing."""
-        invalid = _invalid_plan(plan)
+        data = cast(dict[str, Any], plan)
+        invalid = _invalid_plan(data)
         if invalid is not None:
             return invalid
-        start, end = _plan_dates(plan)
+        start, end = _plan_dates(data)
         return _authenticated(
             config,
-            lambda: preview_training_plan(plan, *_calendar_with_projections(start, end)),
+            lambda: preview_training_plan(data, *_calendar_with_projections(start, end)),
         )
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
-    def training_plan_apply(plan: dict[str, Any]) -> dict[str, Any]:
+    def training_plan_apply(plan: TrainingPlan) -> dict[str, Any]:
         """Apply a validated plan after live rechecks; no confirmation boolean is accepted."""
-        invalid = _invalid_plan(plan)
-        if invalid is not None:
-            return invalid
-        return _authenticated(config, lambda: _apply_plan(plan))
+        data = cast(dict[str, Any], plan)
+        base = WriteLogEvent(tool="training_plan_apply", outcome="success", name_len=len(data["name"]))
+        with _write_audit(base, _emit_write_log) as audit:
+            invalid = _invalid_plan(data)
+            if invalid is not None:
+                audit.fail_validation(len(invalid["errors"]))
+                return invalid
+            ensure_authenticated(config)
+            return audit.plan_result(_apply_plan(data))
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
     def training_plan_reschedule(schedule_id: StrictId, new_date: str, expected_date: str) -> dict[str, Any]:
@@ -547,4 +559,7 @@ def register_training_plan_tools(mcp: MCPServer, config: CliConfig) -> None:
                 return _result("compensated", [failed_op, compensated_op], errors=errors)
             return _result("complete", [moved_op], complete=True)
 
-        return _authenticated(config, move)
+        base = WriteLogEvent(tool="training_plan_reschedule", outcome="success", schedule_id=schedule_id)
+        with _write_audit(base, _emit_write_log) as audit:
+            ensure_authenticated(config)
+            return audit.plan_result(move())

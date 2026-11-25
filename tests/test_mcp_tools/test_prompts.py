@@ -33,8 +33,9 @@ def test_server_lists_exactly_four_prompts() -> None:
     }
 
 
-def test_every_prompt_tool_reference_is_registered() -> None:
-    server = create_mcp_server(_config())
+@pytest.mark.parametrize("read_only", [False, True])
+def test_every_prompt_tool_reference_is_registered(read_only: bool) -> None:
+    server = create_mcp_server(_config(), read_only=read_only)
     registered = {tool.name for tool in asyncio.run(server.list_tools())}
 
     for prompt in asyncio.run(server.list_prompts()):
@@ -49,3 +50,11 @@ def test_plan_prompt_requires_confirmation_before_apply() -> None:
     assert "`training_plan_preview`" in text
     assert "`training_plan_apply`" in text
     assert "explicit human confirmation" in text
+
+
+def test_read_only_plan_prompt_ends_at_preview() -> None:
+    text = _prompt_text(create_mcp_server(_config(), read_only=True), "plan_next_week")
+
+    assert "`training_plan_preview`" in text
+    assert "training_plan_apply" not in text
+    assert "read-only" in text

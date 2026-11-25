@@ -16,6 +16,11 @@ class GarminCliError(Exception):
         may_have_landed: An earlier attempt of this request failed in a way
             Garmin may still have applied (5xx, read timeout), whatever the
             final error says.
+        local_config: The failure is local configuration (an unsafe or
+            unusable Garmin home or token file), which logging in again
+            does not fix.
+        mfa_rejected: Garmin rejected a submitted MFA code; the fix is a new
+            code, not other credentials.
     """
 
     def __init__(
@@ -25,11 +30,15 @@ class GarminCliError(Exception):
         *,
         retry_after_seconds: int | None = None,
         may_have_landed: bool = False,
+        local_config: bool = False,
+        mfa_rejected: bool = False,
     ) -> None:
         self.error = error
         self.error_code = error_code
         self.retry_after_seconds = retry_after_seconds
         self.may_have_landed = may_have_landed
+        self.local_config = local_config
+        self.mfa_rejected = mfa_rejected
         super().__init__(error)
 
 
@@ -295,6 +304,6 @@ def resume_error(exc: Exception) -> GarminCliError | None:
         and not any(isinstance(e, http) for e in _exception_chain(exc))
     ):
         return GarminCliError(
-            error=f"Cannot access session directory: {exc}", error_code="AUTH_FAILED"
+            error=f"Cannot access session directory: {exc}", error_code="AUTH_FAILED", local_config=True
         )
     return None

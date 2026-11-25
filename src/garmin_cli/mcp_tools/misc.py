@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -33,12 +33,12 @@ from garmin_cli.endpoints.health import (
 from garmin_cli.endpoints.metrics import get_endurance_score_range, get_race_predictions
 from garmin_cli.endpoints.workouts import get_calendar_range
 from garmin_cli.doctor import run_checks
-from garmin_cli.exceptions import TRANSIENT_ERROR_CODES, GarminCliError
+from garmin_cli.exceptions import TRANSIENT_ERROR_CODES
+from garmin_cli.mcp_tools._audit import WriteLogEvent, _emit_audit, _write_audit
 from garmin_cli.mcp_tools._shared import (
     ReportSection,
     _authenticated,
     _collect_report_sections,
-    _handle_error,
     _parse_date,
     _run_tool,
 )
@@ -58,6 +58,10 @@ from garmin_cli.serializers import (
     serialize_stress,
     serialize_training_readiness,
 )
+
+# Module-level so tests can patch the sink per domain.
+_emit_write_log = _emit_audit
+
 
 def _calendar_rows(raw: Any) -> list[dict[str, Any]]:
     return serialize_calendar_workout({"calendarItems": raw})
@@ -101,8 +105,11 @@ def _report_specs(kind: str, anchor: date) -> tuple[date, list[ReportSection]]:
     return window_from, specs
 
 
-def register_misc_tools(mcp: MCPServer, config: CliConfig) -> None:
-    """Register device, login-status, and report_snapshot tools on ``mcp``."""
+def register_misc_tools(mcp: MCPServer, config: CliConfig, *, read_only: bool = False) -> None:
+    """Register device, login-status, and report_snapshot tools on ``mcp``.
+
+    ``read_only`` is the server's mode, reported by ``server_doctor``.
+    """
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def device_list() -> Envelope:
@@ -129,7 +136,7 @@ def register_misc_tools(mcp: MCPServer, config: CliConfig) -> None:
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def server_doctor(fast: bool = False) -> Envelope:
         """Run non-raising server diagnostics and return one row per check."""
-        results = run_checks(config, fast=fast, include_mcp_extra=False)
+        results = run_checks(config, fast=fast, include_mcp_extra=False, read_only=read_only)
         return {
             "count": len(results),
             "rows": [result.to_row() for result in results],
@@ -147,27 +154,25 @@ def register_misc_tools(mcp: MCPServer, config: CliConfig) -> None:
         tool call to trigger a fresh code before submitting a new one.
         """
         code = mfa_code.strip()
-        if not code:
-            raise ToolError("mfa_code must be a non-empty string")
-        try:
+        # The code itself is never logged, not even its length.
+        with _write_audit(WriteLogEvent(tool="submit_mfa_code", outcome="success"), _emit_write_log) as audit:
+            if not code:
+                audit.fail_validation(1)
+                raise ToolError("mfa_code must be a non-empty string")
             complete_mfa_login(config, code)
-        except GarminCliError as exc:
-            raise _handle_error(exc) from exc
-        return {"authenticated": True, "garmin_home": os.path.expanduser(config.garth_home)}
+            audit.success()
+            return {"authenticated": True, "garmin_home": os.path.expanduser(config.garth_home)}
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def report_snapshot(kind: str, date: str | None = None) -> dict[str, Any]:
+    def report_snapshot(kind: Literal["morning", "evening", "weekly"], date: str | None = None) -> dict[str, Any]:
         """Assemble a multi-section daily or weekly report in a single call, fanning out the underlying reads server-side.
 
-        ``kind`` selects the report shape:
-        - ``morning``: last night's ``sleep`` and ``hrv``, today's ``readiness`` and ``body_battery``, and today's ``planned_today`` workouts.
-        - ``evening``: today's ``steps``, ``intensity_minutes``, ``stress``, ``body_battery``, completed ``activities_today``, and ``planned_tomorrow`` workouts.
-        - ``weekly``: 7-day trends for ``sleep``, ``hrv``, ``stress``, ``steps``, ``resting_hr`` and ``body_battery``, the window's ``activities``, plus ``endurance_score`` and ``race_predictions``.
+        Use when you want a fixed morning/evening/weekly status report; use coach_snapshot for baselines, load, and plan facts behind coaching advice.
 
-        ``date`` (YYYY-MM-DD) anchors the report and defaults to today; for ``weekly`` the window is the anchor day and the six preceding days. Returns ``{kind, date_range, sections, unavailable?}`` where ``sections`` maps each section name to its rows (same row shapes as the individual health/activity/performance/workout tools). A section with no data for the window is an empty list and is listed in ``unavailable`` with a ``reason`` (``not_found`` or ``no_data``); a section is never silently omitted. Auth, rate-limit, and server/network failures fail the whole call.
+        Sections: morning = sleep, hrv, readiness, body_battery, planned_today; evening = steps, intensity_minutes, stress, body_battery, activities_today, planned_tomorrow; weekly (anchor day plus six before) = sleep, hrv, stress, steps, resting_hr, body_battery, activities, endurance_score, race_predictions.
+
+        ``date`` (YYYY-MM-DD) defaults to today. Returns {kind, date_range, sections, unavailable?}; sections map names to rows shaped like the per-domain tools. A section without data is an empty list named in ``unavailable`` (reason not_found or no_data). Auth, rate-limit, and server/network failures fail the whole call.
         """
-        if kind not in ("morning", "evening", "weekly"):
-            raise ToolError(f"kind must be one of: morning, evening, weekly (got '{kind}')")
         parsed = _parse_date(date, "date") if date is not None else None
 
         def produce() -> dict[str, Any]:

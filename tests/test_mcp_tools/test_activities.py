@@ -1,6 +1,7 @@
 """Activity MCP tool tests (moved from test_mcp_server.py; assertions unchanged)."""
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 from typing import Any
 
@@ -30,8 +31,37 @@ class TestActivityTools:
         mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
         mock_list = mocker.patch("garmin_cli.mcp_tools.activities.list_activities", return_value=[])
         server = create_mcp_server(_config())
-        _call(server, "activity_list", {"limit": 5, "start": 10, "activity_type": "running", "search": "morning"})
+        _call(server, "activity_list", {"limit": 5, "offset": 10, "activity_type": "running", "search": "morning"})
         mock_list.assert_called_once_with(5, 10, "running", "morning", None, None)
+
+    @pytest.mark.parametrize("value", [20, None])
+    def test_activity_list_rejects_the_old_start_argument(self, mocker: Any, value: Any) -> None:
+        list_activities = mocker.patch("garmin_cli.mcp_tools.activities.list_activities")
+        server = create_mcp_server(_config())
+        with pytest.raises(ToolError, match="use offset"):
+            _call(server, "activity_list", {"start": value})
+        list_activities.assert_not_called()
+        schema = next(t for t in asyncio.run(server.list_tools()) if t.name == "activity_list").input_schema
+        assert "start" not in schema["properties"]
+
+    def test_activity_list_full_page_reports_next_offset(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.mcp_tools.activities.list_activities",
+            return_value=[{"activityId": n} for n in (1, 2)],
+        )
+        server = create_mcp_server(_config())
+        result = _call(server, "activity_list", {"limit": 2, "offset": 4})
+        assert result["truncated"] is True
+        assert result["next_offset"] == 6
+
+    def test_activity_list_short_page_is_not_truncated(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+        mocker.patch("garmin_cli.mcp_tools.activities.list_activities", return_value=[{"activityId": 1}])
+        server = create_mcp_server(_config())
+        result = _call(server, "activity_list", {"limit": 2})
+        assert result["truncated"] is False
+        assert "next_offset" not in result
 
     def test_activity_list_with_date_range(self, mocker: Any) -> None:
 
@@ -244,7 +274,7 @@ class TestActivityTools:
         result = _call(server, "activity_weather", {"activity_id": 123})
         assert result["count"] == 1
         row = result["rows"][0]
-        assert row["temperature"] == 20
+        assert row["temp_c"] == -6.7  # Garmin's 20 is Fahrenheit
         assert row["humidity"] == 60
         assert row["wind_direction"] == 180
         assert row["condition"] == "Cloudy"

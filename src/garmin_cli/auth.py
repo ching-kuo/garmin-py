@@ -47,6 +47,8 @@ class SessionProbeResult:
     latency_ms: float
     error_code: str | None = None
     detail: str = ""
+    # The session path itself is unusable (see GarminCliError.local_config).
+    local_config: bool = False
 
 
 def _home_key(path: str) -> str:
@@ -194,6 +196,7 @@ def _persist_session(garth_home: str, client: Any) -> None:
         raise GarminCliError(
             error=f"Authenticated, but saving the session to {garth_home} failed: {exc}",
             error_code="AUTH_FAILED",
+            local_config=True,
         ) from exc
 
 
@@ -205,6 +208,7 @@ def _secure_directory(path: str) -> None:
         raise GarminCliError(
             error=f"garmin_home directory has insecure permissions and cannot be repaired: {exc}",
             error_code="AUTH_FAILED",
+            local_config=True,
         ) from exc
 
 
@@ -232,6 +236,7 @@ def probe_session_status(config: CliConfig) -> SessionProbeResult:
     started = time.monotonic()
     authenticated = False
     error_code: str | None = None
+    local_config = False
     detail = "Saved Garmin session is unavailable."
     unvalidated = "The saved Garmin session could not be validated."
     try:
@@ -241,6 +246,7 @@ def probe_session_status(config: CliConfig) -> SessionProbeResult:
         detail = "No saved Garmin session was found."
     except GarminCliError as exc:
         error_code = exc.error_code
+        local_config = exc.local_config
         detail = (
             "The Garmin session path is not usable."
             if exc.error_code in ("AUTH_FAILED", "INVALID_INPUT")
@@ -249,6 +255,7 @@ def probe_session_status(config: CliConfig) -> SessionProbeResult:
     except Exception as exc:
         error = resume_error(exc)  # upstream throttle/5xx/network, or filesystem
         error_code = "AUTH_FAILED" if error is None else error.error_code
+        local_config = error is not None and error.local_config
         detail = (
             "The Garmin session directory cannot be accessed."
             if error is not None and error.error_code == "AUTH_FAILED"
@@ -270,6 +277,7 @@ def probe_session_status(config: CliConfig) -> SessionProbeResult:
         latency_ms=round((time.monotonic() - started) * 1000, 1),
         error_code=error_code,
         detail=detail,
+        local_config=local_config,
     )
 
 
