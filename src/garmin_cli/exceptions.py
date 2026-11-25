@@ -13,14 +13,23 @@ class GarminCliError(Exception):
         error: Human-readable error message.
         error_code: Machine-readable error code (e.g. AUTH_FAILED, NOT_FOUND).
         retry_after_seconds: Known wait before a retry can succeed, if any.
+        may_have_landed: An earlier attempt of this request failed in a way
+            Garmin may still have applied (5xx, read timeout), whatever the
+            final error says.
     """
 
     def __init__(
-        self, error: str, error_code: str, *, retry_after_seconds: int | None = None
+        self,
+        error: str,
+        error_code: str,
+        *,
+        retry_after_seconds: int | None = None,
+        may_have_landed: bool = False,
     ) -> None:
         self.error = error
         self.error_code = error_code
         self.retry_after_seconds = retry_after_seconds
+        self.may_have_landed = may_have_landed
         super().__init__(error)
 
 

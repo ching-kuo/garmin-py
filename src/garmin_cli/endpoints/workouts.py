@@ -103,14 +103,15 @@ def _schedule_as_calendar_item(entry: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _get_scheduled_by_period(start: date, end: date) -> list[Any]:
+def _get_scheduled_by_period(start: date, end: date, *, strict: bool = False) -> list[Any]:
     """Scheduled workouts in [start, end], including adaptive-plan sessions.
 
     Garmin Coach (adaptive) sessions can be missing from the calendar-service
     pages but are listed here (python-garminconnect 0.3.14/0.3.19 notes).
     The lookup is supplemental: it is tried once on server and network errors,
     and if it fails for any reason other than a rate limit or a missing
-    session, the calendar pages stand alone.
+    session, the calendar pages stand alone, unless *strict* asks for every
+    failure to be raised.
     """
     try:
         result = _retry_loop(
@@ -122,7 +123,7 @@ def _get_scheduled_by_period(start: date, end: date) -> list[Any]:
             retry_transient=False,
         )
     except Exception as exc:  # includes transport failures (timeouts, resets)
-        if isinstance(exc, GarminCliError) and exc.error_code in {"RATE_LIMITED", "AUTH_MISSING"}:
+        if strict or (isinstance(exc, GarminCliError) and exc.error_code in {"RATE_LIMITED", "AUTH_MISSING"}):
             raise
         reason = exc.error_code if isinstance(exc, GarminCliError) else type(exc).__name__
         logger.debug("workoutScheduleByPeriod unavailable (%s); calendar only", reason)
@@ -140,12 +141,14 @@ def _in_range(item: Any, start: date, end: date) -> bool:
         return False
 
 
-def get_calendar_range(start: date, end: date) -> list:
+def get_calendar_range(start: date, end: date, *, strict: bool = False) -> list:
     """Collect calendarItems week by week, plus schedules the calendar omits.
 
     Costs one request per calendar week plus one ``workoutScheduleByPeriod``
     request. Merged schedules are deduplicated by schedule id (a calendar
-    workout item's ``id``) and the result is ordered by date.
+    workout item's ``id``) and the result is ordered by date. With *strict*,
+    a failed ``workoutScheduleByPeriod`` lookup raises instead of returning
+    the calendar pages alone, so callers can trust an absence.
     """
     all_items: list = []
     current = start
@@ -163,7 +166,7 @@ def get_calendar_range(start: date, end: date) -> list:
         current = current + timedelta(days=7)
 
     on_calendar = {item.get("id") for item in all_items}
-    for entry in _get_scheduled_by_period(start, end):
+    for entry in _get_scheduled_by_period(start, end, strict=strict):
         if not isinstance(entry, dict) or entry.get("workoutScheduleId") in on_calendar:
             continue
         item = _schedule_as_calendar_item(entry)

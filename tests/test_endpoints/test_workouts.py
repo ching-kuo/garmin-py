@@ -279,6 +279,16 @@ class TestCalendarIncludesScheduledByPeriod:
         live_item = {"id": 5, "itemType": "workout", "date": "2026-03-14", "workoutId": 2, "sportTypeKey": "running"}
         assert serialize_calendar_workout({"calendarItems": [live_item]})[0]["type"] == "running"
 
+    @pytest.mark.parametrize("failure", [_http_error(500), TimeoutError("read timed out")])
+    def test_strict_read_fails_when_by_period_lookup_fails(self, mocker: Any, failure: Exception) -> None:
+        # A recheck must not take a calendar-only read as proof a schedule is gone.
+        on_calendar = {"id": 1, "itemType": "workout", "date": "2026-03-14", "workoutId": 2, "title": "Run"}
+        self._patch(mocker, [on_calendar], failure)
+
+        with pytest.raises(GarminCliError):
+            get_calendar_range(date(2026, 3, 11), date(2026, 3, 17), strict=True)
+        assert get_calendar_range(date(2026, 3, 11), date(2026, 3, 17)) == [on_calendar]
+
     def test_by_period_rate_limit_still_fails_the_calendar(self, mocker: Any) -> None:
         self._patch(mocker, [], _http_error(429))
 

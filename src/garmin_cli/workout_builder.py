@@ -7,15 +7,12 @@ from garmin_cli.exceptions import GarminCliError
 from garmin_cli.workout_schema import (
     END_CONDITIONS,
     RANGE_TARGETS,
+    READ_ONLY_FIELDS,
     SPORT_TYPES,
     STEP_TYPES,
     TARGET_TYPES,
     ZONE_TARGETS,
-)
-
-# Read-only fields from the Garmin API that must never be overwritten by user input.
-_READ_ONLY_FIELDS = frozenset(
-    {"workoutId", "ownerId", "createdDate", "updatedDate", "consumer", "atpPlanId"}
+    is_positive_id,
 )
 
 # "speed.zone" in user input maps to Garmin's "pace.zone" with ID 6.
@@ -232,7 +229,7 @@ def merge_workout_payload(existing: dict, user_input: dict) -> tuple[dict, list[
     warnings: list[str] = []
 
     # Detect and warn about read-only fields in user_input
-    for field in _READ_ONLY_FIELDS:
+    for field in READ_ONLY_FIELDS:
         if field in user_input:
             warnings.append(
                 f"Field '{field}' is read-only and cannot be modified; existing value preserved."
@@ -255,8 +252,20 @@ def merge_workout_payload(existing: dict, user_input: dict) -> tuple[dict, list[
         merged["description"] = user_input["description"]
 
     if "steps" in user_input:
-        sport_type = _build_sport_type(merged["sportType"]["sportTypeKey"])
-        merged["workoutSegments"] = _build_segments(user_input["steps"], sport_type)
+        # Reuse the stored sport as-is: Garmin sub-sports (trail_running,
+        # road_biking, ...) are outside SPORT_TYPES but valid to keep.
+        stored = merged.get("sportType")
+        stored_sport = dict(stored) if isinstance(stored, dict) else {}
+        sport_key = stored_sport.get("sportTypeKey")
+        if isinstance(sport_key, str) and sport_key in SPORT_TYPES and not is_positive_id(stored_sport.get("sportTypeId")):
+            stored_sport["sportTypeId"] = SPORT_TYPES[sport_key]
+        if not (isinstance(sport_key, str) and sport_key and is_positive_id(stored_sport.get("sportTypeId"))):
+            raise GarminCliError(
+                error="Existing workout has no usable sportType; include 'sport' with the new steps.",
+                error_code="INVALID_INPUT",
+            )
+        merged["sportType"] = stored_sport
+        merged["workoutSegments"] = _build_segments(user_input["steps"], stored_sport)
         metrics = _compute_estimated_metrics(user_input["steps"])
         for key in ("estimatedDurationInSecs", "estimatedDistanceInMeters"):
             if key in metrics:

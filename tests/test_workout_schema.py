@@ -422,6 +422,49 @@ def test_live_verified_end_condition_ids() -> None:
     assert END_CONDITIONS["iterations"] == 7
 
 
+def test_misspelled_top_level_key_is_rejected_with_allowed_keys() -> None:
+    errors = validate_workout_input({"title": "New Name"}, partial=True)
+    assert any("unknown key 'title'" in error and "'name'" in error for error in errors)
+
+
+def test_empty_partial_update_is_rejected() -> None:
+    assert any("at least one of" in error for error in validate_workout_input({}, partial=True))
+    # Read-only Garmin fields alone are not an update either.
+    assert any("at least one of" in error for error in validate_workout_input({"workoutId": 1}, partial=True))
+
+
+def test_read_only_fields_are_tolerated_only_on_partial_update() -> None:
+    assert validate_workout_input({"name": "Run", "workoutId": 1}, partial=True) == []
+    data = _minimal_workout()
+    data["workoutId"] = 1
+    assert any("unknown key 'workoutId'" in error for error in validate_workout_input(data))
+
+
+@pytest.mark.parametrize(
+    ("step", "path"),
+    [
+        ({"type": "interval", "duration": {"type": "time", "value": 60}, "notes": "x"}, "steps[0]: unknown key 'notes'"),
+        ({"type": "interval", "duration": {"type": "time", "value": 60, "units": "s"}}, "steps[0].duration: unknown key 'units'"),
+        (
+            {"type": "interval", "duration": {"type": "time", "value": 60}, "target": {"type": "heart.rate.zone", "zone": 2, "min": 1}},
+            "steps[0].target: unknown key 'min'",
+        ),
+        ({"type": "repeat", "count": 2, "duration": {}, "steps": [{"type": "rest", "duration": {"type": "time", "value": 60}}]}, "steps[0]: unknown key 'duration'"),
+    ],
+)
+def test_unknown_nested_keys_are_rejected(step: dict, path: str) -> None:
+    errors = validate_workout_input({"steps": [step]}, partial=True)
+    assert any(path in error for error in errors), errors
+
+
+def test_description_is_capped() -> None:
+    data = _minimal_workout()
+    data["description"] = "x" * 1024
+    assert validate_workout_input(data) == []
+    data["description"] = "x" * 1025
+    assert any("at most 1024" in error for error in validate_workout_input(data))
+
+
 def test_description_must_be_a_string_when_supplied() -> None:
     errors = validate_workout_input(
         {

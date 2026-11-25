@@ -393,7 +393,7 @@ The MCP server exposes primitive health, activity, workout, performance, and dev
 2. Claude calls `training_plan_reconcile` in `summary` mode to separate exact workout associations from explicitly inferred or ambiguous matches.
 3. If the user asks for a changed plan, Claude builds the strict plan object and calls `training_plan_preview`. Preview performs live reads only.
 4. Claude shows the diff and asks for approval in the client. Only after approval should the client invoke `training_plan_apply`; the server does not treat an agent-supplied boolean as human approval.
-5. Apply rechecks live state, creates and verifies destinations first, removes source schedules last, and reports `complete`, `compensated`, `partial`, or `unknown` truthfully.
+5. Apply rechecks live state, creates and verifies destinations first, removes source schedules last (a schedule the plan vacates from a destination date, as in a swap, is removed just before that destination is written), and reports `complete`, `compensated`, `partial`, or `unknown` truthfully. A compensated apply restores removed schedules under new ids, so preview again and rebuild the plan before retrying.
 
 `training_plan_reconcile(detail="targets")` adds HR, pace, power, and cadence target comparisons for matched running and cycling activities. It uses HR-zone and lap summaries first, fetches stride-downsampled streams only when required (at most 10 streams per call and 1000 samples per stream), and reports per-target coverage and data quality. Missing sensors and unsupported sports remain explicit `insufficient_data` states rather than failure verdicts. Apply tools can mutate the Garmin calendar and rely on the MCP client's destructive-tool approval UX.
 

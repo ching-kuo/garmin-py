@@ -281,7 +281,7 @@ def _write_projection(
     }
     if workout.get("description") is not None:
         projection["description"] = workout["description"]
-    validation_errors = validate_workout_input(projection)
+    validation_errors = validate_workout_input(projection, cap_description=False)
     if validation_errors:
         reasons.extend(
             {"path": "write_projection", "reason": error}

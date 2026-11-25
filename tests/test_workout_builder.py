@@ -427,6 +427,63 @@ class TestMergeWorkoutPayload:
         _, warnings = merge_workout_payload(existing, user_input)
         assert warnings == []
 
+    def test_steps_update_keeps_sub_sport_outside_sport_types(self) -> None:
+        existing = _existing_workout()
+        trail = {"sportTypeId": 1, "sportTypeKey": "trail_running", "displayOrder": 1}
+        existing["sportType"] = dict(trail)
+        steps = [{"type": "interval", "duration": {"type": "time", "value": 300}}]
+        result, _ = merge_workout_payload(existing, {"steps": steps})
+        assert result["sportType"] == trail
+        assert result["workoutSegments"][0]["sportType"] == trail
+
+    def test_steps_update_without_stored_sport_requires_sport(self) -> None:
+        import pytest
+
+        from garmin_cli.exceptions import GarminCliError
+
+        existing = _existing_workout()
+        del existing["sportType"]
+        steps = [{"type": "interval", "duration": {"type": "time", "value": 300}}]
+        with pytest.raises(GarminCliError, match="include 'sport'") as excinfo:
+            merge_workout_payload(existing, {"steps": steps})
+        assert excinfo.value.error_code == "INVALID_INPUT"
+        result, _ = merge_workout_payload(existing, {"steps": steps, "sport": "cycling"})
+        assert result["workoutSegments"][0]["sportType"]["sportTypeKey"] == "cycling"
+
+    def test_projected_steps_only_update_of_stored_fixture(self) -> None:
+        import json
+        from pathlib import Path
+
+        from garmin_cli.serializers import serialize_workout_detail
+        from garmin_cli.workout_schema import validate_workout_input
+
+        fixture = Path(__file__).parent / "fixtures/backend/get_workout/get_workout__workout_id=id-a20c2562.json"
+        existing = json.loads(fixture.read_text())
+        # The stored sportType has a key but no id; the id is filled from SPORT_TYPES.
+        update = {"steps": serialize_workout_detail(existing)[0]["write_projection"]["steps"]}
+        assert validate_workout_input(update, partial=True) == []
+        result, _ = merge_workout_payload(existing, update)
+        assert result["sportType"] == {"sportTypeId": 1, "sportTypeKey": "running"}
+        assert result["workoutSegments"][0]["sportType"] == result["sportType"]
+
+    def test_steps_update_backfills_invalid_id_for_known_sport(self) -> None:
+        steps = [{"type": "interval", "duration": {"type": "time", "value": 300}}]
+        for bad_id in (0, "1", None, True):
+            existing = {**_existing_workout(), "sportType": {"sportTypeId": bad_id, "sportTypeKey": "cycling"}}
+            result, _ = merge_workout_payload(existing, {"steps": steps})
+            assert result["sportType"] == {"sportTypeId": 2, "sportTypeKey": "cycling"}
+
+    def test_steps_update_rejects_unusable_stored_sport(self) -> None:
+        import pytest
+
+        from garmin_cli.exceptions import GarminCliError
+
+        steps = [{"type": "interval", "duration": {"type": "time", "value": 300}}]
+        for sport_type in ({"sportTypeKey": ""}, {"sportTypeKey": "trail_running"}, {"sportTypeId": 1}):
+            existing = {**_existing_workout(), "sportType": sport_type}
+            with pytest.raises(GarminCliError, match="include 'sport'"):
+                merge_workout_payload(existing, {"steps": steps})
+
     def test_partial_update_name_only(self) -> None:
         existing = _existing_workout()
         result, _ = merge_workout_payload(existing, {"name": "Only Name Changed"})

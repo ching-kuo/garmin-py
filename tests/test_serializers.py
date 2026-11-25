@@ -441,6 +441,32 @@ class TestSerializeWorkoutDetailStructure:
         assert row["write_compatible"] is True
         assert row["write_projection"]["steps"][0]["count"] == 3
 
+    def test_long_stored_description_keeps_write_projection(self) -> None:
+        # The 1024-char cap is for write input only; reconciliation reads
+        # write_projection from stored workouts of any description length.
+        raw = {
+            "workoutName": "Easy Run",
+            "description": "x" * 1025,
+            "sportType": {"sportTypeKey": "running"},
+            "workoutSegments": [{
+                "segmentOrder": 1,
+                "sportType": {"sportTypeKey": "running"},
+                "workoutSteps": [{
+                    "type": "ExecutableStepDTO",
+                    "stepOrder": 1,
+                    "stepType": {"stepTypeKey": "interval"},
+                    "endCondition": {"conditionTypeKey": "time"},
+                    "endConditionValue": 300,
+                }],
+            }],
+        }
+
+        projection = serialize_workout_detail(raw)[0]["write_projection"]
+
+        assert projection is not None
+        assert len(projection["description"]) == 1025
+        assert projection["steps"] == [{"type": "interval", "duration": {"type": "time", "value": 300}}]
+
     def test_supported_builder_shape_has_a_write_projection(self) -> None:
         raw = {
             "workoutId": 8,

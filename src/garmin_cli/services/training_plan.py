@@ -7,7 +7,7 @@ from collections import Counter
 from datetime import date
 from typing import Any
 
-from garmin_cli.workout_schema import validate_workout_input
+from garmin_cli.workout_schema import is_positive_id, unknown_key_errors, validate_workout_input
 
 _PLAN_FIELDS = frozenset({"name", "description", "start_date", "end_date", "entries", "removals"})
 _ENTRY_FIELDS = frozenset(
@@ -22,14 +22,6 @@ _ENTRY_FIELDS = frozenset(
     }
 )
 _REMOVAL_FIELDS = frozenset({"schedule_id", "expected_date"})
-_WORKOUT_FIELDS = frozenset({"name", "description", "sport", "steps"})
-_STEP_FIELDS = frozenset({"type", "duration", "target", "count", "steps"})
-_DURATION_FIELDS = frozenset({"type", "value"})
-_TARGET_FIELDS = frozenset({"type", "zone", "min", "max"})
-
-
-def _is_positive_id(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
 def _canonical_date(value: Any) -> date | None:
@@ -48,45 +40,21 @@ def _canonical_date(value: Any) -> date | None:
     return parsed if value == parsed.isoformat() else None
 
 
-def _unknown_fields(value: dict[str, Any], allowed: frozenset[str], path: str) -> list[str]:
-    return [f"{path}: unknown field {key!r}" for key in sorted(set(value) - allowed)]
-
-
 def _strict_workout_errors(workout: Any, path: str) -> list[str]:
     if not isinstance(workout, dict):
         return [f"{path}: workout must be an object"]
-    errors = _unknown_fields(workout, _WORKOUT_FIELDS, path)
-    errors.extend(f"{path}.{error}" for error in validate_workout_input(workout))
-    steps = workout.get("steps")
-    if not isinstance(steps, list):
-        return errors
-    for index, step in enumerate(steps):
-        if isinstance(step, dict):
-            errors.extend(_strict_step_unknown_errors(step, f"{path}.steps[{index}]"))
-    return errors
-
-
-def _strict_step_unknown_errors(step: dict[str, Any], path: str) -> list[str]:
-    errors = _unknown_fields(step, _STEP_FIELDS, path)
-    duration = step.get("duration")
-    if isinstance(duration, dict):
-        errors.extend(_unknown_fields(duration, _DURATION_FIELDS, f"{path}.duration"))
-    target = step.get("target")
-    if isinstance(target, dict):
-        errors.extend(_unknown_fields(target, _TARGET_FIELDS, f"{path}.target"))
-    nested = step.get("steps")
-    if isinstance(nested, list):
-        for index, child in enumerate(nested):
-            if isinstance(child, dict):
-                errors.extend(_strict_step_unknown_errors(child, f"{path}.steps[{index}]"))
-    return errors
+    # validate_workout_input already rejects unknown keys at every level; its
+    # step errors start with a "steps[i]" path, the rest are top-level.
+    return [
+        f"{path}{'.' if error.startswith('steps[') else ': '}{error}" for error in validate_workout_input(workout)
+    ]
 
 
 def validate_training_plan(plan: Any) -> list[str]:
     """Validate the closed v1 plan schema before any Garmin request."""
     if not isinstance(plan, dict):
         return ["plan must be an object"]
-    errors = _unknown_fields(plan, _PLAN_FIELDS, "plan")
+    errors = unknown_key_errors(plan, _PLAN_FIELDS, "plan")
     name = plan.get("name")
     if not isinstance(name, str) or not name.strip() or len(name) > 256:
         errors.append("plan.name must be a non-empty string of at most 256 characters")
@@ -114,7 +82,7 @@ def validate_training_plan(plan: Any) -> list[str]:
         if not isinstance(entry, dict):
             errors.append(f"{path} must be an object")
             continue
-        errors.extend(_unknown_fields(entry, _ENTRY_FIELDS, path))
+        errors.extend(unknown_key_errors(entry, _ENTRY_FIELDS, path))
         entry_id = entry.get("entry_id")
         if not isinstance(entry_id, str) or not entry_id:
             errors.append(f"{path}.entry_id must be a non-empty string")
@@ -132,12 +100,12 @@ def validate_training_plan(plan: Any) -> list[str]:
         has_inline = "workout" in entry
         if has_id == has_inline:
             errors.append(f"{path} must contain exactly one of workout_id or workout")
-        if has_id and not _is_positive_id(entry.get("workout_id")):
+        if has_id and not is_positive_id(entry.get("workout_id")):
             errors.append(f"{path}.workout_id must be a positive integer")
         if has_inline:
             errors.extend(_strict_workout_errors(entry.get("workout"), f"{path}.workout"))
         for key in ("move_from_schedule_id", "replace_schedule_id"):
-            if key in entry and not _is_positive_id(entry[key]):
+            if key in entry and not is_positive_id(entry[key]):
                 errors.append(f"{path}.{key} must be a positive integer")
             elif key in entry:
                 source_id = entry[key]
@@ -166,9 +134,9 @@ def validate_training_plan(plan: Any) -> list[str]:
             if not isinstance(removal, dict):
                 errors.append(f"{path} must be an object")
                 continue
-            errors.extend(_unknown_fields(removal, _REMOVAL_FIELDS, path))
+            errors.extend(unknown_key_errors(removal, _REMOVAL_FIELDS, path))
             schedule_id = removal.get("schedule_id")
-            if not _is_positive_id(schedule_id):
+            if not is_positive_id(schedule_id):
                 errors.append(f"{path}.schedule_id must be a positive integer")
             elif not isinstance(schedule_id, int) or isinstance(schedule_id, bool):
                 errors.append(f"{path}.schedule_id must be a positive integer")
@@ -210,13 +178,49 @@ def _comparable_workout(value: Any) -> Any:
     }
 
 
-def _source_by_schedule(calendar: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
+def source_by_schedule(calendar: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
     result: dict[int, dict[str, Any]] = {}
     for row in calendar:
         schedule_id = row.get("workout_schedule_id")
-        if isinstance(schedule_id, int) and not isinstance(schedule_id, bool) and schedule_id > 0:
+        if is_positive_id(schedule_id):
             result[schedule_id] = row
     return result
+
+
+def entry_source_id(entry: dict[str, Any]) -> int | None:
+    """The schedule an entry moves or replaces, if any."""
+    source_id = entry.get("move_from_schedule_id") or entry.get("replace_schedule_id")
+    return source_id if isinstance(source_id, int) else None
+
+
+def claims_row(vacated: dict[Any, str | None], row: dict[str, Any], entry_id: str) -> bool:
+    """Whether *row* still counts for *entry_id*: another entry or removal does not vacate it."""
+    return vacated.get(row.get("workout_schedule_id"), entry_id) == entry_id
+
+
+def blocking_occupants(rows: list[dict[str, Any]], source_id: int | None) -> list[dict[str, Any]]:
+    """Scheduled workouts other than the entry's own source (a same-date replace)."""
+    return [row for row in rows if row.get("workout_id") is not None and row.get("workout_schedule_id") != source_id]
+
+
+def vacated_schedule_owners(plan: dict[str, Any], schedules: dict[int, dict[str, Any]]) -> dict[Any, str | None]:
+    """Map each schedule id (int) this plan removes to its owning entry_id (None for removals).
+
+    *schedules* is ``source_by_schedule(calendar)``. Only sources verified
+    present on their expected date count, so swaps, chained shifts and
+    removal+replacement on one date are not conflicts.
+    """
+    owners: dict[Any, str | None] = {}
+    for entry in plan["entries"]:
+        source_id = entry_source_id(entry)
+        source = schedules.get(source_id) if source_id is not None else None
+        if source is not None and source.get("date") == entry.get("expected_source_date"):
+            owners[source_id] = entry["entry_id"]
+    for removal in plan.get("removals", []):
+        source = schedules.get(removal["schedule_id"])
+        if source is not None and source.get("date") == removal["expected_date"]:
+            owners[removal["schedule_id"]] = None
+    return owners
 
 
 def preview_training_plan(
@@ -234,7 +238,8 @@ def preview_training_plan(
             "conflicts": [],
             "summary": {},
         }
-    schedules = _source_by_schedule(calendar)
+    schedules = source_by_schedule(calendar)
+    vacated = vacated_schedule_owners(plan, schedules)
     operations: list[dict[str, Any]] = []
     conflicts: list[dict[str, str]] = []
 
@@ -246,7 +251,10 @@ def preview_training_plan(
 
     for entry in plan["entries"]:
         destination = entry["date"]
-        same_date = [row for row in calendar if row.get("date") == destination]
+        # Rows another entry or removal vacates cannot satisfy or block this entry.
+        same_date = [
+            row for row in calendar if row.get("date") == destination and claims_row(vacated, row, entry["entry_id"])
+        ]
         workout_id = entry.get("workout_id")
         inline = entry.get("workout")
         equivalent = next(
@@ -262,7 +270,7 @@ def preview_training_plan(
             ),
             None,
         )
-        source_id = entry.get("move_from_schedule_id") or entry.get("replace_schedule_id")
+        source_id = entry_source_id(entry)
         source = schedules.get(source_id) if source_id is not None else None
         expected = entry.get("expected_source_date")
         # "absent" (id nowhere in the window) is how an already-applied move or
@@ -302,12 +310,7 @@ def preview_training_plan(
         if source_state in {"absent", "changed"}:
             conflicts.append({"entry_id": entry["entry_id"], "reason": "source_schedule_changed"})
             continue
-        occupants = [
-            row
-            for row in same_date
-            if row.get("workout_id") is not None and row.get("workout_schedule_id") != source_id
-        ]
-        if occupants:
+        if blocking_occupants(same_date, source_id):
             conflicts.append({"entry_id": entry["entry_id"], "reason": "destination_occupied"})
             continue
         if inline is not None:

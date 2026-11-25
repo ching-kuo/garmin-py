@@ -16,6 +16,10 @@
 - Resuming or validating a saved session no longer reports `AUTH_FAILED` ("reconnect") or starts a credential login when Garmin throttles, returns 5xx (or 408/425), or is unreachable: those report `RATE_LIMITED`, `SERVER_ERROR`, or `NETWORK_ERROR`. `login status` exits 1 with that code instead of printing `authenticated: false`; `doctor` reports it as the session check's code; MCP `login_status` returns it in new optional `error_code` / `detail` fields; resources report it with a "could not check the Garmin session" message.
 - Workout create, workout schedule, and activity upload are retried only on 429, never after a 5xx or timeout, since Garmin may already have applied the first attempt; a failed create may still have landed, so list before retrying.
 - The `garmin://server/manifest` resource no longer lists `limits.steps_window_days`; steps ranges are no longer limited to 28 days.
+- Workout input (`workout create` / `workout update`, MCP `workout_create` / `workout_update`, and inline plan workouts) rejects unknown or misspelled keys at the top, step, duration, and target level with a message naming the key and the allowed keys (for example `{"title": ...}` no longer reports "updated" without changing anything); a target only accepts the fields its type uses.
+- A workout update must include at least one of `name`, `sport`, `description`, or `steps`; an empty `{}` update is `INVALID_INPUT`.
+- Workout `description` is capped at 1024 characters.
+- `training_plan_reschedule` returns a `destination_occupied` conflict without writing when the new date already holds a different workout; it used to schedule on top of it.
 
 ### Added
 
@@ -61,6 +65,15 @@
 - `training_plan_apply` reports outcome `unknown`, not `compensated`, when a workout create or schedule fails with `SERVER_ERROR`, `NETWORK_ERROR`, or `INTERNAL_ERROR`, since that write may have landed; a new template whose schedule may exist is kept instead of deleted. `training_plan_reschedule` reports `unknown` with an unknown schedule operation in the same case.
 - Deleting or unscheduling a workout and deleting an activity succeed when a retry after a 5xx or read timeout gets 404 (the first attempt already removed it); after a connection or DNS failure a 404 is still `NOT_FOUND`.
 - The `NETWORK_ERROR` and `SERVER_ERROR` recovery hints warn that a failed write may still have been applied and to verify remote state before repeating it.
+- `training_plan_preview` / `training_plan_apply` accept swaps, chained shifts, and a removal plus replacement on the same date: an occupant the plan itself vacates (another entry's verified source or a verified removal) is no longer a `destination_occupied` conflict. Apply removes such an occupant just before writing that destination and restores it if the plan rolls back.
+- Updating a workout's `steps` without `sport` keeps its stored sport, so workouts with Garmin sub-sports such as `trail_running` or `road_biking` can be updated (a known stored sport without a valid id gets it from the known sport table); a workout with no usable stored sport asks for `sport`.
+- `training_plan_apply` rollback removes this call's new schedules before restoring removed sources and verifies each restore by its own new schedule id, so a leftover new schedule of the same workout can no longer pass for a restore; `restore_source` operations now report the old `schedule_id` and the new `restored_schedule_id`.
+- `training_plan_apply` rechecks the calendar when deleting a source fails with a server, network, or internal error, or with a rate limit or auth error after an earlier attempt that Garmin may have processed: a delete that landed is restored on rollback (or, as the plan's last step, counts as done), and an unreadable or incomplete recheck (Garmin's schedule lookup failed) is reported as an `unknown` operation for that schedule.
+- `training_plan_apply` and `training_plan_reschedule` verify a new schedule by its returned id, workout, and date together; when Garmin returns no id, only a single new row of that workout on that date (absent before the write and not already claimed) is accepted, otherwise the result is `unknown`. A stale or untouched schedule of the same workout no longer passes as the new one.
+- `training_plan_apply` reports a `source_schedule_changed` conflict and deletes nothing when a schedule it would vacate has moved onto the destination date since the plan was read.
+- The `training_plan_apply` and `training_plan_reschedule` rechecks no longer treat a schedule as gone when Garmin's supplemental schedule lookup failed and only the calendar pages were read.
+- `training_plan_apply` rollback records a failure of any kind in one cleanup step as an `unknown` operation with its `error_code` and continues with the remaining cleanup, instead of escaping with an internal error.
+- `training_plan_reschedule` reports `destination_occupied` when the new date holds a different workout even if the same workout is also there.
 
 ## [2.13.0] - 2026-11-09
 

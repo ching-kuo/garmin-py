@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from typing import TypeGuard
 
 SPORT_TYPES: dict[str, int] = {
     "running": 1,
@@ -49,6 +50,18 @@ ZONE_TARGETS = frozenset({"heart.rate.zone", "power.zone"})
 # Range-based target types (use targetValueOne / targetValueTwo)
 RANGE_TARGETS = frozenset({"speed.zone", "cadence.zone"})
 
+WORKOUT_FIELDS = frozenset({"name", "sport", "description", "steps"})
+# Garmin-owned fields: tolerated in partial updates, where the merge warns and
+# keeps the existing value, but never accepted on create.
+READ_ONLY_FIELDS = frozenset(
+    {"workoutId", "ownerId", "createdDate", "updatedDate", "consumer", "atpPlanId"}
+)
+_REPEAT_STEP_FIELDS = frozenset({"type", "count", "steps"})
+_STEP_FIELDS = frozenset({"type", "duration", "target"})
+_DURATION_FIELDS = frozenset({"type", "value"})
+# Garmin documents no workout description limit; this bounds the payload.
+_MAX_DESCRIPTION_LENGTH = 1024
+
 _ZONE_LIMITS = {
     "heart.rate.zone": 5,
     "power.zone": 7,
@@ -62,6 +75,11 @@ _MAX_TOTAL_DURATION_SECONDS = 86_400
 _MAX_TOTAL_DISTANCE_METERS = 1_000_000
 
 
+def is_positive_id(value: object) -> TypeGuard[int]:
+    """Return whether ``value`` is a positive ``int`` identifier (not ``bool``)."""
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
 def _is_finite_number(value: object) -> bool:
     """Return whether ``value`` is a finite numeric scalar (not ``bool``)."""
     return (
@@ -69,6 +87,15 @@ def _is_finite_number(value: object) -> bool:
         and not isinstance(value, bool)
         and math.isfinite(value)
     )
+
+
+def unknown_key_errors(value: dict, allowed: frozenset[str], path: str) -> list[str]:
+    """Name each key outside *allowed*, so a misspelling is not silently ignored."""
+    where = f"{path}: " if path else ""
+    return [
+        f"{where}unknown key {key!r}; allowed keys: {sorted(allowed)}"
+        for key in sorted(set(value) - allowed, key=str)
+    ]
 
 
 def _validate_target(target: object, index: int, prefix: str) -> list[str]:
@@ -86,6 +113,10 @@ def _validate_target(target: object, index: int, prefix: str) -> list[str]:
             f"must be one of {sorted(TARGET_TYPES)}"
         )
         return errors
+
+    allowed = {"type"} | ({"zone"} if target_type in ZONE_TARGETS else set())
+    allowed |= {"min", "max"} if target_type in RANGE_TARGETS else set()
+    errors.extend(unknown_key_errors(target, frozenset(allowed), f"{prefix}[{index}].target"))
 
     if target_type in ZONE_TARGETS:
         zone = target.get("zone")
@@ -144,6 +175,8 @@ def _validate_step(
             f"{prefix}[{index}]: invalid step type {step_type!r}; "
             f"must be one of {sorted(STEP_TYPES)}"
         )
+    step_fields = _REPEAT_STEP_FIELDS if step_type == "repeat" else _STEP_FIELDS
+    errors.extend(unknown_key_errors(step, step_fields, f"{prefix}[{index}]"))
 
     if step_type == "repeat":
         if repeat_depth:
@@ -176,6 +209,7 @@ def _validate_step(
         if duration is None:
             errors.append(f"{prefix}[{index}]: non-repeat step missing required field 'duration'")
         elif isinstance(duration, dict):
+            errors.extend(unknown_key_errors(duration, _DURATION_FIELDS, f"{prefix}[{index}].duration"))
             dur_type = duration.get("type")
             if dur_type not in _VALID_DURATION_TYPES:
                 errors.append(
@@ -234,18 +268,22 @@ def _expanded_metrics(steps: list[object]) -> tuple[int, float, float]:
     return count, duration_seconds, distance_meters
 
 
-def validate_workout_input(data: dict, partial: bool = False) -> list[str]:
+def validate_workout_input(data: dict, partial: bool = False, *, cap_description: bool = True) -> list[str]:
     """Validate simplified workout input.
 
     Args:
         data: Workout input dict.
         partial: When True, only fields present are validated (missing top-level
                  fields are not reported as errors).
+        cap_description: Enforce the description length cap. Only write input
+                 is capped; projections of stored Garmin workouts pass False.
 
     Returns:
         List of error strings. Empty list means valid.
     """
-    errors: list[str] = []
+    errors = unknown_key_errors(data, (WORKOUT_FIELDS | READ_ONLY_FIELDS) if partial else WORKOUT_FIELDS, "")
+    if partial and not WORKOUT_FIELDS & set(data):
+        errors.append(f"update must include at least one of {sorted(WORKOUT_FIELDS)}")
 
     name = data.get("name")
     if not partial or "name" in data:
@@ -256,8 +294,11 @@ def validate_workout_input(data: dict, partial: bool = False) -> list[str]:
         elif len(name) > 256:
             errors.append("'name' must be at most 256 characters")
 
-    if "description" in data and data["description"] is not None and not isinstance(data["description"], str):
+    description = data.get("description")
+    if description is not None and not isinstance(description, str):
         errors.append("'description' must be a string when supplied")
+    elif cap_description and description is not None and len(description) > _MAX_DESCRIPTION_LENGTH:
+        errors.append(f"'description' must be at most {_MAX_DESCRIPTION_LENGTH} characters")
 
     sport = data.get("sport")
     if not partial or "sport" in data:

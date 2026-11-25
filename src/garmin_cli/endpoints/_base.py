@@ -154,7 +154,9 @@ def _retry_loop(
 
             if immediate_errors is not None and code in immediate_errors:
                 error_msg, error_code = immediate_errors[code]
-                raise GarminCliError(error=error_msg, error_code=error_code) from exc
+                raise GarminCliError(
+                    error=error_msg, error_code=error_code, may_have_landed=maybe_processed
+                ) from exc
 
             kind = failure_kind(exc)
             maybe_processed = maybe_processed or may_have_been_processed(exc)
@@ -165,6 +167,8 @@ def _retry_loop(
             error = upstream_error(kind, code)
             if error is None:
                 raise
+            # A 429/401 after a 5xx does not undo what the 5xx attempt may have applied.
+            error.may_have_landed = maybe_processed
             raise error from exc
 
 

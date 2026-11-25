@@ -306,6 +306,26 @@ class TestUnscheduleWorkout:
             unschedule_workout(99999)
         assert exc_info.value.error_code == "NOT_FOUND"
 
+    @pytest.mark.parametrize(
+        ("side_effect", "landed"),
+        [
+            ([_http_error(503)] + [_http_error(429)] * 3, True),
+            ([_http_error(503), _http_error(401)], True),
+            ([_http_error(429)] * 4, False),
+        ],
+    )
+    def test_error_after_a_possibly_processed_attempt_may_have_landed(
+        self, mocker: Any, side_effect: list[Exception], landed: bool
+    ) -> None:
+        mock_garth = MagicMock()
+        mock_garth.unschedule_workout.side_effect = side_effect
+        mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
+        mocker.patch("time.sleep")
+
+        with pytest.raises(GarminCliError) as exc_info:
+            unschedule_workout(99999)
+        assert exc_info.value.may_have_landed is landed
+
     def test_404_on_retry_after_rate_limit_is_still_not_found(self, mocker: Any) -> None:
         # A 429 was not processed, so the later 404 is a genuine miss.
         mock_garth = MagicMock()
