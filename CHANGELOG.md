@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [3.0.0] - 2026-11-26
 
 ### Breaking
 
@@ -55,7 +55,6 @@
 
 - `garmin-cli plan preview|apply|reschedule|reconcile`: CLI versions of the MCP `training_plan_preview`, `training_plan_apply`, `training_plan_reschedule`, and `training_plan_reconcile` tools, running the same code; plans are read from a JSON or YAML file or stdin, writes ask for confirmation (or `--confirm`), `plan apply --dry-run` previews, and an incomplete result exits 1.
 - Training readiness rows (`health readiness`, MCP `health_readiness`, the morning report, and `coach_snapshot` wellness rows) add `latest_score` and `latest_level`, the day's newest recalculation, so afternoon changes after a workout are visible next to the morning `score` / `level`.
-
 - `workout schedule --allow-multiple` and MCP `workout_schedule(allow_multiple=true)` schedule a workout on a date that already holds a different one (Garmin allows several per day).
 - `--json` and `--format` also work after the subcommand (`garmin-cli health sleep --days 7 --json`); the subcommand's value wins over a global one.
 - `workout create --dry-run` and `workout update --dry-run` validate the input and print the Garmin payload without saving (`--json`: `data[0]` has `dry_run` and `wire_payload`; `--format csv` is rejected); create needs no login, and the update preview is the exact PUT body.
@@ -63,7 +62,6 @@
 - `doctor` reports the garmin-py and garminconnect versions, fails the MCP check when the installed `mcp` is outside `>=2.2.0,<3` (with a reinstall hint), accepts `GARMIN_EMAIL` / `GARMIN_PASSWORD` as a valid sign-in setup when no token store or session exists yet, and gives check-specific recovery hints (install Python 3.12+, the permission mode to set, fixing `GARMIN_HOME` or the bearer token).
 - `login`, `login status`, and `login logout` print a one-row CSV table under `--format csv`; they printed a sentence.
 - `garmin-cli --help` has a description with examples, and the shared date, limit, type, search, and confirm options have help text; `workout create --help` shows `FILE` as optional.
-
 - `garmin-cli login` reads the password from `GARMIN_PASSWORD` when `--password` is absent, accepts `--password-stdin` (piped stdin only; an empty line is `AUTH_MISSING`), and takes an MFA code from `--mfa-code` / `GARMIN_MFA_CODE` (only useful for codes valid for the new challenge, such as authenticator-app codes; emailed/SMS codes still need an interactive login, which prompts and ignores `GARMIN_MFA_CODE`). A rejected MFA code is reported as such, not as bad credentials. `--password` is deprecated (shell history and process-list exposure).
 - `garmin-cli login logout` deletes the saved `garmin_tokens.json` (refusing symlinks); it reports `{"logged_out": true|false}` (plain text names the deleted file) and exits 0 when there was nothing to delete. Stop a running MCP server first: it keeps its loaded session and may save refreshed tokens again.
 - `doctor` checks that `garmin_tokens.json` is a regular file (not a symlink, dangling or not) with mode 600, and names the offending symlink when the Garmin home path passes through one; an uninspectable token store is a check failure, not `INTERNAL_ERROR`.
@@ -160,6 +158,7 @@
 - Strict calendar reads (plan rechecks, `workout_schedule`) read a no-content (HTTP 204) calendar page or schedule lookup as an empty period instead of failing.
 - A failure to save the session tokens after a successful `garmin-cli login` reports "Authenticated, but saving the session ... failed" (`AUTH_FAILED`) instead of "Garmin login failed".
 - The Claude Desktop bundle no longer fails on macOS when `python3` is Apple's Python 3.9: it switches to the oldest Homebrew (`/opt/homebrew/bin`, `/usr/local/bin`) or python.org Python whose real version meets the minimum (pyenv, asdf, and uv Pythons are not searched). The manifest now declares Python >=3.8 so Claude Desktop lets the bundle start on such a Mac; the launcher still enforces 3.12.
+- The MCP `health_daily_summary` description and SKILL.md name the fields the tool returns (`active_kilocalories`, `floors_ascended`, `floors_descended`, `resting_heart_rate`, ...) instead of `calories`, `floors`, and `resting_hr`; SKILL.md now documents `coach snapshot`, `activity rename`, `activity set-type`, and `workout unschedule`, and points to the README for MCP setup instead of repeating it.
 
 ## [2.13.0] - 2026-11-09
 

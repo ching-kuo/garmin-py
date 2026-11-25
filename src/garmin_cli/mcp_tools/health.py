@@ -60,7 +60,7 @@ def register_health_tools(mcp: MCPServer, config: CliConfig) -> None:
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def health_daily_summary(start_date: str | None = None, end_date: EndDate = None, days: Days = None) -> Envelope:
-        """Get daily summary data for a date range (YYYY-MM-DD). Returns date, total_steps, distance_km, calories, floors, intensity minutes, and resting heart rate. One request covers the whole range. Use when you need several daily totals at once; use the individual health_* tools for detail such as sleep stages, HRV status, or stress."""
+        """Get daily summary data for a date range (YYYY-MM-DD). Returns date, total_steps, distance_km, active_kilocalories, floors_ascended, floors_descended, moderate_intensity_minutes, vigorous_intensity_minutes, resting_heart_rate. One request covers the whole range. Use when you need several daily totals at once; use the individual health_* tools for detail such as sleep stages, HRV status, or stress."""
         window = _date_window(start_date, end_date, days)
         return _run_tool(config, lambda: get_daily_summary_range(*window()), serialize_daily_summary)
 

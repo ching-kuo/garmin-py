@@ -51,7 +51,7 @@ Destructive commands (`activity delete`, `workout delete`, `workout unschedule`,
 | Code | Meaning | Retry? |
 |------|---------|--------|
 | `AUTH_MISSING` | No credentials or session found | No -- configure auth |
-| `AUTH_FAILED` | Credentials rejected | No -- fix credentials |
+| `AUTH_FAILED` | Credentials or session rejected, or an unsafe or unusable Garmin home or token file | No -- fix credentials, or the path `doctor` reports |
 | `MFA_REQUIRED` | Garmin sent a one-time MFA code | Ask the user for the code, then `submit_mfa_code` (MCP), or `garmin-cli login` at a terminal (CLI); `--mfa-code` only works for authenticator-app codes |
 | `NOT_FOUND` | Endpoint returned 404 | No |
 | `RATE_LIMITED` | 429 (or SSO 427) after 3 retries | Yes -- wait and retry |
@@ -125,13 +125,25 @@ garmin-cli --json health status --date 2026-03-11
 # Steps -- fields: date, total_steps, total_distance, step_goal
 garmin-cli --json health steps --days 7
 
-# Daily summary -- fields: date, total_steps, distance_km, calories, floors, moderate_intensity_minutes, vigorous_intensity_minutes, resting_hr
+# Daily summary -- fields: date, total_steps, distance_km, active_kilocalories, floors_ascended,
+# floors_descended, moderate_intensity_minutes, vigorous_intensity_minutes, resting_heart_rate
 # Note: one request for the whole range
 garmin-cli --json health daily-summary --days 7
 
 # Intensity minutes -- fields: date, moderate_value, vigorous_value, weekly_goal
 garmin-cli --json health intensity-minutes --days 7
 ```
+
+### AI coach
+
+```bash
+# Bounded recovery, load, plan, wellness, execution, data-quality, and provenance snapshot
+# (data[0] is the coach_snapshot object). --baseline-days 7-90 (default 28),
+# --recent-daily-days 1-9 (default 9), --sport is repeatable; at most 24 Garmin data requests.
+garmin-cli --json coach snapshot --date 2026-03-11
+```
+
+Table output shows only the recovery signals (`signal, current_value, baseline_median, absolute_delta, state`); `--format csv` is `INVALID_INPUT`. See the `coach_snapshot` row of the MCP tool table for the full contract.
 
 ### Activities
 
@@ -187,6 +199,13 @@ garmin-cli --json activity upload run.fit
 
 # Delete an activity (--confirm skips the interactive prompt) -- fields: id, status
 garmin-cli --json activity delete 12345678901 --confirm
+
+# Rename an activity -- fields: id, name, status
+garmin-cli --json activity rename 12345678901 "Morning tempo"
+
+# Change an activity's sport -- fields: id, type, status
+# TYPE_KEY is a typeKey from Garmin's live sport-type table; an unknown key is rejected before any write
+garmin-cli --json activity set-type 12345678901 cycling
 ```
 
 `--limit` defaults to 20 and must be 1-100 (`INVALID_INPUT` otherwise). `activity get --laps` with `--format csv` is rejected; use `activity laps` for lap CSV. `--type` filters by Garmin activity type key (e.g., `running`, `cycling`, `swimming`).
@@ -236,8 +255,9 @@ garmin-cli --json workout list --limit 10
 # Get workout detail -- fields: id, name, sport, duration_min, description, steps_summary, steps[]
 garmin-cli --json workout get 12345678901
 
-# Workout calendar (planned workouts + races/events) -- fields: date, id, name,
-# type, duration_min, description, item_type, is_race, primary_event, event_time, location
+# Workout calendar (planned workouts + races/events) -- fields: date, id, workout_id,
+# workout_schedule_id, name, type, duration_min, description, item_type, is_race,
+# primary_event, event_time, location
 # item_type distinguishes workouts from events; is_race/primary_event flag target races
 garmin-cli --json workout calendar --ahead 7
 garmin-cli --json workout calendar --from 2026-03-01 --to 2026-03-14
@@ -266,6 +286,10 @@ garmin-cli --json workout delete 12345678901 --confirm
 
 # Schedule a workout to a calendar date
 garmin-cli --json workout schedule 12345678901 2026-04-01
+
+# Remove a calendar entry (keeps the workout); SCHEDULE_ID is the workout_schedule_id
+# from schedule or calendar, not the workout id -- fields: id, status
+garmin-cli --json workout unschedule 987654 --confirm
 
 # Send a workout to a watch (arrives on its next sync); --device defaults to the only
 # device that takes workouts of this sport (several: the error lists them); --dry-run resolves only
@@ -597,49 +621,7 @@ garmin-cli --format csv health sleep --days 30 > sleep.csv
 
 ## MCP Server (Alternative)
 
-For Claude Code/Desktop integration via MCP protocol instead of shell commands. Uses MCP Python SDK v2 (MCPServer).
-
-### Install
-
-```bash
-pip install "garmin-py[mcp]"
-```
-
-### Register with Claude Code (stdio)
-
-```bash
-claude mcp add --transport stdio garmin -- garmin-cli mcp-server
-```
-
-Or with a custom session directory:
-
-```bash
-claude mcp add --transport stdio garmin -- garmin-cli --garmin-home /path/to/.garminconnect mcp-server
-```
-
-### HTTP transports (SSE / streamable-http)
-
-`--host` defaults to `127.0.0.1`. Non-loopback binds require the `GARMIN_MCP_BEARER_TOKEN` environment variable (at least 32 RFC 6750 token characters, e.g. `secrets.token_urlsafe(32)` output); whenever the variable is present (a blank value refuses to start), the MCP SDK gates every tool call (read and write) on every HTTP bind, loopback included, through `Authorization: Bearer <token>`.
-
-```bash
-garmin-cli mcp-server --transport streamable-http --port 8000
-garmin-cli mcp-server --transport sse --port 8000
-
-# Non-loopback (requires bearer token):
-export GARMIN_MCP_BEARER_TOKEN="<long-random-token>"
-garmin-cli mcp-server --transport streamable-http --host 0.0.0.0 --port 8000
-```
-
-See README.md for full HTTP transport options and authentication notes.
-
-### Resources and prompts
-
-| Resource | Content |
-|----------|---------|
-| `garmin://server/manifest` | Runtime-generated tool inventory and annotations, auth state, error recovery contracts, envelope descriptions, and response caps |
-| `garmin://athlete/profile` | Cached thresholds, VO2max, race predictions, and 7/28-day activity load; unauthenticated reads return a structured body |
-
-Available prompts are `weekly_training_review`, `recovery_check`, `compare_recent_activities`, and `plan_next_week`. They contain workflow instructions only and reference the registered tool surface. `plan_next_week` reminds the client that `training_plan_apply` is destructive and requires human confirmation.
+For Claude Code/Desktop integration via MCP protocol instead of shell commands (`pip install "garmin-py[mcp]"`, then `claude mcp add --transport stdio garmin -- garmin-cli mcp-server`). Installation, client setup, HTTP transports and the bearer token, read-only mode, the write audit log, file access, resources, URI templates, and prompts are described in the [README MCP Server section](README.md#mcp-server). The tool contracts follow.
 
 ### Available tools
 
@@ -650,7 +632,7 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `health_sleep` | `start_date?` or `days?`, `end_date?` | `{count, rows}` |
 | `health_hrv` | `start_date?` or `days?`, `end_date?` | `{count, rows}` |
 | `health_weight` | `start_date?` or `days?`, `end_date?` | `{count, rows}` |
-| `health_daily_summary` | `start_date?` or `days?`, `end_date?` | `{count, rows}` — steps, floors, intensity minutes, calories, resting HR (one request for the whole range) |
+| `health_daily_summary` | `start_date?` or `days?`, `end_date?` | `{count, rows}` — `date`, `total_steps`, `distance_km`, `active_kilocalories`, `floors_ascended`, `floors_descended`, `moderate_intensity_minutes`, `vigorous_intensity_minutes`, `resting_heart_rate` (one request for the whole range) |
 | `health_steps` | `start_date?` or `days?`, `end_date?` | `{count, rows}` — steps, distance, step goal (native range API; one request per 28 days) |
 | `health_intensity_minutes` | `start_date?` or `days?`, `end_date?` | `{count, rows}` — moderate/vigorous minutes, weekly goal (native range API; one request per 31 days) |
 | `health_body_battery` | `start_date?` or `days?`, `end_date?` | `{count, rows}` — `date`, `start_level`, `end_level`, `max_level` (intraday peak); single ranged API call |
@@ -725,10 +707,10 @@ Because the section set is fixed, a report can never silently drop a metric: an 
 
 `date_range` reports the anchor day (or the 7-day window for `weekly`). The `evening` `planned_tomorrow` section deliberately holds the day *after* the anchor and so falls outside `date_range` — it is a forward-looking section, not part of the reported window.
 
-Latency note: `weekly` (and the `endurance-score`/`hill-score` reads generally) fan out one upstream request per day; snapshot sections and per-day requests now run on bounded thread pools (`GARMIN_CLI_FETCH_CONCURRENCY`, default `4`), so a weekly snapshot takes a few seconds instead of 10-20s. `GARMIN_CLI_DAILY_CALL_DELAY` (seconds, default `0.5`) still throttles how fast per-day requests are submitted — tune it down if your MCP client times out, up (or set concurrency to `1`) to be gentler on Garmin's rate limits.
+Latency note: `weekly` (and the `endurance-score`/`hill-score` reads generally) fan out one upstream request per day; snapshot sections and per-day requests run on bounded thread pools (`GARMIN_CLI_FETCH_CONCURRENCY`, default `4`), so a weekly snapshot takes a few seconds. `GARMIN_CLI_DAILY_CALL_DELAY` (seconds, default `0.5`) still throttles how fast per-day requests are submitted — tune it down if your MCP client times out, up (or set concurrency to `1`) to be gentler on Garmin's rate limits.
 
-`activity_get(detail=true)` may carry an `unavailable[]` array (omitted when empty) annotating registry-known metrics with `not_applicable_to_sport` (the metric isn't meaningful for the sport) or `absent_in_response` (the metric applies but the upstream payload didn't include it). Multisport parents union per-child manifests with a 0-based `leg_index` attached. `activity_laps`, `activity_hr_zones`, and `activity_metrics_describe` do not carry the manifest in this release; use `activity_get(detail=true)` for sport-applicability checks.
+`activity_get(detail=true)` may carry an `unavailable[]` array (omitted when empty) annotating registry-known metrics with `not_applicable_to_sport` (the metric isn't meaningful for the sport) or `absent_in_response` (the metric applies but the upstream payload didn't include it). Multisport parents union per-child manifests with a 0-based `leg_index` attached. `activity_laps`, `activity_hr_zones`, and `activity_metrics_describe` do not carry the manifest; use `activity_get(detail=true)` for sport-applicability checks.
 
-`activity_swim_lengths` remains unnecessary because `activity_laps` already returns pool lengths for `lap_swimming`. Hardware/profile manifest reasons (`requires_hardware`, `requires_profile_config`) remain future work.
+There is no separate swim-lengths tool: `activity_laps` returns pool lengths for `lap_swimming`.
 
 SKILL.md remains the default and simpler integration method. Use MCP when you want native tool semantics without shell command parsing.

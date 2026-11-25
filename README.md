@@ -311,7 +311,7 @@ FILE is the plan object of MCP `training_plan_preview` (see [SKILL.md](SKILL.md)
 ```bash
 garmin-cli performance thresholds
 garmin-cli performance zones
-garmin-cli performance vo2max
+garmin-cli performance vo2max          [--date DATE]  # default: latest
 garmin-cli performance race-predictions
 garmin-cli performance endurance-score [--date DATE | --from DATE --to DATE | --days N]
 garmin-cli performance hill-score      [--date DATE | --from DATE --to DATE | --days N]
@@ -337,7 +337,7 @@ garmin-cli device list  # registered devices: device_id, display_name, device_ty
 
 ## Normalized JSON Schemas
 
-Recent fixes normalized several JSON payloads for agent-safe output:
+Several JSON payloads are normalized for agent-safe output:
 
 - `performance vo2max` returns `date`, `vo2max`, `sport`
 - `performance zones` returns one row per heart-rate or power zone: `kind` (`heart_rate` or `power`), `sport`, `zone`, `low`, `high` (the next zone's floor, exclusive; the top heart-rate zone ends at Garmin's max HR, the top power zone is null), `unit` (`bpm` or `W`); power zones cover cycling and running
@@ -571,16 +571,20 @@ See [SKILL.md](SKILL.md#mcp-server-alternative) for the full tool list and param
 
 ## Development
 
+Set up a fresh environment (Python 3.12+) with the dev and MCP extras, which the MCP server tests need:
+
 ```bash
-pip install -e ".[dev]"
-pytest tests/                 # unit and offline contract tests
-pytest tests/ --e2e           # add read-only live e2e tests
+uv sync --extra dev --extra mcp   # creates .venv (editable install) and a local uv.lock
+# or: python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev,mcp]"
 ```
 
-To run MCP server tests, also install the mcp extra:
+Then run the same checks as CI (prefix with `uv run`, or activate `.venv`):
 
 ```bash
-pip install -e ".[dev,mcp]"
+pytest tests/                 # unit and offline contract tests
+pytest tests/ --e2e           # add read-only live e2e tests
+ruff check src/ tests/
+mypy src/ && mypy mcpb/ scripts/
 ```
 
 E2E tests make real Garmin Connect API calls. They require a valid `garmin_tokens.json` session in `~/.garminconnect` (or `GARMIN_HOME`). Set `E2E_RATE_LIMIT_SECONDS` (default: 5) to adjust the inter-request delay.
