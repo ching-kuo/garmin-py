@@ -3,8 +3,22 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from typing import Any
 
 from garmin_cli.token_store import DEFAULT_GARMIN_HOME
+
+# Click ctx.obj key: the command path, set once a leaf command's options are
+# parsed, so error reporting can trust the parsed output format.
+PARSED_COMMAND = "parsed_command"
+
+
+def command_path(ctx: Any) -> str:
+    """Command names from a click context chain, without the program name."""
+    names: list[str] = []
+    while ctx is not None and ctx.parent is not None:
+        names.append(ctx.info_name or "")
+        ctx = ctx.parent
+    return " ".join(reversed(names))
 
 
 @dataclass(frozen=True)

@@ -13,8 +13,10 @@ from click.core import ParameterSource
 from garmin_cli import backend as garth
 from garmin_cli.auth import _secure_directory, resume_and_probe
 from garmin_cli.backend import PendingMFA
+from garmin_cli.commands import _options
+from garmin_cli.commands._options import OutputGroup, output_options
 from garmin_cli.exceptions import GarminCliError, login_error
-from garmin_cli.output import echo_json, make_envelope
+from garmin_cli.output import render_output
 from garmin_cli.token_store import (
     DEFAULT_GARMIN_HOME,
     expand_garth_home,
@@ -23,14 +25,12 @@ from garmin_cli.token_store import (
     validate_garmin_home,
 )
 
+_COLUMNS_SESSION = ("authenticated", "garmin_home")
+
 
 def _prompt_mfa_code() -> str:
     """Prompt the user for an MFA code when Garmin requires one."""
-    return click.prompt("MFA code", err=True).strip()
-
-
-def _stdin_is_tty() -> bool:
-    return sys.stdin.isatty()
+    return _options.prompt_line("MFA code").strip()
 
 
 def _missing_credentials() -> GarminCliError:
@@ -43,7 +43,8 @@ def _missing_credentials() -> GarminCliError:
     )
 
 
-@click.group(invoke_without_command=True)
+@output_options
+@click.group(cls=OutputGroup, invoke_without_command=True)
 @click.option("--email", default=None, help="Garmin Connect email (default: GARMIN_EMAIL).")
 @click.option(
     "--password",
@@ -83,8 +84,8 @@ def login(
     config = ctx.obj["config"]
     garmin_home = os.path.expanduser(config.garth_home)
     output_format = config.output_format
-    # Prompts would corrupt JSON output or hang a script waiting on stdin.
-    interactive = output_format != "json" and _stdin_is_tty()
+    # Prompts would corrupt JSON/CSV output or hang a script waiting on stdin.
+    interactive = output_format == "table" and _options.stdin_is_tty()
 
     if password_stdin:
         if password is not None:
@@ -92,7 +93,7 @@ def login(
                 error="Use either --password or --password-stdin, not both.",
                 error_code="INVALID_INPUT",
             )
-        if _stdin_is_tty():
+        if _options.stdin_is_tty():
             raise GarminCliError(
                 error="--password-stdin needs the password piped in, not a terminal.",
                 error_code="INVALID_INPUT",
@@ -108,8 +109,8 @@ def login(
     if not email or not password:
         if not interactive:
             raise _missing_credentials()
-        email = email or click.prompt("Email", err=True)
-        password = password or click.prompt("Password", hide_input=True, err=True)
+        email = email or _options.prompt_line("Email").strip()
+        password = password or _options.prompt_line("Password", hidden=True)
 
     code = (mfa_code or "").strip()
     if interactive and ctx.get_parameter_source("mfa_code") is ParameterSource.ENVIRONMENT:
@@ -155,8 +156,11 @@ def login(
             ) from exc
         raise login_error(exc) from exc
 
-    if output_format == "json":
-        echo_json(make_envelope("login", [{"authenticated": True, "garmin_home": garmin_home}]))
+    if output_format != "table":
+        render_output(
+            output_format, "login", [{"authenticated": True, "garmin_home": garmin_home}],
+            _COLUMNS_SESSION,
+        )
     else:
         click.echo(
             f"Login successful. Token store saved at: {tokenstore_path(garmin_home)}"
@@ -179,8 +183,8 @@ def login_status(ctx: click.Context) -> None:
 
     record = {"authenticated": authenticated, "garmin_home": garmin_home}
 
-    if output_format == "json":
-        echo_json(make_envelope("login status", [record]))
+    if output_format != "table":
+        render_output(output_format, "login status", [record], _COLUMNS_SESSION)
         return
 
     if authenticated:
@@ -228,11 +232,13 @@ def logout(ctx: click.Context) -> None:
         if legacy_removed:
             deleted.append(legacy_token)
 
-    if config.output_format == "json":
-        echo_json(make_envelope(
+    if config.output_format != "table":
+        render_output(
+            config.output_format,
             "login logout",
             [{"logged_out": bool(deleted), "legacy_token_removed": legacy_removed}],
-        ))
+            ("logged_out", "legacy_token_removed"),
+        )
     elif deleted:
         click.echo("Logged out. Deleted: " + ", ".join(str(path) for path in deleted))
     else:

@@ -131,7 +131,7 @@ def test_workout_delete_nonexistent_returns_error(run_cli: Any) -> None:
 
 @pytest.mark.e2e
 def test_workout_schedule_returns_schedule_id(run_cli: Any, tmp_path: Any) -> None:
-    """Verify schedule returns a workoutScheduleId."""
+    """Verify schedule returns a workout_schedule_id."""
     unique_name = f"__test_garmin_cli_{uuid.uuid4().hex[:8]}"
     workout_data = {**MINIMAL_WORKOUT, "name": unique_name}
 
@@ -149,7 +149,7 @@ def test_workout_schedule_returns_schedule_id(run_cli: Any, tmp_path: Any) -> No
         assert_exit_ok(result)
         assert_envelope_ok(parsed)
         row = parsed["data"][0]
-        schedule_id = row.get("workoutScheduleId") or row.get("id")
+        schedule_id = row.get("workout_schedule_id")
         assert schedule_id is not None
     finally:
         if created_id:

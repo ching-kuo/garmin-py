@@ -164,11 +164,12 @@ class TestSleepCommand:
         )
         assert result.exit_code != 0
 
-    def test_sleep_conflict_days_and_ahead(self, mocker: Any) -> None:
+    def test_sleep_has_no_ahead_option(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(cli, ["health", "sleep", "--days", "7", "--ahead", "3"])
-        assert result.exit_code != 0
+        result = runner.invoke(cli, ["health", "sleep", "--ahead", "3"])
+        assert result.exit_code == 1
+        assert "--ahead" in result.stderr
 
     def test_sleep_from_without_to_fails(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands._options.ensure_authenticated")

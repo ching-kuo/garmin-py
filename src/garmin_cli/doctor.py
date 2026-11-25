@@ -1,11 +1,12 @@
 """Non-raising environment and session diagnostics."""
 from __future__ import annotations
 
-import importlib.util
 import os
+import re
 import stat
 import sys
 from dataclasses import asdict, dataclass
+from importlib import metadata
 from pathlib import Path
 from typing import Callable
 
@@ -36,14 +37,34 @@ class CheckResult:
         return asdict(self)
 
 
-def _failure(name: str, detail: str, error_code: str) -> CheckResult:
+# Must match pyproject's `mcp[cli]>=2.2.0,<3` (tests/test_doctor.py checks it).
+MIN_MCP_VERSION = (2, 2, 0)
+MCP_MAJOR_CEILING = 3
+_ENV_CREDENTIALS = (
+    "GARMIN_EMAIL and GARMIN_PASSWORD are set, so commands will sign in; "
+    "credentials not verified (no session yet)."
+)
+
+
+def _failure(name: str, detail: str, error_code: str, hint: str | None = None) -> CheckResult:
     return CheckResult(
         name=name,
         ok=False,
         detail=detail,
         error_code=error_code,
-        recovery_hint=error_contract(error_code)["recovery_hint"],
+        recovery_hint=hint or error_contract(error_code)["recovery_hint"],
     )
+
+
+def _has_env_credentials(config: CliConfig) -> bool:
+    return bool(config.email and config.password)
+
+
+def _installed_version(distribution: str) -> str | None:
+    try:
+        return metadata.version(distribution)
+    except metadata.PackageNotFoundError:
+        return None
 
 
 def _display_path(path: Path) -> str:
@@ -62,7 +83,14 @@ def check_python_version(_config: CliConfig) -> CheckResult:
         "python_version",
         f"Python {version} is unsupported; Python 3.12 or newer is required.",
         "INVALID_INPUT",
+        "Install Python 3.12 or newer, then reinstall garmin-py with it.",
     )
+
+
+def check_versions(_config: CliConfig) -> CheckResult:
+    garmin_py = _installed_version("garmin-py") or "unknown"
+    garminconnect = _installed_version("garminconnect") or "not installed"
+    return CheckResult("versions", True, f"garmin-py {garmin_py}; garminconnect {garminconnect}.")
 
 
 def check_config(config: CliConfig) -> CheckResult:
@@ -71,8 +99,17 @@ def check_config(config: CliConfig) -> CheckResult:
     try:
         validate_garmin_home(str(path))
     except GarminCliError as exc:
-        return _failure("config", exc.error, exc.error_code)  # names the offending link
+        hint = (
+            "Point --garmin-home or GARMIN_HOME at a directory, not a file."
+            if exc.error_code == "INVALID_INPUT"
+            else None
+        )
+        return _failure("config", exc.error, exc.error_code, hint)  # names the offending link
     if not path.exists():
+        if _has_env_credentials(config):
+            return CheckResult(
+                "config", True, f"Garmin home {shown} does not exist yet; {_ENV_CREDENTIALS}"
+            )
         return _failure(
             "config",
             f"Garmin home {shown} does not exist.",
@@ -84,7 +121,10 @@ def check_config(config: CliConfig) -> CheckResult:
 def check_token_store(config: CliConfig) -> CheckResult:
     path = Path(os.path.expanduser(config.garth_home))
     try:
-        return _check_token_store(path)
+        result = _check_token_store(path)
+        if result.error_code == "AUTH_MISSING" and _has_env_credentials(config):
+            return CheckResult("token_store", True, f"No token store yet; {_ENV_CREDENTIALS}")
+        return result
     except OSError:
         return _failure(
             "token_store",
@@ -110,11 +150,17 @@ def _check_token_store(path: Path) -> CheckResult:
             f"No token store was found in {shown}.",
             "AUTH_MISSING",
         )
+    replace_hint = f"Remove {TOKEN_FILE_NAME} from the Garmin home folder, then run garmin-cli login."
     if stat.S_ISLNK(token_stat.st_mode):
-        return _failure("token_store", f"Token file {TOKEN_FILE_NAME} is a symlink.", "AUTH_FAILED")
+        return _failure(
+            "token_store", f"Token file {TOKEN_FILE_NAME} is a symlink.", "AUTH_FAILED", replace_hint
+        )
     if not stat.S_ISREG(token_stat.st_mode):
         return _failure(
-            "token_store", f"Token file {TOKEN_FILE_NAME} is not a regular file.", "AUTH_FAILED"
+            "token_store",
+            f"Token file {TOKEN_FILE_NAME} is not a regular file.",
+            "AUTH_FAILED",
+            replace_hint,
         )
     mode = stat.S_IMODE(path.stat().st_mode)
     if mode != 0o700:
@@ -122,12 +168,12 @@ def _check_token_store(path: Path) -> CheckResult:
             "token_store",
             f"Token-store directory permissions are {mode:04o}; expected 0700.",
             "AUTH_FAILED",
+            "Restrict the Garmin home folder to owner-only access (mode 700).",
         )
     file_mode = stat.S_IMODE(token_stat.st_mode)
     if file_mode != 0o600:
-        return CheckResult(
+        return _failure(
             "token_store",
-            False,
             f"Token file {TOKEN_FILE_NAME} permissions are {file_mode:04o}; expected 0600.",
             "AUTH_FAILED",
             f"Restrict {TOKEN_FILE_NAME} to owner read/write (mode 600).",
@@ -137,10 +183,43 @@ def _check_token_store(path: Path) -> CheckResult:
     )
 
 
+_PEP440 = re.compile(r"(?:(\d+)!)?(\d+(?:\.\d+)*)(.*)")
+_PRE_RELEASE = re.compile(r"[-_.]?(a|b|c|rc|alpha|beta|pre|preview|dev)", re.IGNORECASE)
+
+
+def _in_supported_range(version: str) -> bool:
+    """PEP 440 ``MIN_MCP_VERSION <= version < MCP_MAJOR_CEILING`` for the common
+    cases, without ``packaging``. A pre-release or dev build sorts below its
+    release (2.2.0rc1 < 2.2.0; 3.0.0rc1 is outside ``<3``).
+    """
+    match = _PEP440.fullmatch(version.strip().lower().removeprefix("v"))
+    if match is None:
+        return False
+    epoch, release_text, suffix = match.groups()
+    if epoch and int(epoch) > 0:
+        return False  # an epoch 1+ version sorts after every 2.x and 3.x
+    parts = tuple(int(part) for part in release_text.split("."))
+    width = max(len(parts), len(MIN_MCP_VERSION))
+    release = parts + (0,) * (width - len(parts))  # "2.2" means 2.2.0
+    floor = MIN_MCP_VERSION + (0,) * (width - len(MIN_MCP_VERSION))
+    meets_floor = release > floor if _PRE_RELEASE.match(suffix) else release >= floor
+    return meets_floor and release[0] < MCP_MAJOR_CEILING
+
+
 def check_mcp_extra(_config: CliConfig) -> CheckResult:
-    available = importlib.util.find_spec("mcp") is not None
-    detail = "MCP extra is installed." if available else "MCP extra is not installed; this is a CLI-only install."
-    return CheckResult("mcp_extra", True, detail)
+    # Read package metadata only: importing mcp is slow and may fail on old versions.
+    version = _installed_version("mcp")
+    if version is None:
+        return CheckResult("mcp_extra", True, "MCP extra is not installed; this is a CLI-only install.")
+    if not _in_supported_range(version):
+        supported = f">={'.'.join(map(str, MIN_MCP_VERSION))},<{MCP_MAJOR_CEILING}"
+        return _failure(
+            "mcp_extra",
+            f"mcp {version} is installed; garmin-py supports mcp {supported}.",
+            "INVALID_INPUT",
+            "Reinstall the supported mcp version: pip install --upgrade 'garmin-py[mcp]'",
+        )
+    return CheckResult("mcp_extra", True, f"MCP extra is installed (mcp {version}).")
 
 
 def check_session(config: CliConfig) -> CheckResult:
@@ -148,6 +227,8 @@ def check_session(config: CliConfig) -> CheckResult:
     detail = f"{probe.detail} Probe latency: {probe.latency_ms:.1f} ms."
     if probe.authenticated:
         return CheckResult("session", True, detail)
+    if probe.error_code == "AUTH_MISSING" and _has_env_credentials(config):
+        return CheckResult("session", True, f"{detail} {_ENV_CREDENTIALS}")
     return _failure("session", detail, probe.error_code or "AUTH_FAILED")
 
 
@@ -161,7 +242,12 @@ def check_write_surface(_config: CliConfig) -> CheckResult:
         try:
             validate_bearer_token(raw_token)
         except ValueError as exc:
-            return _failure("write_surface", str(exc), "INVALID_INPUT")
+            return _failure(
+                "write_surface",
+                str(exc),
+                "INVALID_INPUT",
+                f"Set {BEARER_ENV} to a valid token, or unset it for stdio-only use.",
+            )
     detail = (
         "MCP write tools are enabled. Stdio is trusted; HTTP binds enforce the "
         f"bearer token ({BEARER_ENV}) whenever it is present, and non-loopback "
@@ -173,6 +259,7 @@ def check_write_surface(_config: CliConfig) -> CheckResult:
 
 _CHECKS: tuple[Callable[[CliConfig], CheckResult], ...] = (
     check_python_version,
+    check_versions,
     check_config,
     check_token_store,
     check_mcp_extra,

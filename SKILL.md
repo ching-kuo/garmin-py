@@ -17,7 +17,9 @@ Extract health, activity, workout, and performance data from Garmin Connect.
 
 ## Agent Usage
 
-Always use `--json` for machine-readable output. The tool returns a JSON envelope on stdout with exit code 0 (success) or 1 (error).
+Always use `--json` for machine-readable output; it works before or after the subcommand (`garmin-cli health sleep --days 7 --json`). The tool returns a JSON envelope on stdout with exit code 0 (success) or 1 (error).
+
+Destructive commands (`activity delete`, `workout delete`, `workout unschedule`) never prompt under `--json` or without a terminal: pass `--confirm` (alias `--yes`/`-y`) or they fail with `INVALID_INPUT`.
 
 ### Success envelope
 
@@ -56,6 +58,7 @@ Always use `--json` for machine-readable output. The tool returns a JSON envelop
 | `SERVER_ERROR` | 5xx after 3 retries; creates (workout create/schedule, activity upload) are never retried | Reads: wait and retry. Writes: the write may have landed -- verify remote state (list/calendar) before repeating it |
 | `NETWORK_ERROR` | Connection or timeout failure after 3 retries; creates (workout create/schedule, activity upload) are never retried | Reads: check connectivity, retry once. Writes: the write may have landed -- verify remote state before repeating it |
 | `INVALID_INPUT` | Bad arguments or conflicting options, or another 4xx from Garmin (message names the status) | No -- fix arguments |
+| `INTERRUPTED` | CLI only: Ctrl-C or end of input at a prompt (exit 130) | Only if the user wants to |
 | `INTERNAL_ERROR` | Unexpected error | Maybe |
 
 ## Commands
@@ -67,9 +70,9 @@ garmin-cli --json doctor
 garmin-cli --json doctor --fast  # skip the authenticated network probe
 ```
 
-`doctor` checks Python, configuration, token-store layout and permissions, the optional MCP install, the live session, and MCP write-surface binding. It returns one row per check and exits 1 if any check fails; paths are redacted and credentials are never included.
+`doctor` checks Python, the garmin-py and garminconnect versions, configuration, token-store layout and permissions, the optional MCP install (mcp >=2.2.0,<3), the live session, and MCP write-surface binding. It returns one row per check with a per-check `recovery_hint`, and exits 1 if any check fails; paths are redacted and credentials are never included. With `GARMIN_EMAIL`/`GARMIN_PASSWORD` set, a missing token store or session is not a failure.
 
-### Date range options (health range commands + workout calendar)
+### Date range options (health/performance range commands, activity list, workout calendar)
 
 | Option | Effect | Example |
 |--------|--------|---------|
@@ -77,7 +80,7 @@ garmin-cli --json doctor --fast  # skip the authenticated network probe
 | `--days N` | Past N days (inclusive of today) | `--days 7` |
 | `--from YYYY-MM-DD --to YYYY-MM-DD` | Explicit range (both inclusive) | `--from 2026-03-01 --to 2026-03-07` |
 | `--ahead N` | Next N days (workout calendar only) | `--ahead 7` |
-| *(none)* | Defaults to today | |
+| *(none)* | Health/performance range commands: today. `workout calendar`: the next 7 days. `activity list`: the most recent activities (up to `--limit`). | |
 
 Max range: 90 days. Conflicting options produce `INVALID_INPUT`.
 
@@ -185,7 +188,7 @@ garmin-cli --json activity upload run.fit
 garmin-cli --json activity delete 12345678901 --confirm
 ```
 
-`--limit` defaults to 20, max 100. `--type` filters by Garmin activity type key (e.g., `running`, `cycling`, `swimming`).
+`--limit` defaults to 20 and must be 1-100 (`INVALID_INPUT` otherwise). `activity get --laps` with `--format csv` is rejected; use `activity laps` for lap CSV. `--type` filters by Garmin activity type key (e.g., `running`, `cycling`, `swimming`).
 
 #### Detailed sport-specific metrics glossary
 
@@ -238,9 +241,14 @@ garmin-cli --json workout get 12345678901
 garmin-cli --json workout calendar --ahead 7
 garmin-cli --json workout calendar --from 2026-03-01 --to 2026-03-14
 garmin-cli --json workout calendar --days 7
+garmin-cli --json workout calendar --date 2026-04-01
 
 # Create a workout from JSON file -- fields: id, name, sport, duration_min, status
 garmin-cli --json workout create workout.json
+
+# Validate and preview the Garmin payload without saving (no login needed for create)
+# -- data[0]: dry_run (true), wire_payload
+garmin-cli --json workout create workout.json --dry-run
 
 # Create from stdin (pipe from LLM output)
 echo '{"name":"Easy Run","sport":"running","steps":[{"type":"warmup","duration":{"type":"time","value":300},"target":{"type":"no.target"}}]}' | garmin-cli --json workout create --stdin
@@ -250,6 +258,7 @@ garmin-cli --json workout create workout.yaml
 
 # Update an existing workout (partial -- only fields provided are changed)
 garmin-cli --json workout update 12345678901 changes.json
+garmin-cli --json workout update 12345678901 changes.json --dry-run  # merged payload, no write
 
 # Delete a workout (--confirm skips interactive prompt)
 garmin-cli --json workout delete 12345678901 --confirm
@@ -264,7 +273,7 @@ garmin-cli --json workout schedule 12345678901 2026-04-01
 
 `workout delete` output fields: `id, status`
 
-`workout schedule` output fields: `workoutScheduleId, date, status`
+`workout schedule` output fields: `workout_schedule_id, date, status`
 
 ---
 
@@ -501,7 +510,7 @@ garmin-cli --json login status
 garmin-cli --json login logout
 ```
 
-Under `--json` or with a non-terminal stdin, `login` never prompts: missing credentials fail with `AUTH_MISSING`, and an MFA challenge without a code fails with `MFA_REQUIRED` (exit 1). Every login starts a new challenge, so `--mfa-code` only works for a code valid for it (authenticator app); for emailed or SMS codes, have the user run `garmin-cli login` in a terminal. `--password-stdin` with an empty line fails with `AUTH_MISSING`. `login logout` returns `{"logged_out": true|false, "legacy_token_removed": true|false}` (exit 0 when nothing existed); it refuses symlinks and, for the default home, also deletes a legacy `~/.garth/garmin_tokens.json`. Stop a running MCP server before logging out: it keeps its loaded session and may save refreshed tokens again. Login failures from network errors (`NETWORK_ERROR`) or Garmin 5xx (`SERVER_ERROR`) are not credential problems; retry later instead of asking for a new password.
+Under `--json` or `--format csv`, or with a non-terminal stdin, `login` never prompts: missing credentials fail with `AUTH_MISSING`, and an MFA challenge without a code fails with `MFA_REQUIRED` (exit 1). Every login starts a new challenge, so `--mfa-code` only works for a code valid for it (authenticator app); for emailed or SMS codes, have the user run `garmin-cli login` in a terminal. `--password-stdin` with an empty line fails with `AUTH_MISSING`. `login logout` returns `{"logged_out": true|false, "legacy_token_removed": true|false}` (exit 0 when nothing existed); it refuses symlinks and, for the default home, also deletes a legacy `~/.garth/garmin_tokens.json`. Stop a running MCP server before logging out: it keeps its loaded session and may save refreshed tokens again. Login failures from network errors (`NETWORK_ERROR`) or Garmin 5xx (`SERVER_ERROR`) are not credential problems; retry later instead of asking for a new password.
 
 `login status` returns `{"ok": true, ..., "data": [{"authenticated": true, "garmin_home": "..."}]}` when a session is present and `"authenticated": false` when it is missing or Garmin rejects it (exit `0` in both cases). When the session cannot be checked it exits `1` with an error envelope instead: `RATE_LIMITED`, `SERVER_ERROR`, or `NETWORK_ERROR` when Garmin throttles, fails, or is unreachable (the session may still be fine; retry later), and `AUTH_FAILED` when the Garmin home path is unusable.
 
@@ -657,7 +666,7 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `performance_fastest_splits` | `start_date`, `end_date`, `sport?` (`running`\|`cycling`), `bests_per_distance?` (1-10) | `{count, rows}` — `distance_m`, `time_s`, `activity_id`, `activity_date` |
 | `device_list` | *(none)* | `{count, rows}` — registered devices with type and last sync |
 | `login_status` | *(none)* | `{authenticated, garmin_home, error_code?, detail?}` — `error_code` (`RATE_LIMITED` / `SERVER_ERROR` / `NETWORK_ERROR`) is set when Garmin could not be asked, so `authenticated: false` does not mean logged out |
-| `server_doctor` | `fast?` | `{count, rows}` — non-raising Python, config, token-store, session, and MCP write-surface diagnostics. `fast=true` skips the network probe. **Read-only.** |
+| `server_doctor` | `fast?` | `{count, rows}` — non-raising Python, package-version, config, token-store, session, and MCP write-surface diagnostics. `fast=true` skips the network probe. **Read-only.** |
 | `submit_mfa_code` | `mfa_code` | `{authenticated, garmin_home}` — completes a login that failed with `MFA_REQUIRED`; ask the user for the one-time code Garmin sent them. Codes are single-use: on failure, retry the original tool call to trigger a fresh code |
 | `report_snapshot` | `kind` (`morning`\|`evening`\|`weekly`), `date?` | `{kind, date_range, sections, unavailable?}` — one composite call that fans out the day's (or week's) reads server-side. `sections` maps section name → rows (same shapes as the per-domain tools). Sections with no data are empty and listed in `unavailable` with a `reason` (`not_found`\|`no_data`). `date` (YYYY-MM-DD) defaults to today in the athlete's Garmin profile timezone (not the server host's); `weekly` covers the anchor day and the six prior days. |
 

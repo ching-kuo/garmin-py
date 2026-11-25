@@ -1,14 +1,25 @@
 """Workout commands."""
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any
 
 import click
 
 from garmin_cli.auth import ensure_authenticated
-from garmin_cli.commands._options import resolve_after_login, validate_limit
-from garmin_cli.date_utils import CLICK_DATE_TYPE, resolve_date_range
+from garmin_cli.commands._options import (
+    OutputGroup,
+    confirm_option,
+    date_range_options,
+    limit_option,
+    reject_csv,
+    require_confirmation,
+    resolve_after_login,
+    validate_limit,
+)
+from garmin_cli.date_utils import CLICK_DATE_TYPE, resolve_click_dates
+from garmin_cli.endpoints._base import _validate_numeric_id
 from garmin_cli.endpoints.workouts import (
     create_workout,
     delete_workout,
@@ -36,17 +47,38 @@ from garmin_cli.workout_builder import build_garmin_payload, merge_workout_paylo
 from garmin_cli.workout_schema import validate_workout_input
 
 COLUMNS_WORKOUT_DELETE = ("id", "status")
-COLUMNS_WORKOUT_SCHEDULE = ("workoutScheduleId", "date", "status")
+COLUMNS_WORKOUT_SCHEDULE = ("workout_schedule_id", "date", "status")
 COLUMNS_WORKOUT_UNSCHEDULE = ("id", "status")
 
+_dry_run_option = click.option(
+    "--dry-run", is_flag=True, default=False,
+    help="Validate and print the Garmin payload without saving anything.",
+)
+_stdin_option = click.option(
+    "--stdin", "use_stdin", is_flag=True, default=False, help="Read the workout from stdin instead of FILE."
+)
+_input_format_option = click.option(
+    "--input-format", type=click.Choice(["json", "yaml"]), default=None,
+    help="Input format (default: .yaml/.yml FILE extension, else JSON).",
+)
+_DRY_RUN_CSV = "--dry-run prints a nested payload that CSV cannot hold; use --json."
 
-@click.group()
+
+def _echo_dry_run(ctx: click.Context, command: str, payload: dict[str, Any]) -> None:
+    if ctx.obj["config"].output_format == "json":
+        render_output("json", command, [{"dry_run": True, "wire_payload": payload}], ())
+        return
+    click.echo("Dry run: nothing was saved. Garmin payload:", err=True)
+    click.echo(json.dumps(payload, indent=2))
+
+
+@click.group(cls=OutputGroup)
 def workout() -> None:
     """Workout commands."""
 
 
 @workout.command("list")
-@click.option("--limit", type=int, default=20)
+@limit_option
 @click.pass_context
 def list_cmd(ctx: click.Context, limit: int) -> None:
     """List workouts."""
@@ -69,31 +101,22 @@ def get_cmd(ctx: click.Context, workout_id: str) -> None:
 
 
 @workout.command("calendar")
-@click.option("--from", "date_from", type=CLICK_DATE_TYPE, default=None)
-@click.option("--to", "date_to", type=CLICK_DATE_TYPE, default=None)
-@click.option("--days", type=int, default=None)
-@click.option("--ahead", type=int, default=None)
+@date_range_options(include_ahead=True)
 @click.pass_context
 def calendar_cmd(
     ctx: click.Context,
-    date_from: Any,
-    date_to: Any,
+    value_date: datetime | None,
     days: int | None,
     ahead: int | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
 ) -> None:
-    """Get workout calendar for a date range."""
-    if all(value is None for value in (date_from, date_to, days, ahead)):
+    """Get workout calendar for a date range (default: the next 7 days)."""
+    if all(value is None for value in (value_date, date_from, date_to, days, ahead)):
         ahead = 7
 
     start, end = resolve_after_login(
-        lambda: resolve_date_range(
-            None,
-            date_from.date() if date_from else None,
-            date_to.date() if date_to else None,
-            days,
-            ahead,
-            default_days=7,
-        ),
+        lambda: resolve_click_dates(value_date, days, ahead, date_from, date_to),
         lambda: ensure_authenticated(ctx.obj["config"]),
     )
     raw = get_calendar_range(start, end)
@@ -109,23 +132,30 @@ def calendar_cmd(
 
 
 @workout.command("create")
-@click.argument("file_path", required=False, metavar="FILE")
-@click.option("--stdin", "use_stdin", is_flag=True, default=False)
-@click.option("--input-format", type=click.Choice(["json", "yaml"]), default=None)
+@click.argument("file_path", required=False, metavar="[FILE]")
+@_stdin_option
+@_input_format_option
+@_dry_run_option
 @click.pass_context
 def create_cmd(
     ctx: click.Context,
     file_path: str | None,
     use_stdin: bool,
     input_format: str | None,
+    dry_run: bool,
 ) -> None:
-    """Create a new workout from a JSON or YAML file."""
+    """Create a new workout from a JSON or YAML file (or --stdin)."""
+    if dry_run:
+        reject_csv(ctx, _DRY_RUN_CSV)
     user_data = read_workout_input(file_path, use_stdin, input_format)
     errors = validate_workout_input(user_data)
     if errors:
         raise GarminCliError(error="; ".join(errors), error_code="INVALID_INPUT")
-    ensure_authenticated(ctx.obj["config"])
     garmin_payload = build_garmin_payload(user_data)
+    if dry_run:
+        _echo_dry_run(ctx, "workout create", garmin_payload)
+        return
+    ensure_authenticated(ctx.obj["config"])
     raw = create_workout(garmin_payload)
     if raw is None:
         raise GarminCliError(error="Workout creation returned no data.", error_code="SERVER_ERROR")
@@ -135,9 +165,10 @@ def create_cmd(
 
 @workout.command("update")
 @click.argument("workout_id")
-@click.argument("file_path", required=False, metavar="FILE")
-@click.option("--stdin", "use_stdin", is_flag=True, default=False)
-@click.option("--input-format", type=click.Choice(["json", "yaml"]), default=None)
+@click.argument("file_path", required=False, metavar="[FILE]")
+@_stdin_option
+@_input_format_option
+@_dry_run_option
 @click.pass_context
 def update_cmd(
     ctx: click.Context,
@@ -145,8 +176,11 @@ def update_cmd(
     file_path: str | None,
     use_stdin: bool,
     input_format: str | None,
+    dry_run: bool,
 ) -> None:
-    """Update an existing workout by ID."""
+    """Update an existing workout by ID (only the fields given change)."""
+    if dry_run:
+        reject_csv(ctx, _DRY_RUN_CSV)
     user_data = read_workout_input(file_path, use_stdin, input_format)
     errors = validate_workout_input(user_data, partial=True)
     if errors:
@@ -156,6 +190,10 @@ def update_cmd(
     merged, warnings = merge_workout_payload(existing, user_data)
     for w in warnings:
         click.echo(f"WARNING: {w}", err=True)
+    if dry_run:
+        # The SDK forces workoutId to the path id before the PUT; show the same body.
+        _echo_dry_run(ctx, "workout update", merged | {"workoutId": int(workout_id)})
+        return
     update_workout(workout_id, merged)
     data = serialize_workout_mutate(merged, "updated")
     render_output(ctx.obj["config"].output_format, "workout update", data, COLUMNS_WORKOUT_MUTATE)
@@ -163,13 +201,13 @@ def update_cmd(
 
 @workout.command("delete")
 @click.argument("workout_id")
-@click.option("--confirm", is_flag=True, default=False)
+@confirm_option
 @click.pass_context
 def delete_cmd(ctx: click.Context, workout_id: str, confirm: bool) -> None:
     """Delete a workout by ID."""
+    _validate_numeric_id(workout_id, "workout_id")  # before asking to confirm
+    require_confirmation(ctx, confirm, f"Delete workout {workout_id}?")
     ensure_authenticated(ctx.obj["config"])
-    if not confirm:
-        click.confirm(f"Delete workout {workout_id}?", abort=True)
     delete_workout(workout_id)
     data: list[dict[str, Any]] = [{"id": workout_id, "status": "deleted"}]
     render_output(ctx.obj["config"].output_format, "workout delete", data, COLUMNS_WORKOUT_DELETE)
@@ -186,7 +224,7 @@ def schedule_cmd(ctx: click.Context, workout_id: str, schedule_date: datetime) -
     raw_dict = raw if isinstance(raw, dict) else {}
     data: list[dict[str, Any]] = [
         {
-            "workoutScheduleId": raw_dict.get("workoutScheduleId"),
+            "workout_schedule_id": raw_dict.get("workoutScheduleId"),
             "date": raw_dict.get("calendarDate"),
             "status": "scheduled",
         }
@@ -201,17 +239,17 @@ def schedule_cmd(ctx: click.Context, workout_id: str, schedule_date: datetime) -
 
 @workout.command("unschedule")
 @click.argument("schedule_id")
-@click.option("--confirm", is_flag=True, default=False)
+@confirm_option
 @click.pass_context
 def unschedule_cmd(ctx: click.Context, schedule_id: str, confirm: bool) -> None:
     """Remove a scheduled workout from the calendar (keeps the template).
 
-    SCHEDULE_ID is the workoutScheduleId returned by `workout schedule`
+    SCHEDULE_ID is the workout_schedule_id returned by `workout schedule`
     (also shown by `workout calendar`), not the workout ID.
     """
+    _validate_numeric_id(schedule_id, "scheduled_workout_id")  # before asking to confirm
+    require_confirmation(ctx, confirm, f"Unschedule workout schedule {schedule_id}?")
     ensure_authenticated(ctx.obj["config"])
-    if not confirm:
-        click.confirm(f"Unschedule workout schedule {schedule_id}?", abort=True)
     unschedule_workout(schedule_id)
     data: list[dict[str, Any]] = [{"id": schedule_id, "status": "unscheduled"}]
     render_output(

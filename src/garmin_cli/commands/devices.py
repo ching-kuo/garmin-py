@@ -4,6 +4,7 @@ from __future__ import annotations
 import click
 
 from garmin_cli.auth import ensure_authenticated
+from garmin_cli.commands._options import OutputGroup
 from garmin_cli.endpoints.devices import get_devices
 from garmin_cli.output import render_output
 from garmin_cli.serializers import (
@@ -12,7 +13,7 @@ from garmin_cli.serializers import (
 )
 
 
-@click.group()
+@click.group(cls=OutputGroup)
 def device() -> None:
     """Device commands."""
 

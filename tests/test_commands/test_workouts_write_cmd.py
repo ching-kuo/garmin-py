@@ -55,6 +55,58 @@ _SAMPLE_SCHEDULE_RESPONSE: dict = {
 
 class TestWorkoutCreateCommand:
 
+    def test_create_dry_run_shows_payload_without_auth_or_write(
+        self, mocker: Any, tmp_path: Any
+    ) -> None:
+        auth = mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
+        create = mocker.patch("garmin_cli.commands.workouts.create_workout")
+        f = tmp_path / "workout.json"
+        f.write_text(json.dumps(_SAMPLE_WORKOUT_PAYLOAD))
+        result = CliRunner(mix_stderr=False).invoke(
+            cli, ["workout", "create", str(f), "--dry-run", "--json"]
+        )
+        assert result.exit_code == 0, result.stderr
+        row = json.loads(result.stdout)["data"][0]
+        assert row["dry_run"] is True
+        assert row["wire_payload"]["workoutName"] == "Morning Run"
+        auth.assert_not_called()
+        create.assert_not_called()
+
+    def test_create_dry_run_plain_text_prints_payload(self, mocker: Any, tmp_path: Any) -> None:
+        create = mocker.patch("garmin_cli.commands.workouts.create_workout")
+        f = tmp_path / "workout.json"
+        f.write_text(json.dumps(_SAMPLE_WORKOUT_PAYLOAD))
+        result = CliRunner(mix_stderr=False).invoke(cli, ["workout", "create", str(f), "--dry-run"])
+        assert result.exit_code == 0, result.stderr
+        assert json.loads(result.stdout)["workoutName"] == "Morning Run"
+        assert "Dry run: nothing was saved" in result.stderr
+        create.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "args", [["workout", "create", "--dry-run"], ["workout", "update", "12345", "--dry-run"]]
+    )
+    def test_dry_run_rejects_csv_before_reading_input(
+        self, mocker: Any, tmp_path: Any, args: list[str]
+    ) -> None:
+        read = mocker.patch("garmin_cli.commands.workouts.read_workout_input")
+        auth = mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
+        result = CliRunner(mix_stderr=False).invoke(cli, [*args, "x.json", "--format", "csv"])
+        assert result.exit_code == 1
+        assert "--json" in result.stderr
+        read.assert_not_called()
+        auth.assert_not_called()
+
+    def test_create_dry_run_rejects_invalid_input(self, mocker: Any, tmp_path: Any) -> None:
+        create = mocker.patch("garmin_cli.commands.workouts.create_workout")
+        f = tmp_path / "workout.json"
+        f.write_text(json.dumps({"name": "x"}))
+        result = CliRunner(mix_stderr=False).invoke(
+            cli, ["--json", "workout", "create", str(f), "--dry-run"]
+        )
+        assert result.exit_code == 1
+        assert json.loads(result.stdout)["error_code"] == "INVALID_INPUT"
+        create.assert_not_called()
+
     def test_create_exit_code_0(self, mocker: Any, tmp_path: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
         mocker.patch(
@@ -230,6 +282,44 @@ class TestWorkoutCreateCommand:
 # ---------------------------------------------------------------------------
 
 class TestWorkoutUpdateCommand:
+
+    def test_update_dry_run_shows_merged_payload_without_write(
+        self, mocker: Any, tmp_path: Any
+    ) -> None:
+        mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.commands.workouts.get_workout",
+            return_value=_SAMPLE_EXISTING_WORKOUT,
+        )
+        update = mocker.patch("garmin_cli.commands.workouts.update_workout")
+        f = tmp_path / "update.json"
+        f.write_text(json.dumps({"name": "New Name"}))
+        result = CliRunner(mix_stderr=False).invoke(
+            cli, ["workout", "update", "12345", str(f), "--dry-run"]
+        )
+        assert result.exit_code == 0, result.stderr
+        assert json.loads(result.stdout)["workoutName"] == "New Name"
+        assert "Dry run" in result.stderr
+        update.assert_not_called()
+
+    def test_update_dry_run_json_matches_sdk_put_body(self, mocker: Any, tmp_path: Any) -> None:
+        mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
+        mocker.patch(
+            "garmin_cli.commands.workouts.get_workout",
+            return_value={**_SAMPLE_EXISTING_WORKOUT, "workoutId": "12345"},
+        )
+        update = mocker.patch("garmin_cli.commands.workouts.update_workout")
+        f = tmp_path / "update.json"
+        f.write_text(json.dumps({"name": "New Name"}))
+        result = CliRunner(mix_stderr=False).invoke(
+            cli, ["workout", "update", "12345", str(f), "--dry-run", "--json"]
+        )
+        assert result.exit_code == 0, result.stderr
+        row = json.loads(result.stdout)["data"][0]
+        assert row["dry_run"] is True
+        # The SDK forces workoutId to the integer path id before the PUT.
+        assert row["wire_payload"]["workoutId"] == 12345
+        update.assert_not_called()
 
     def test_update_exit_code_0(self, mocker: Any, tmp_path: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
@@ -450,34 +540,40 @@ class TestWorkoutDeleteCommand:
         assert parsed["ok"] is True
 
     def test_delete_confirmation_prompt_shown(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands._options.stdin_is_tty", return_value=True)
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
         mock_delete = mocker.patch(
             "garmin_cli.commands.workouts.delete_workout", return_value=None
         )
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["workout", "delete", "12345"], input="y\n")
-        assert "Delete workout 12345?" in result.output
+        assert "Delete workout 12345?" in result.stderr
         assert result.exit_code == 0
         mock_delete.assert_called_once()
 
     def test_delete_aborted_on_no_confirmation(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.stdin_is_tty", return_value=True)
+        auth = mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
         mock_delete = mocker.patch(
             "garmin_cli.commands.workouts.delete_workout", return_value=None
         )
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["workout", "delete", "12345"], input="n\n")
         assert result.exit_code == 1
+        assert result.stderr.rstrip().endswith("Aborted.")
         assert mock_delete.call_count == 0
+        auth.assert_not_called()
 
-    def test_delete_json_output_still_prompts(self, mocker: Any) -> None:
+    def test_delete_json_requires_confirm_without_prompting(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands._options.stdin_is_tty", return_value=True)
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
-        mocker.patch("garmin_cli.commands.workouts.delete_workout", return_value=None)
+        mock_delete = mocker.patch("garmin_cli.commands.workouts.delete_workout")
         runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(cli, ["--json", "workout", "delete", "12345"])
-        # --json does not bypass the confirmation prompt; with no stdin input
-        # the prompt aborts rather than hanging.
+        result = runner.invoke(cli, ["--json", "workout", "delete", "12345"], input="y\n")
         assert result.exit_code == 1
+        assert json.loads(result.stdout)["error_code"] == "INVALID_INPUT"
+        assert "Delete workout" not in result.stderr
+        mock_delete.assert_not_called()
 
     def test_delete_not_found_exit_1(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
@@ -559,7 +655,8 @@ class TestWorkoutScheduleCommand:
         result = runner.invoke(cli, ["--json", "workout", "schedule", "12345", "2026-04-01"])
         parsed = json.loads(result.output)
         row = parsed["data"][0]
-        assert "workoutScheduleId" in row or "id" in row
+        assert row["workout_schedule_id"] == _SAMPLE_SCHEDULE_RESPONSE["workoutScheduleId"]
+        assert "workoutScheduleId" not in row
 
 
 # ---------------------------------------------------------------------------
@@ -588,17 +685,19 @@ class TestWorkoutUnscheduleCommand:
         assert parsed["data"][0]["status"] == "unscheduled"
 
     def test_unschedule_confirmation_prompt_shown(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands._options.stdin_is_tty", return_value=True)
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
         mock_unschedule = mocker.patch(
             "garmin_cli.commands.workouts.unschedule_workout", return_value=None
         )
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["workout", "unschedule", "555"], input="y\n")
-        assert "Unschedule workout schedule 555?" in result.output
+        assert "Unschedule workout schedule 555?" in result.stderr
         assert result.exit_code == 0
         mock_unschedule.assert_called_once()
 
     def test_unschedule_aborted_on_no_confirmation(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands._options.stdin_is_tty", return_value=True)
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
         mock_unschedule = mocker.patch(
             "garmin_cli.commands.workouts.unschedule_workout", return_value=None
@@ -607,6 +706,37 @@ class TestWorkoutUnscheduleCommand:
         result = runner.invoke(cli, ["workout", "unschedule", "555"], input="n\n")
         assert result.exit_code == 1
         assert mock_unschedule.call_count == 0
+
+    @pytest.mark.parametrize(
+        ("args", "tty"),
+        [
+            (["--json", "workout", "unschedule", "555"], True),
+            (["workout", "unschedule", "555", "--json"], True),
+            (["workout", "unschedule", "555"], False),
+        ],
+    )
+    def test_unschedule_never_prompts_for_scripts(
+        self, mocker: Any, args: list[str], tty: bool
+    ) -> None:
+        mocker.patch("garmin_cli.commands._options.stdin_is_tty", return_value=tty)
+        auth = mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
+        unschedule = mocker.patch("garmin_cli.commands.workouts.unschedule_workout")
+        result = CliRunner(mix_stderr=False).invoke(cli, args, input="y\n")
+        assert result.exit_code == 1
+        assert "Unschedule workout" not in result.stderr + result.stdout
+        assert "--confirm" in result.stderr + result.stdout
+        unschedule.assert_not_called()
+        auth.assert_not_called()
+
+    @pytest.mark.parametrize("flag", ["--yes", "-y"])
+    def test_unschedule_yes_alias_skips_prompt(self, mocker: Any, flag: str) -> None:
+        mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
+        unschedule = mocker.patch("garmin_cli.commands.workouts.unschedule_workout")
+        result = CliRunner(mix_stderr=False).invoke(
+            cli, ["--json", "workout", "unschedule", "555", flag]
+        )
+        assert result.exit_code == 0
+        unschedule.assert_called_once_with("555")
 
     def test_unschedule_not_found_exit_1(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")

@@ -6,7 +6,7 @@ from datetime import datetime
 import click
 
 from garmin_cli.auth import ensure_authenticated
-from garmin_cli.commands._options import date_range_options, render_date_range
+from garmin_cli.commands._options import OutputGroup, date_range_options, render_date_range
 from garmin_cli.date_utils import CLICK_DATE_TYPE
 from garmin_cli.endpoints.metrics import (
     FASTEST_SPLITS_SPORTS,
@@ -62,7 +62,7 @@ from garmin_cli.serializers.trends import (
 from garmin_cli.services.performance import fetch_vo2max
 
 
-@click.group()
+@click.group(cls=OutputGroup)
 def performance() -> None:
     """Performance commands."""
 
@@ -78,7 +78,7 @@ def thresholds_cmd(ctx: click.Context) -> None:
 
 
 @performance.command("vo2max")
-@click.option("--date", "value_date", type=CLICK_DATE_TYPE, default=None)
+@click.option("--date", "value_date", type=CLICK_DATE_TYPE, default=None, help="Day to report (default: latest).")
 @click.pass_context
 def vo2max_cmd(ctx: click.Context, value_date: datetime | None) -> None:
     """Get VO2 max for a day."""

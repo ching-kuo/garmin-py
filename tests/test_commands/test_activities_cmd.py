@@ -92,6 +92,23 @@ class TestActivityListCommand:
         result = runner.invoke(cli, ["activity", "list", "--limit", "-1"])
         assert result.exit_code == 1
 
+    def test_list_limit_above_100_is_invalid_input(self, mocker: Any) -> None:
+        auth = mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["activity", "list", "--limit", "101", "--json"])
+        assert result.exit_code == 1
+        assert json.loads(result.stdout)["error_code"] == "INVALID_INPUT"
+        auth.assert_not_called()
+
+    def test_get_laps_csv_rejected_with_hint(self, mocker: Any) -> None:
+        auth = mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        runner = CliRunner(mix_stderr=False)
+        result = runner.invoke(cli, ["activity", "get", "42", "--laps", "--format", "csv"])
+        assert result.exit_code == 1
+        assert "activity laps 42" in result.stderr
+        assert result.stdout == ""
+        auth.assert_not_called()
+
     def test_list_activity_type_filter(self, mocker: Any) -> None:
         mock_list = mocker.patch(
             "garmin_cli.commands.activities.list_activities",
@@ -538,19 +555,21 @@ class TestActivityGetCommand:
                 "tss": None, "intensity_factor": None,
             }],
         )
-        mocker.patch(
+        children = mocker.patch(
             "garmin_cli.commands.activities.get_multisport_children",
             return_value=[{"activityId": 101, "activityName": "Run", "activityType": {"typeKey": "running"}}],
         )
-        mocker.patch(
-            "garmin_cli.commands.activities.serialize_multisport_children",
-            return_value=[{"id": 101, "sport": "running", "name": "Run", "distance_km": 10.0, "duration_min": 50.0, "avg_hr": 165, "avg_pace": "5:00", "calories": 600}],
-        )
+        manifest = mocker.patch("garmin_cli.commands.activities.build_capability_manifest")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["--format", "csv", "activity", "get", "100", "--detail"])
         assert result.exit_code == 0
         assert "100" in result.output
         assert "1800" in result.output
+        # One CSV table: the detail rows, no appended child-leg table, and
+        # nothing fetched or built that CSV would not print.
+        assert len(result.output.strip().splitlines()) == 2
+        children.assert_not_called()
+        manifest.assert_not_called()
 
     def test_get_detail_all_null_extended_renders(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
@@ -1238,18 +1257,67 @@ class TestActivityDeleteCommand:
         dele.assert_called_once_with("12345")
 
     def test_delete_aborts_when_declined(self, mocker: Any) -> None:
-        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        mocker.patch("garmin_cli.commands._options.stdin_is_tty", return_value=True)
+        auth = mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
         dele = mocker.patch("garmin_cli.commands.activities.delete_activity")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["activity", "delete", "12345"], input="n\n")
-        assert result.exit_code != 0
+        assert result.exit_code == 1
+        assert "Delete activity 12345?" in result.stderr
+        assert "Aborted." in result.stderr
+        assert "Internal error" not in result.stderr
+        assert result.stdout == ""
+        dele.assert_not_called()
+        auth.assert_not_called()  # auth runs only after confirmation
+
+    @pytest.mark.parametrize("answer", ["", "\n", "maybe\n", "no\n"])
+    def test_delete_aborts_on_eof_or_non_yes(self, mocker: Any, answer: str) -> None:
+        mocker.patch("garmin_cli.commands._options.stdin_is_tty", return_value=True)
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        dele = mocker.patch("garmin_cli.commands.activities.delete_activity")
+        result = CliRunner(mix_stderr=False).invoke(
+            cli, ["activity", "delete", "12345"], input=answer
+        )
+        assert result.exit_code == 1
+        assert result.stderr.rstrip().endswith("Aborted.")
         dele.assert_not_called()
 
     def test_delete_proceeds_when_confirmed_interactively(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands._options.stdin_is_tty", return_value=True)
         mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
         dele = mocker.patch("garmin_cli.commands.activities.delete_activity")
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["activity", "delete", "12345"], input="y\n")
+        assert result.exit_code == 0
+        dele.assert_called_once_with("12345")
+
+    @pytest.mark.parametrize(
+        ("args", "tty"),
+        [
+            (["--json", "activity", "delete", "12345"], True),
+            (["activity", "delete", "12345", "--json"], True),
+            (["activity", "delete", "12345"], False),
+        ],
+    )
+    def test_delete_never_prompts_for_scripts(
+        self, mocker: Any, args: list[str], tty: bool
+    ) -> None:
+        mocker.patch("garmin_cli.commands._options.stdin_is_tty", return_value=tty)
+        auth = mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        dele = mocker.patch("garmin_cli.commands.activities.delete_activity")
+        result = CliRunner(mix_stderr=False).invoke(cli, args, input="y\n")
+        assert result.exit_code == 1
+        assert "Delete activity" not in result.stderr + result.stdout
+        assert "--confirm" in result.stderr + result.stdout
+        if "--json" in args:
+            assert json.loads(result.stdout)["error_code"] == "INVALID_INPUT"
+        dele.assert_not_called()
+        auth.assert_not_called()
+
+    def test_delete_yes_alias_skips_prompt(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.activities.ensure_authenticated")
+        dele = mocker.patch("garmin_cli.commands.activities.delete_activity")
+        result = CliRunner(mix_stderr=False).invoke(cli, ["activity", "delete", "12345", "-y"])
         assert result.exit_code == 0
         dele.assert_called_once_with("12345")
 

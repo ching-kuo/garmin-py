@@ -20,7 +20,7 @@ from tests.helpers import make_requests_http_error
 @pytest.fixture(autouse=True)
 def _interactive_terminal(mocker: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """These tests drive the prompts, so stdin counts as a terminal."""
-    mocker.patch("garmin_cli.commands.login._stdin_is_tty", return_value=True)
+    mocker.patch("garmin_cli.commands._options.stdin_is_tty", return_value=True)
     for name in ("GARMIN_EMAIL", "GARMIN_PASSWORD", "GARMIN_MFA_CODE"):
         monkeypatch.delenv(name, raising=False)
 
@@ -61,6 +61,29 @@ def _run_login(
 # ---------------------------------------------------------------------------
 
 class TestLoginCommand:
+
+    def test_prompts_go_to_stderr_only(self, mocker: Any, tmp_path: Path) -> None:
+        result, _ = _run_login(
+            ["login"], mocker, input="user@example.com\nsecretpassword\n", tmp_path=tmp_path
+        )
+        assert result.exit_code == 0, result.stderr
+        assert "Email: " in result.stderr
+        assert "Password: " in result.stderr
+        assert result.stdout.startswith("Login successful.")
+
+    def test_csv_output_never_prompts(self, mocker: Any, tmp_path: Path) -> None:
+        result, mock_garth = _run_login(
+            ["login", "--format", "csv"], mocker, input="user@example.com\npw\n", tmp_path=tmp_path
+        )
+        assert result.exit_code == 1
+        assert "Email" not in result.stderr
+        mock_garth.login.assert_not_called()
+
+    def test_end_of_input_at_prompt_is_interrupted(self, mocker: Any, tmp_path: Path) -> None:
+        result, mock_garth = _run_login(["login"], mocker, input="", tmp_path=tmp_path)
+        assert result.exit_code == 130
+        assert "Interrupted." in result.stderr
+        mock_garth.login.assert_not_called()
 
     def test_login_exits_zero_on_success(self, mocker: Any, tmp_path: Path) -> None:
         result, _ = _run_login(
@@ -447,6 +470,27 @@ class TestLoginStatusLoggedIn:
         assert result.exit_code == 0
         parsed = json.loads(result.output)
         assert parsed["ok"] is True
+
+    def test_status_leaf_format_overrides_group_json(self, mocker: Any, tmp_path: Path) -> None:
+        mocker.patch("garmin_cli.commands.login.garth", MagicMock())
+        garth_dir = tmp_path / "garth"
+        garth_dir.mkdir(mode=0o700)
+        result = CliRunner(mix_stderr=False).invoke(
+            cli,
+            ["--garmin-home", str(garth_dir), "login", "--json", "status", "--format", "table"],
+        )
+        assert result.exit_code == 0, result.stderr
+        assert result.stdout.startswith("Logged in.")
+
+    def test_status_csv_is_one_row_table(self, mocker: Any, tmp_path: Path) -> None:
+        mocker.patch("garmin_cli.commands.login.garth", MagicMock())
+        garth_dir = tmp_path / "garth"
+        garth_dir.mkdir(mode=0o700)
+        result = CliRunner(mix_stderr=False).invoke(
+            cli, ["--garmin-home", str(garth_dir), "login", "status", "--format", "csv"]
+        )
+        assert result.exit_code == 0, result.stderr
+        assert result.stdout.splitlines() == ["authenticated,garmin_home", f"True,{garth_dir}"]
 
     def test_status_json_mode_data_contains_authenticated_flag(
         self, mocker: Any, tmp_path: Path

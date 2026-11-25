@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
+import tomllib
 from collections import namedtuple
+from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from typing import Any
 
@@ -15,8 +18,12 @@ from garmin_cli.bearer_token import BEARER_ENV, BEARER_TOKEN_HINT, MIN_BEARER_TO
 from garmin_cli.cli import cli
 from garmin_cli.config import CliConfig
 from garmin_cli.doctor import (
+    MCP_MAJOR_CEILING,
+    MIN_MCP_VERSION,
     check_config,
+    check_mcp_extra,
     check_python_version,
+    check_versions,
     check_session,
     check_token_store,
     check_write_surface,
@@ -214,9 +221,119 @@ def test_python_version_minimum_is_3_12(minor: int, ok: bool, mocker: Any) -> No
         assert "Python 3.12 or newer is required" in result.detail
 
 
-def test_doctor_cli_healthy_fast_path_exits_zero(tmp_path: Path) -> None:
+def test_python_version_hint_says_install_newer_python(mocker: Any) -> None:
+    mocker.patch.object(sys, "version_info", _VersionInfo(3, 11, 0, "final", 0))
+
+    result = check_python_version(CliConfig())
+
+    assert "Install Python 3.12" in (result.recovery_hint or "")
+    assert "Correct the request" not in (result.recovery_hint or "")
+
+
+def test_env_credentials_are_a_valid_auth_setup(tmp_path: Path) -> None:
+    config = CliConfig(email="a@example.com", password="pw", garth_home=str(tmp_path / "none"))
+
+    results = {r.name: r for r in run_checks(config, fast=True)}
+
+    assert results["config"].ok is True
+    assert results["token_store"].ok is True
+    assert "credentials not verified (no session yet)" in results["token_store"].detail
+
+
+def test_missing_session_is_ok_with_env_credentials(mocker: Any) -> None:
+    mocker.patch(
+        "garmin_cli.doctor.probe_session_status",
+        return_value=SessionProbeResult(
+            authenticated=False,
+            garmin_home="~/.garminconnect",
+            latency_ms=1.0,
+            error_code="AUTH_MISSING",
+            detail="No saved Garmin session.",
+        ),
+    )
+
+    result = check_session(CliConfig(email="a@example.com", password="pw"))
+
+    assert result.ok is True
+    assert "GARMIN_EMAIL" in result.detail
+
+
+def test_loose_directory_mode_hint_is_prose(tmp_path: Path) -> None:
     home = tmp_path / "garmin"
     _secure_home(home)
+    home.chmod(0o755)
+
+    token = check_token_store(CliConfig(garth_home=str(home)))
+
+    assert token.ok is False
+    assert token.recovery_hint == (
+        "Restrict the Garmin home folder to owner-only access (mode 700)."
+    )
+
+
+def test_versions_are_reported(mocker: Any) -> None:
+    mocker.patch(
+        "garmin_cli.doctor.metadata.version",
+        side_effect=lambda name: {"garmin-py": "3.0.0", "garminconnect": "0.3.20"}[name],
+    )
+
+    result = check_versions(CliConfig())
+
+    assert result.ok is True
+    assert result.detail == "garmin-py 3.0.0; garminconnect 0.3.20."
+
+
+@pytest.mark.parametrize(
+    ("installed", "ok"),
+    [
+        ("2.1.9", False),
+        ("2.2.0rc1", False),
+        ("2.2.0.dev3", False),
+        ("1.99", False),
+        ("2.2", True),
+        ("2.2.0", True),
+        ("2.2.0.post1", True),
+        ("2.3.0rc1", True),
+        ("2.10.1", True),
+        ("2.2.0.0.1", True),
+        ("3.0.0", False),
+        ("3.0.0rc1", False),
+        ("3", False),
+        ("1!2.1.0", False),
+        (None, True),
+    ],
+)
+def test_mcp_extra_supported_range(mocker: Any, installed: str | None, ok: bool) -> None:
+    def version(name: str) -> str:
+        if installed is None:
+            raise PackageNotFoundError(name)
+        return installed
+
+    mocker.patch("garmin_cli.doctor.metadata.version", side_effect=version)
+
+    result = check_mcp_extra(CliConfig())
+
+    assert result.ok is ok
+    if not ok:
+        assert "pip install --upgrade" in (result.recovery_hint or "")
+        assert "supports mcp >=2.2.0,<3" in result.detail
+
+
+def test_mcp_range_matches_pyproject() -> None:
+    pyproject = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
+    spec = pyproject["project"]["optional-dependencies"]["mcp"][0]
+    floor = re.search(r">=([\d.]+)", spec)
+    ceiling = re.search(r"<(\d+)", spec)
+
+    assert floor is not None and ceiling is not None
+    assert tuple(int(part) for part in floor.group(1).split(".")) == MIN_MCP_VERSION
+    assert int(ceiling.group(1)) == MCP_MAJOR_CEILING
+
+
+def test_doctor_cli_healthy_fast_path_exits_zero(tmp_path: Path, mocker: Any) -> None:
+    home = tmp_path / "garmin"
+    _secure_home(home)
+    mocker.patch("garmin_cli.doctor.metadata.version", return_value="2.3.0")
 
     result = CliRunner().invoke(
         cli,

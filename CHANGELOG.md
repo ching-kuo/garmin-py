@@ -24,8 +24,24 @@
 - `coach_snapshot` / `coach snapshot` accept `recent_daily_days` 1-9 (was 1-14, but anything above 9 always exceeded the request cap), and the request cap is 32 (was 31) because the seven-day plan window can span two calendar weeks.
 - Activity, workout, and schedule ids must be positive integers: `0`, negative ids, booleans, and floats are `INVALID_INPUT` (CLI) or a tool validation error (MCP). CLI ids and `garmin://activity/{id}` must be plain ASCII digits, at most 20 (no sign, spaces, or `_`); MCP id parameters are strict integers, so `true`, `1.0`, and `"1"` fail schema validation instead of being coerced to `1`.
 - Calendar items of type activity, weight, or nap never report a `workout_schedule_id`, even when they carry a `workoutId`; other items with a `workoutId` (including Garmin Coach types) do. Training plans no longer treat such items as occupying or satisfying a date.
+- `activity delete`, `workout delete`, and `workout unschedule` never prompt under `--json` or without a terminal: pass `--confirm` (new aliases `--yes` / `-y`) or they fail with `INVALID_INPUT`. The id is validated first, the prompt goes to stderr before any login, and any answer but y/yes (or end of input) prints `Aborted.` (exit 1, `INVALID_INPUT`) instead of an empty `INTERNAL_ERROR`.
+- Ctrl-C (or end of input at a login prompt) exits 130 with the new error code `INTERRUPTED` ("Interrupted.") instead of `INTERNAL_ERROR`.
+- `login` prompts only for table output at a terminal: `--format csv` behaves like `--json` (no prompts). Email, password, and MFA prompts go to stderr only (the password without echo), and a missing stdin counts as non-interactive.
+- `garmin-cli --json coach snapshot` returns the standard envelope (`data[0]` is the snapshot) instead of the bare snapshot; table output adds a note pointing to `--json` for the sections it omits, and `--format csv` is `INVALID_INPUT`.
+- `activity get --laps --format csv` is `INVALID_INPUT` (use `activity laps`), and `activity get --detail --format csv` on a multisport activity prints only the detail table; CSV output is now always one table.
+- `health sleep` no longer accepts `--ahead`.
+- `--limit` must be 1-100 (`activity list`, `workout list`); values above 100 were sent to Garmin.
+- CLI `workout schedule` reports `workout_schedule_id` instead of `workoutScheduleId`, matching the MCP tool and `workout calendar`.
+- `doctor --format` accepts `csv` like every other command; it used to fall back to a table.
 
 ### Added
+
+- `--json` and `--format` also work after the subcommand (`garmin-cli health sleep --days 7 --json`); the subcommand's value wins over a global one.
+- `workout create --dry-run` and `workout update --dry-run` validate the input and print the Garmin payload without saving (`--json`: `data[0]` has `dry_run` and `wire_payload`; `--format csv` is rejected); create needs no login, and the update preview is the exact PUT body.
+- `workout calendar --date DATE` shows a single day.
+- `doctor` reports the garmin-py and garminconnect versions, fails the MCP check when the installed `mcp` is outside `>=2.2.0,<3` (with a reinstall hint), accepts `GARMIN_EMAIL` / `GARMIN_PASSWORD` as a valid sign-in setup when no token store or session exists yet, and gives check-specific recovery hints (install Python 3.12+, the permission mode to set, fixing `GARMIN_HOME` or the bearer token).
+- `login`, `login status`, and `login logout` print a one-row CSV table under `--format csv`; they printed a sentence.
+- `garmin-cli --help` has a description with examples, and the shared date, limit, type, search, and confirm options have help text; `workout create --help` shows `FILE` as optional.
 
 - `garmin-cli login` reads the password from `GARMIN_PASSWORD` when `--password` is absent, accepts `--password-stdin` (piped stdin only; an empty line is `AUTH_MISSING`), and takes an MFA code from `--mfa-code` / `GARMIN_MFA_CODE` (only useful for codes valid for the new challenge, such as authenticator-app codes; emailed/SMS codes still need an interactive login, which prompts and ignores `GARMIN_MFA_CODE`). A rejected MFA code is reported as such, not as bad credentials. `--password` is deprecated (shell history and process-list exposure).
 - `garmin-cli login logout` deletes the saved `garmin_tokens.json` (refusing symlinks) and, for the default home, a legacy `~/.garth/garmin_tokens.json` that migration would otherwise restore; it reports `{"logged_out": true|false, "legacy_token_removed": true|false}` (plain text lists the deleted files) and exits 0 when there was nothing to delete. Stop a running MCP server first: it keeps its loaded session and may save refreshed tokens again.
@@ -91,6 +107,8 @@
 - `training_plan_reschedule` onto a date that already holds the same workout rechecks the calendar when removing the source fails in a way that may have landed: a source that is gone is `complete`, an unreadable recheck is `unknown`.
 - Running cadence targets are scored against full steps per minute (`directDoubleCadence`, or `directRunCadence` doubled when its median is below 120, i.e. per foot); the per-foot stream made every running cadence sample read about half.
 - `workout get` maps Garmin's `cadence` target key back to `cadence.zone`, so cadence workouts get a `write_projection`.
+- CSV output no longer prefixes negative numbers with a tab; only text cells that start with a formula character are escaped.
+- Once a command's options are parsed, errors (including date-range usage errors) follow the parsed output format, so an option value that happens to be `--json` (for example a search term) no longer switches errors to JSON; JSON error envelopes then name the full command (for example `login status`). Before parsing, a subcommand's `--format` overrides a global `--json`, and a repeated `--format` follows click's last-wins rule.
 
 ## [2.13.0] - 2026-11-09
 

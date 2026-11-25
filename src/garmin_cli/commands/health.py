@@ -6,7 +6,7 @@ from datetime import datetime
 import click
 
 from garmin_cli.auth import ensure_authenticated
-from garmin_cli.commands._options import date_range_options, render_date_range
+from garmin_cli.commands._options import OutputGroup, date_range_options, render_date_range
 from garmin_cli.date_utils import CLICK_DATE_TYPE, resolve_click_dates
 from garmin_cli.endpoints.health import (
     get_body_battery_range,
@@ -50,22 +50,19 @@ from garmin_cli.serializers import (
     serialize_weight,
 )
 
-_DATE_TYPE = CLICK_DATE_TYPE
 
-
-@click.group()
+@click.group(cls=OutputGroup)
 def health() -> None:
     """Health data commands."""
 
 
 @health.command()
-@date_range_options(include_ahead=True)
+@date_range_options()
 @click.pass_context
 def sleep(
     ctx: click.Context,
     value_date: datetime | None,
     days: int | None,
-    ahead: int | None,
     date_from: datetime | None,
     date_to: datetime | None,
 ) -> None:
@@ -80,7 +77,6 @@ def sleep(
         days,
         date_from,
         date_to,
-        ahead=ahead,
     )
 
 
@@ -253,7 +249,7 @@ def readiness(
 
 
 @health.command("status")
-@click.option("--date", "value_date", type=_DATE_TYPE, default=None)
+@click.option("--date", "value_date", type=CLICK_DATE_TYPE, default=None, help="Day to report (default: today).")
 @click.pass_context
 def status(
     ctx: click.Context,

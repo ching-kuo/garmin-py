@@ -147,12 +147,12 @@ _CSV_INJECT_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 def _sanitize_csv_cell(value: Any) -> str:
     """Convert a cell value to a CSV-safe string.
 
-    Prefixes values that start with CSV formula-injection characters with a
-    tab so spreadsheet software does not interpret them as formulas.
+    Prefixes strings that start with CSV formula-injection characters with a
+    tab so spreadsheet software does not interpret them as formulas. Numbers
+    are never formulas, so a negative int/float stays numeric.
     """
     if value is None:
         return ""
-    text = str(value)
-    if text and text[0] in _CSV_INJECT_PREFIXES:
-        return "\t" + text
-    return text
+    if isinstance(value, str) and value[:1] in _CSV_INJECT_PREFIXES:
+        return "\t" + value
+    return str(value)

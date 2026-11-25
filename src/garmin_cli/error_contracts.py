@@ -44,6 +44,10 @@ ERROR_CODE_TABLE: dict[str, dict[str, str]] = {
             "write may still have been applied: verify the remote state before repeating a write."
         ),
     },
+    "INTERRUPTED": {
+        "category": "client",
+        "recovery_hint": "The command was interrupted (Ctrl-C or end of input); run it again when ready.",
+    },
     "INTERNAL_ERROR": {
         "category": "internal",
         "recovery_hint": "Retry once, then report the failure if it persists.",

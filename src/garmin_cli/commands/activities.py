@@ -8,9 +8,19 @@ from typing import Any
 import click
 
 from garmin_cli.auth import ensure_authenticated
-from garmin_cli.commands._options import resolve_after_login, validate_limit
+from garmin_cli.commands._options import (
+    OutputGroup,
+    confirm_option,
+    date_range_options,
+    limit_option,
+    reject_csv,
+    require_confirmation,
+    resolve_after_login,
+    validate_limit,
+)
 from garmin_cli.exceptions import GarminCliError
-from garmin_cli.date_utils import CLICK_DATE_TYPE, resolve_click_dates
+from garmin_cli.date_utils import resolve_click_dates
+from garmin_cli.endpoints._base import _validate_numeric_id
 from garmin_cli.endpoints.activities import (
     activity_type_key,
     delete_activity,
@@ -74,22 +84,19 @@ from garmin_cli.services.activities import (
 )
 
 
-_DATE_TYPE = CLICK_DATE_TYPE
-
-
-@click.group()
+@click.group(cls=OutputGroup)
 def activity() -> None:
     """Activity commands."""
 
 
 @activity.command("list")
-@click.option("--limit", type=int, default=20)
-@click.option("--type", "activity_type", type=str, default=None)
-@click.option("--search", type=str, default=None)
-@click.option("--date", "value_date", type=_DATE_TYPE, default=None)
-@click.option("--days", type=int, default=None)
-@click.option("--from", "date_from", type=_DATE_TYPE, default=None)
-@click.option("--to", "date_to", type=_DATE_TYPE, default=None)
+@limit_option
+@click.option(
+    "--type", "activity_type", type=str, default=None,
+    help="Only this Garmin activity typeKey (e.g. running, cycling).",
+)
+@click.option("--search", type=str, default=None, help="Garmin free-text search (e.g. part of an activity name).")
+@date_range_options()
 @click.pass_context
 def list_cmd(
     ctx: click.Context,
@@ -162,9 +169,15 @@ def _fetch_laps_for_activity(
 @click.pass_context
 def get_cmd(ctx: click.Context, activity_id: str, detail: bool, include_laps: bool) -> None:
     """Get a single activity by ID. For multisport activities, shows each child sport."""
+    fmt = ctx.obj["config"].output_format
+    if include_laps:
+        reject_csv(
+            ctx,
+            "--laps cannot be combined with --format csv (one table per CSV); "
+            f"use: garmin-cli activity laps {activity_id} --format csv",
+        )
     ensure_authenticated(ctx.obj["config"])
     raw = get_activity(activity_id)
-    fmt = ctx.obj["config"].output_format
     data = serialize_activity_detail(raw) if detail else serialize_activity_summary(raw)
 
     if detail:
@@ -177,9 +190,11 @@ def get_cmd(ctx: click.Context, activity_id: str, detail: bool, include_laps: bo
         csv_columns = COLUMNS_ACTIVITY_SUMMARY
         table_columns = COLUMNS_ACTIVITY_SUMMARY
 
+    # Detail CSV prints only the activity rows: skip the legs and manifest.
+    detail_csv = detail and fmt == "csv"
     children_raw: list[dict[str, Any]] = []
     child_data: list[dict[str, Any]] = []
-    if is_multisport_parent(raw):
+    if is_multisport_parent(raw) and not detail_csv:
         fetched = get_multisport_children(raw)
         if fetched:
             children_raw = fetched
@@ -193,7 +208,7 @@ def get_cmd(ctx: click.Context, activity_id: str, detail: bool, include_laps: bo
     # Capability manifest: only when --detail is set. Multisport parent
     # envelopes union per-child manifests with leg_index attached.
     manifest: list[dict[str, Any]] = []
-    if detail:
+    if detail and not detail_csv:
         manifest = build_capability_manifest(
             raw,
             data,
@@ -226,20 +241,12 @@ def get_cmd(ctx: click.Context, activity_id: str, detail: bool, include_laps: bo
             if footnote:
                 click.echo("")
                 click.echo(footnote)
+    elif child_data and not detail:
+        # CSV is a single table: the legs for a multisport summary, otherwise
+        # the activity rows. The manifest stays JSON-only.
+        echo_csv(child_data, COLUMNS_MULTISPORT_CHILDREN)
     else:
-        # CSV: parent rows + (optionally) children rows + (optionally) laps rows
-        # Manifest is intentionally omitted from CSV output (back-compat).
-        if child_data:
-            if detail:
-                echo_csv(data, csv_columns)
-                click.echo("")
-            echo_csv(child_data, COLUMNS_MULTISPORT_CHILDREN)
-        else:
-            echo_csv(data, csv_columns)
-        if include_laps:
-            click.echo("")
-            lap_columns = columns_for_lap(laps_profile)  # type: ignore[arg-type]
-            echo_csv(laps_rows, lap_columns)
+        echo_csv(data, csv_columns)
 
 
 @activity.command("laps")
@@ -370,13 +377,13 @@ def upload_cmd(ctx: click.Context, file_path: str) -> None:
 
 @activity.command("delete")
 @click.argument("activity_id")
-@click.option("--confirm", is_flag=True, default=False)
+@confirm_option
 @click.pass_context
 def delete_cmd(ctx: click.Context, activity_id: str, confirm: bool) -> None:
     """Delete an activity by ID."""
+    _validate_numeric_id(activity_id, "activity_id")  # before asking to confirm
+    require_confirmation(ctx, confirm, f"Delete activity {activity_id}?")
     ensure_authenticated(ctx.obj["config"])
-    if not confirm:
-        click.confirm(f"Delete activity {activity_id}?", abort=True)
     delete_activity(activity_id)
     rows = serialize_activity_delete(activity_id)
     render_output(ctx.obj["config"].output_format, "activity delete", rows, COLUMNS_ACTIVITY_DELETE)

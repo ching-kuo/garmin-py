@@ -75,7 +75,7 @@ class TestWorkoutListCommand:
         parsed = json.loads(result.output)
         assert parsed["ok"] is False
 
-    @pytest.mark.parametrize("limit_value", ["0", "-5"])
+    @pytest.mark.parametrize("limit_value", ["0", "-5", "101"])
     def test_list_invalid_limit_exit_1(self, mocker: Any, limit_value: str) -> None:
         """Regression: --limit 0 or negative must be rejected before hitting the API."""
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
@@ -260,6 +260,17 @@ class TestWorkoutCalendarCommand:
             date.today(),
             date.today() + timedelta(days=6),
         )
+
+    def test_calendar_single_date(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")
+        mock_calendar = mocker.patch(
+            "garmin_cli.commands.workouts.get_calendar_range", return_value=[]
+        )
+        result = CliRunner(mix_stderr=False).invoke(
+            cli, ["workout", "calendar", "--date", "2026-03-12", "--json"]
+        )
+        assert result.exit_code == 0, result.stderr
+        assert mock_calendar.call_args[0] == (date(2026, 3, 12), date(2026, 3, 12))
 
     def test_calendar_json_envelope_ok(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands.workouts.ensure_authenticated")

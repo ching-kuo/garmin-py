@@ -279,8 +279,12 @@ class TestSanitizeCsvCell:
     def test_numeric_value_not_prefixed(self) -> None:
         assert _sanitize_csv_cell(42) == "42"
 
-    def test_negative_number_is_prefixed(self) -> None:
+    def test_negative_number_string_is_prefixed(self) -> None:
         assert _sanitize_csv_cell("-5") == "\t-5"
+
+    @pytest.mark.parametrize("value", [-5, -1.5])
+    def test_negative_numeric_value_not_prefixed(self, value: float) -> None:
+        assert _sanitize_csv_cell(value) == str(value)
 
     def test_csv_output_formula_values_are_tab_prefixed(self, capsys: Any) -> None:
         """Integration: formula-like values survive the full echo_csv path tab-prefixed."""

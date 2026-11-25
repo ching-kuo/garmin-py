@@ -9,7 +9,7 @@ from typing import Any, NoReturn
 import click
 
 from garmin_cli import __version__
-from garmin_cli.config import CliConfig, load_config
+from garmin_cli.config import PARSED_COMMAND, CliConfig, command_path, load_config
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.mcp_cli import mcp_server_cmd
 from garmin_cli.output import echo_json, make_error_envelope
@@ -41,6 +41,20 @@ _LAZY_SUBCOMMANDS: dict[str, tuple[str, str, str]] = {
 }
 
 
+def _subcommand_index(tokens: Sequence[str]) -> int:
+    """Index of the first subcommand token, skipping global options and their values."""
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in _GLOBAL_OPTIONS_WITH_VALUES:
+            index += 2
+        elif token.startswith("-"):
+            index += 1
+        else:
+            return index
+    return len(tokens)
+
+
 def _command_name_from_args(args: Sequence[str] | None) -> str:
     # Only known command names are echoed, never raw argv tokens: an option
     # value (e.g. `login --password SECRET`) must not leak into the envelope.
@@ -48,53 +62,97 @@ def _command_name_from_args(args: Sequence[str] | None) -> str:
     # unloaded group reports just its bare name. A subcommand counts only
     # directly after its group, so `login --password status` stays "login".
     tokens = list(args or ())
+    index = _subcommand_index(tokens)
+    if index == len(tokens):
+        return "garmin-cli"
+    token = tokens[index]
+    if token not in _LAZY_SUBCOMMANDS and token not in cli.commands:
+        return "garmin-cli"
+    group = cli.commands.get(token)
+    following = tokens[index + 1] if index + 1 < len(tokens) else None
+    if isinstance(group, click.Group) and following in group.commands:
+        return f"{token} {following}"
+    return token
+
+
+_FORMATS = frozenset({"table", "json", "csv"})
+
+
+def _requested_format(tokens: Sequence[str], *, skip_global_values: bool = False) -> str | None:
+    """--json, else the last valid --format value (click's last-wins), in *tokens*."""
+    output_format = None
     index = 0
     while index < len(tokens):
-        token = tokens[index]
-        if token in _GLOBAL_OPTIONS_WITH_VALUES:
+        arg = tokens[index]
+        if arg == "--":
+            break
+        if arg == "--json":
+            return "json"
+        if arg == "--format" and index + 1 < len(tokens):
+            if tokens[index + 1].lower() in _FORMATS:
+                output_format = tokens[index + 1].lower()
             index += 2
             continue
-        if token.startswith("-"):
-            index += 1
-            continue
-        if token not in _LAZY_SUBCOMMANDS and token not in cli.commands:
-            return "garmin-cli"
-        group = cli.commands.get(token)
-        following = tokens[index + 1] if index + 1 < len(tokens) else None
-        if isinstance(group, click.Group) and following in group.commands:
-            return f"{token} {following}"
-        return token
-    return "garmin-cli"
+        if arg.startswith("--format=") and arg.split("=", 1)[1].lower() in _FORMATS:
+            output_format = arg.split("=", 1)[1].lower()
+        index += 2 if skip_global_values and arg in _GLOBAL_OPTIONS_WITH_VALUES else 1
+    return output_format
 
 
-def _json_requested(args: Sequence[str] | None) -> bool:
-    if not args:
-        return False
-    for index, arg in enumerate(args):
-        if arg == "--json":
-            return True
-        if arg == "--format" and index + 1 < len(args) and args[index + 1].lower() == "json":
-            return True
-        if arg.startswith("--format=") and arg.split("=", 1)[1].lower() == "json":
-            return True
-    return False
+def _unparsed_level_tokens(tokens: Sequence[str], failed: click.Context | None) -> list[str]:
+    """argv tokens of the command level whose parsing failed (after its name)."""
+    if failed is None or failed.parent is None:
+        return []
+    index = _subcommand_index(tokens)
+    for name in command_path(failed).split():
+        try:
+            index = tokens.index(name, index) + 1
+        except ValueError:
+            return []
+    return list(tokens[index:])
+
+
+def _parse_time_format(
+    raw_args: Sequence[str], obj: dict[str, Any], failed: click.Context | None
+) -> str:
+    """Best-effort output format when a command's options were not all parsed.
+
+    Levels that finished parsing already updated the config; only the level
+    that failed is scanned, and its options win (deepest level wins). The scan
+    cannot tell an option value that happens to be "--json" from the flag.
+    """
+    tokens = list(raw_args)
+    config = obj.get("config")
+    if config is None:  # the global options themselves failed or never ran
+        return _requested_format(tokens[: _subcommand_index(tokens)], skip_global_values=True) or "table"
+    return _requested_format(_unparsed_level_tokens(tokens, failed)) or config.output_format
 
 
 def _fail(
-    raw_args: Sequence[str], error: str, error_code: str, plain: str | None = None
+    raw_args: Sequence[str],
+    obj: dict[str, Any],
+    error: str,
+    error_code: str,
+    *,
+    plain: str | None = None,
+    failed: click.Context | None = None,
+    exit_code: int = 1,
 ) -> NoReturn:
-    """Report an error as a JSON envelope (--json) or plain text, then exit 1."""
-    if _json_requested(raw_args):
-        echo_json(
-            make_error_envelope(
-                command=_command_name_from_args(raw_args),
-                error=error,
-                error_code=error_code,
-            )
-        )
+    """Report an error as a JSON envelope (--json) or plain text, then exit."""
+    config = obj.get("config")
+    if PARSED_COMMAND in obj:
+        output_format = config.output_format if config is not None else "table"
+        command = obj[PARSED_COMMAND]
+    else:
+        output_format = _parse_time_format(raw_args, obj, failed)
+        command = (
+            command_path(failed) if failed is not None and failed.parent is not None else ""
+        ) or _command_name_from_args(raw_args)
+    if output_format == "json":
+        echo_json(make_error_envelope(command=command, error=error, error_code=error_code))
     else:
         click.echo(error if plain is None else plain, err=True)
-    raise SystemExit(1) from None
+    raise SystemExit(exit_code) from None
 
 
 class SafeGroup(click.Group):
@@ -137,16 +195,28 @@ class SafeGroup(click.Group):
         # does its own argv handling, e.g. Windows wildcard expansion); the
         # JSON error handlers below need the raw argv to see --json.
         raw_args = sys.argv[1:] if args is None else args
+        # Shared with every command context: holds the parsed CliConfig and,
+        # once a leaf is parsed, its command path. Fresh per invocation so a
+        # reused obj cannot carry a previous run's state into error reporting.
+        obj = extra.get("obj")
+        if not isinstance(obj, dict):
+            obj = {}
+        obj.pop("config", None)
+        obj.pop(PARSED_COMMAND, None)
+        extra["obj"] = obj
         try:
             return super().main(args=args, prog_name=prog_name, **extra)
         except click.exceptions.Exit as exc:
             raise SystemExit(exc.exit_code) from None
+        except click.exceptions.Abort:  # Ctrl-C, or end of input at a prompt
+            _fail(raw_args, obj, "Interrupted.", "INTERRUPTED", exit_code=130)
         except GarminCliError as exc:
-            _fail(raw_args, exc.error, exc.error_code)
+            _fail(raw_args, obj, exc.error, exc.error_code)
         except click.ClickException as exc:  # incl. UsageError and startup refusals
-            _fail(raw_args, str(exc), "INVALID_INPUT")
+            failed = exc.ctx if isinstance(exc, click.UsageError) else None
+            _fail(raw_args, obj, str(exc), "INVALID_INPUT", failed=failed)
         except Exception as exc:
-            _fail(raw_args, str(exc), "INTERNAL_ERROR", plain=f"Internal error: {exc}")
+            _fail(raw_args, obj, str(exc), "INTERNAL_ERROR", plain=f"Internal error: {exc}")
 
 
 @click.group(cls=SafeGroup)
@@ -170,7 +240,16 @@ class SafeGroup(click.Group):
 )
 @click.pass_context
 def cli(ctx: click.Context, json_output: bool, output_format: str, garmin_home: str | None) -> None:
-    """garmin-cli."""
+    """Read and manage Garmin Connect data from the command line.
+
+    --json and --format also work after the subcommand.
+
+    \b
+    Examples:
+      garmin-cli login
+      garmin-cli health sleep --days 7
+      garmin-cli activity list --limit 5 --json
+    """
     config = load_config()
     resolved_format = "json" if json_output else output_format
     ctx.ensure_object(dict)

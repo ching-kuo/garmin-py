@@ -61,7 +61,7 @@ def test_password_stdin_reads_one_line(garth: MagicMock, tmp_path: Path) -> None
 def test_password_stdin_from_terminal_is_rejected(
     garth: MagicMock, tmp_path: Path, mocker: Any
 ) -> None:
-    mocker.patch("garmin_cli.commands.login._stdin_is_tty", return_value=True)
+    mocker.patch("garmin_cli.commands._options.stdin_is_tty", return_value=True)
 
     result = _invoke(tmp_path, ["--json", "login", "--email", "a@example.com", "--password-stdin"])
 

@@ -65,7 +65,7 @@ Each login starts a new MFA challenge, so `--mfa-code` / `GARMIN_MFA_CODE` only 
 printf '%s\n' "$GARMIN_PW" | garmin-cli --json login --email your@email.com --password-stdin
 ```
 
-Under `--json`, or when stdin is not a terminal, `login` never prompts: missing credentials fail with `AUTH_MISSING`, and an MFA challenge without a supplied code fails with `MFA_REQUIRED` (exit 1).
+Under `--json` or `--format csv`, or when stdin is not a terminal, `login` never prompts: missing credentials fail with `AUTH_MISSING`, and an MFA challenge without a supplied code fails with `MFA_REQUIRED` (exit 1).
 
 In the MCP server, a login that Garmin rejects (bad credentials, 401/403) or throttles (429/427) pauses new login attempts for 60 seconds, doubling per consecutive failure up to 15 minutes; every such error, including the first, carries `retry_after_seconds`. The pause resets after a successful login or session resume, or when `GARMIN_EMAIL` / `GARMIN_PASSWORD` change. A rejected MFA code pauses logins too, so the next call does not immediately send a fresh code; after a 429 on `submit_mfa_code` the challenge is kept, but resubmitting waits out the pause (after a 5xx or network failure it is kept with no pause). Network errors, timeouts and Garmin 5xx responses during login never pause logins: a 5xx reports `SERVER_ERROR`, and an unreachable Garmin reports `NETWORK_ERROR` instead of blaming the credentials. The same applies when validating a saved session: a throttle, 5xx, or network failure reports `RATE_LIMITED` / `SERVER_ERROR` / `NETWORK_ERROR` rather than `AUTH_FAILED`, and does not trigger a new login.
 
@@ -129,17 +129,20 @@ garmin-cli doctor
 garmin-cli doctor --fast --format json  # skip the live session probe
 ```
 
-The checks cover Python, configuration, token-store layout and permissions (0700 directory; `garmin_tokens.json` a regular file, not a symlink, with mode 600), the optional MCP install, the authenticated session, and MCP write-surface binding. Paths are home-relative where possible, and credentials are never included. MCP clients can run the same non-interactive checks with the read-only `server_doctor` tool.
+The checks cover Python, the installed garmin-py and garminconnect versions, configuration, token-store layout and permissions (0700 directory; `garmin_tokens.json` a regular file, not a symlink, with mode 600), the optional MCP install (mcp >=2.2.0,<3), the authenticated session, and MCP write-surface binding. With `GARMIN_EMAIL` and `GARMIN_PASSWORD` set, a missing Garmin home, token store, or session passes (the credentials are not verified until a command signs in). Each failed check carries a specific recovery hint (for example the permission mode to set). Paths are home-relative where possible, and credentials are never included. MCP clients can run the same non-interactive checks with the read-only `server_doctor` tool.
 
 ## Output Formats
 
-All commands default to table output. Use `--json` or `--format csv` to change:
+All commands default to table output. Use `--json` or `--format csv` to change, either before or after the subcommand (after wins when both are given):
 
 ```bash
 garmin-cli health sleep --days 7              # table (default)
 garmin-cli --json health sleep --days 7       # JSON envelope
+garmin-cli health sleep --days 7 --json       # same
 garmin-cli --format csv health sleep --days 7 # CSV
 ```
+
+CSV output is always a single table. Output that does not fit one table rejects `--format csv` with `INVALID_INPUT`: `coach snapshot`, `workout create --dry-run` / `workout update --dry-run`, and `activity get --laps` (use `activity laps`); `login`, `login status`, and `login logout` print a one-row table. Text cells starting with `=`, `+`, `-`, `@`, tab, or carriage return are prefixed with a tab so spreadsheets do not run them as formulas; numbers (including negatives) are written as-is.
 
 **JSON envelope structure:**
 
@@ -166,7 +169,9 @@ garmin-cli --format csv health sleep --days 7 # CSV
 }
 ```
 
-Exit code is always `0` on success, `1` on error.
+Exit code is `0` on success and `1` on error; an interrupted command (Ctrl-C, or end of input at a prompt) exits `130` with `INTERRUPTED`.
+
+Destructive commands (`activity delete`, `workout delete`, `workout unschedule`) validate the id, then ask for confirmation on stderr. Any answer but `y`/`yes` prints `Aborted.` and exits 1 (`INVALID_INPUT`). Under `--json`, or when stdin is not a terminal, they never prompt: pass `--confirm` (alias `--yes`/`-y`), otherwise they fail with `INVALID_INPUT`.
 
 ## Commands
 
@@ -200,13 +205,15 @@ garmin-cli --json coach snapshot [--date DATE] [--baseline-days N] [--recent-dai
 
 The default snapshot uses the 28 prior days for ranged signals and activities, nine prior days plus the current date for daily resting-HR and stress calls (leaving slack over the seven-sample baseline minimum for days without data), and at most 32 upstream requests (the calendar costs up to three: the seven-day plan window can span two weekly pages, plus the by-period schedule lookup that catches Garmin Coach sessions). `--recent-daily-days` accepts 1-9, the most that fits the cap. The cap counts Garmin data requests only: the session check or login, the profile-timezone lookup, and retries are extra. `provenance.completed_requests` reports the data requests that completed sections actually made (one fewer calendar page when the window fits in one week). Baseline medians exclude the current date and require seven valid samples; the resting-HR and stress signals report the shorter daily window they were actually fetched over. Missing and stale values remain explicit in `data_quality`; the server returns neutral facts and does not assign a proprietary readiness score or decide whether a workout is safe.
 
+`--json` wraps the snapshot in the standard envelope (`data[0]` is the snapshot). Table output shows the recovery signals only, with a note pointing to `--json` for the other sections; `--format csv` is rejected with `INVALID_INPUT`.
+
 Extended daily baselines are rejected if their estimated cost exceeds the 32-request cap. A terminal rate limit stops further Garmin calls while preserving completed sections with `complete: false` and `aborted: true`.
 
 ### Activities
 
 ```bash
 garmin-cli activity list             [--limit N] [--type TYPE] [--search TEXT] [--date DATE | --from DATE --to DATE | --days N]
-garmin-cli activity get              ACTIVITY_ID [--detail] [--laps]  # --detail/-d shows sport-aware metrics; --laps appends lap data
+garmin-cli activity get              ACTIVITY_ID [--detail] [--laps]  # --detail/-d shows sport-aware metrics; --laps appends lap data (table/JSON; for CSV use activity laps)
 garmin-cli activity laps             ACTIVITY_ID  # per-lap rows (run/bike: HR, power, cadence, start_time_gmt/local) or per-pool-length rows (lap_swimming)
 garmin-cli activity zones            ACTIVITY_ID  # HR time-in-zone breakdown
 garmin-cli activity weather          ACTIVITY_ID  # temperature, apparent temp, dew point, humidity, wind, condition
@@ -214,16 +221,16 @@ garmin-cli activity metrics-describe ACTIVITY_ID  # metric descriptors: key, uni
 garmin-cli activity detail-metrics   ACTIVITY_ID [--metric KEY]...  # raw per-sample time series (one row per sample)
 garmin-cli activity download         ACTIVITY_ID [--fmt original|tcx|gpx|kml|csv] [--output PATH] [--force]
 garmin-cli activity upload           FILE         # .fit / .gpx / .tcx
-garmin-cli activity delete           ACTIVITY_ID [--confirm]
+garmin-cli activity delete           ACTIVITY_ID [--confirm | --yes | -y]
 garmin-cli activity rename           ACTIVITY_ID NEW_NAME
 garmin-cli activity set-type         ACTIVITY_ID TYPE_KEY  # e.g. running, cycling
 ```
 
-`--limit` defaults to 20, max 100. `--type` filters by activity type key (e.g., `running`, `cycling`).
+`--limit` defaults to 20 and must be 1-100 (`activity list`, `workout list`). `--type` filters by activity type key (e.g., `running`, `cycling`).
 
 `activity detail-metrics` returns the raw recorded sample stream (~2000 rows for a typical activity; columns are the watch's metric keys such as `directTimestamp`, `directHeartRate`, `directPower`). Use repeatable `--metric` flags to select columns — `activity metrics-describe` lists what a given activity recorded. This is the data for intra-activity analyses such as first-half vs second-half aerobic decoupling.
 
-`activity download` writes the activity file to disk (it never prints binary to stdout). `--fmt` defaults to `original` (the FIT file inside a ZIP archive); the default output name is `activity_<id><ext>` in the current directory, and an existing file is not overwritten unless `--force` is given. `activity delete` prompts for confirmation unless `--confirm` is passed. `activity set-type` accepts any `typeKey` from Garmin's live sport-type table (an unknown key is rejected before any write).
+`activity download` writes the activity file to disk (it never prints binary to stdout). `--fmt` defaults to `original` (the FIT file inside a ZIP archive); the default output name is `activity_<id><ext>` in the current directory, and an existing file is not overwritten unless `--force` is given. `activity delete` prompts for confirmation unless `--confirm` (or `--yes`/`-y`) is passed. `activity set-type` accepts any `typeKey` from Garmin's live sport-type table (an unknown key is rejected before any write).
 
 #### Detailed sport-specific metrics
 
@@ -265,18 +272,20 @@ garmin-cli --json activity get 12345678 --detail --laps
 # Read
 garmin-cli workout list     [--limit N]
 garmin-cli workout get      WORKOUT_ID
-garmin-cli workout calendar [--from DATE --to DATE | --days N | --ahead N]
+garmin-cli workout calendar [--date DATE | --from DATE --to DATE | --days N | --ahead N]
 
 # Write
-garmin-cli workout create   FILE                   # JSON or YAML file
+garmin-cli workout create   FILE [--dry-run]       # JSON or YAML file
 garmin-cli workout create   --stdin                # read JSON from stdin
-garmin-cli workout update   WORKOUT_ID FILE        # partial update (only fields provided change)
-garmin-cli workout delete   WORKOUT_ID [--confirm] # --confirm skips interactive prompt
+garmin-cli workout update   WORKOUT_ID FILE [--dry-run] # partial update (only fields provided change)
+garmin-cli workout delete   WORKOUT_ID [--confirm] # --confirm (--yes/-y) skips interactive prompt
 garmin-cli workout schedule WORKOUT_ID DATE        # DATE = YYYY-MM-DD
-garmin-cli workout unschedule SCHEDULE_ID [--confirm] # removes a calendar entry; SCHEDULE_ID is the workoutScheduleId returned by schedule
+garmin-cli workout unschedule SCHEDULE_ID [--confirm] # removes a calendar entry; SCHEDULE_ID is the workout_schedule_id returned by schedule
 ```
 
-`--ahead N` shows the next N days of planned workouts (future-facing). `--days N` shows past N days.
+`--ahead N` shows the next N days of planned workouts (future-facing; the default is the next 7 days). `--days N` shows past N days.
+
+`--dry-run` validates the input and prints the Garmin payload without saving (`--json`: `data[0]` has `dry_run: true` and `wire_payload`). `workout create --dry-run` needs no login; `workout update --dry-run` still reads the existing workout to merge it. `workout schedule` reports the new entry as `workout_schedule_id`.
 
 YAML input is supported out of the box. See [SKILL.md](SKILL.md) for the full workout JSON schema reference and step/target types.
 
@@ -326,7 +335,7 @@ Recent fixes normalized several JSON payloads for agent-safe output:
 | `--date DATE` | Single day | `--date 2026-03-11` |
 | `--days N` | Past N days (inclusive) | `--days 7` |
 | `--from DATE --to DATE` | Explicit range (both inclusive) | `--from 2026-03-01 --to 2026-03-11` |
-| `--ahead N` | Next N days (calendar only) | `--ahead 7` |
+| `--ahead N` | Next N days (`workout calendar` only) | `--ahead 7` |
 
 Maximum range: 90 days. Conflicting options (e.g., `--date` with `--days`) produce a clear error.
 
@@ -383,6 +392,7 @@ garmin-cli --json activity list --limit 5
 | `SERVER_ERROR` | 5xx after 3 retries (creates such as workout create/schedule and activity upload are never retried on 5xx, since the first attempt may have succeeded) |
 | `NETWORK_ERROR` | Connection or timeout failure after 3 retries ("Could not reach Garmin."); creates such as workout create/schedule and activity upload are never retried. A failed write may still have landed: verify remote state before repeating any write |
 | `INVALID_INPUT` | Bad arguments or conflicting options, or another 4xx from Garmin (the message names the HTTP status) |
+| `INTERRUPTED` | CLI only: interrupted by Ctrl-C or end of input at a prompt (exit 130) |
 | `INTERNAL_ERROR` | Unexpected error |
 
 ## MCP Server
