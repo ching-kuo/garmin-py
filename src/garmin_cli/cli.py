@@ -34,7 +34,7 @@ _LAZY_SUBCOMMANDS: dict[str, tuple[str, str, str]] = {
     "login": (
         "garmin_cli.commands.login",
         "login",
-        "Login to Garmin Connect and save credentials to the Garmin home directory.",
+        "Login to Garmin Connect and save session tokens to the Garmin home directory.",
     ),
     "performance": ("garmin_cli.commands.performance", "performance", "Performance commands."),
     "workout": ("garmin_cli.commands.workouts", "workout", "Workout commands."),

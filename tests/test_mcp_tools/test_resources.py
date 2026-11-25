@@ -97,6 +97,38 @@ def test_sleep_template_matches_one_day_health_sleep_envelope(mocker: Any) -> No
     get_sleep.assert_called_once_with(date(2026, 1, 1), date(2026, 1, 1))
 
 
+def test_sleep_template_cold_start_uses_probe_resumed_backend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """Resources authenticate only via the read-only probe; its client must serve the read."""
+    from garmin_cli import backend
+
+    home = tmp_path / "garth"
+    home.mkdir(mode=0o700)
+    (home / "garmin_tokens.json").write_text("{}")
+    sleep = [{"dailySleepDTO": {"calendarDate": "2026-01-01", "sleepTimeSeconds": 28800}}]
+
+    class _FakeGarmin:
+        def login(self, tokenstore: str | None = None) -> tuple[None, None]:
+            return None, None
+
+        def connectapi(self, path: str, **_kwargs: Any) -> Any:
+            return sleep if "dailySleeps" in path else {}
+
+    monkeypatch.setattr(backend, "Garmin", _FakeGarmin)
+    monkeypatch.setattr(backend, "_apply_timeout", lambda _client: None)
+    monkeypatch.setattr(backend, "_serialize_refresh", lambda _client: None)
+    monkeypatch.setattr(backend, "_backend", None)
+    monkeypatch.setattr(backend, "_garth_home", None)
+    monkeypatch.setenv("GARMIN_CLI_AUTH_PROBE_TTL", "0")
+    server = create_mcp_server(_config(garth_home=str(home)))
+
+    payload = _read(server, "garmin://health/sleep/2026-01-01")
+
+    assert payload["count"] == 1
+    assert payload["rows"][0]["date"] == "2026-01-01"
+
+
 @pytest.mark.parametrize(
     ("uri", "error_code"),
     [

@@ -13,7 +13,13 @@ from garmin_cli.auth import probe_session_status
 from garmin_cli.config import CliConfig
 from garmin_cli.error_contracts import error_contract
 from garmin_cli.bearer_token import BEARER_ENV, validate_bearer_token
-from garmin_cli.token_store import detect_legacy_tokens, has_tokenstore
+from garmin_cli.exceptions import GarminCliError
+from garmin_cli.token_store import (
+    TOKEN_FILE_NAME,
+    detect_legacy_tokens,
+    tokenstore_path,
+    validate_garmin_home,
+)
 
 
 @dataclass(frozen=True)
@@ -62,9 +68,11 @@ def check_python_version(_config: CliConfig) -> CheckResult:
 def check_config(config: CliConfig) -> CheckResult:
     path = Path(os.path.expanduser(config.garth_home))
     shown = _display_path(path)
-    if path.is_symlink():
-        return _failure("config", f"Garmin home {shown} is a symlink.", "AUTH_FAILED")
-    if not path.exists() or not path.is_dir():
+    try:
+        validate_garmin_home(str(path))
+    except GarminCliError as exc:
+        return _failure("config", exc.error, exc.error_code)  # names the offending link
+    if not path.exists():
         return _failure(
             "config",
             f"Garmin home {shown} does not exist.",
@@ -75,35 +83,58 @@ def check_config(config: CliConfig) -> CheckResult:
 
 def check_token_store(config: CliConfig) -> CheckResult:
     path = Path(os.path.expanduser(config.garth_home))
-    shown = _display_path(path)
-    legacy = detect_legacy_tokens(str(path))
-    if legacy and not has_tokenstore(str(path)):
+    try:
+        return _check_token_store(path)
+    except OSError:
         return _failure(
             "token_store",
-            f"Legacy Garmin session files were found in {shown}; log in again.",
-            "AUTH_MISSING",
+            f"Token store in {_display_path(path)} cannot be inspected.",
+            "AUTH_FAILED",
         )
-    if not has_tokenstore(str(path)):
+
+
+def _check_token_store(path: Path) -> CheckResult:
+    shown = _display_path(path)
+    token_file = tokenstore_path(str(path))
+    try:
+        token_stat = token_file.lstat()  # lstat: a dangling symlink is reported, not "missing"
+    except FileNotFoundError:
+        if detect_legacy_tokens(str(path)):
+            return _failure(
+                "token_store",
+                f"Legacy Garmin session files were found in {shown}; log in again.",
+                "AUTH_MISSING",
+            )
         return _failure(
             "token_store",
             f"No token store was found in {shown}.",
             "AUTH_MISSING",
         )
-    try:
-        mode = stat.S_IMODE(path.stat().st_mode)
-    except OSError:
+    if stat.S_ISLNK(token_stat.st_mode):
+        return _failure("token_store", f"Token file {TOKEN_FILE_NAME} is a symlink.", "AUTH_FAILED")
+    if not stat.S_ISREG(token_stat.st_mode):
         return _failure(
-            "token_store",
-            f"Token-store directory {shown} cannot be inspected.",
-            "AUTH_FAILED",
+            "token_store", f"Token file {TOKEN_FILE_NAME} is not a regular file.", "AUTH_FAILED"
         )
+    mode = stat.S_IMODE(path.stat().st_mode)
     if mode != 0o700:
         return _failure(
             "token_store",
             f"Token-store directory permissions are {mode:04o}; expected 0700.",
             "AUTH_FAILED",
         )
-    return CheckResult("token_store", True, "Token store is present with 0700 directory permissions.")
+    file_mode = stat.S_IMODE(token_stat.st_mode)
+    if file_mode != 0o600:
+        return CheckResult(
+            "token_store",
+            False,
+            f"Token file {TOKEN_FILE_NAME} permissions are {file_mode:04o}; expected 0600.",
+            "AUTH_FAILED",
+            f"Restrict {TOKEN_FILE_NAME} to owner read/write (mode 600).",
+        )
+    return CheckResult(
+        "token_store", True, "Token store is present with 0700 directory and 0600 file permissions."
+    )
 
 
 def check_mcp_extra(_config: CliConfig) -> CheckResult:

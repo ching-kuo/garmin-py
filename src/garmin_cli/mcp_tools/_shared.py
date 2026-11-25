@@ -91,20 +91,17 @@ def _identity_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _error_text(exc: GarminCliError) -> str:
     """Serialize the stable Garmin error contract for MCP text channels."""
-    msg = exc.error
-    if exc.error_code == "AUTH_MISSING":
-        msg = f"{msg} Run `garmin-cli login` to authenticate interactively."
     contract = error_contract(exc.error_code)
-    retry_after_seconds = (
-        _resolve_retry_delays()[0] if exc.error_code == "RATE_LIMITED" else None
-    )
+    retry_after_seconds: float | None = exc.retry_after_seconds
+    if retry_after_seconds is None and exc.error_code == "RATE_LIMITED":
+        retry_after_seconds = _resolve_retry_delays()[0]
     # MCP's ToolError is text-only in the bundled SDK. A JSON object in that
     # text channel preserves a stable machine-readable contract while keeping
     # the existing human-readable message available to older clients.
     return json.dumps({
         "error_code": exc.error_code,
         "category": contract["category"],
-        "message": msg,
+        "message": exc.error,
         "recovery_hint": contract["recovery_hint"],
         "retry_after_seconds": retry_after_seconds,
     }, sort_keys=True)

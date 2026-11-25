@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from garmin_cli import backend
+from garmin_cli.exceptions import GarminCliError
 
 
 class _FakeResponse:
@@ -111,6 +112,45 @@ class TestResume:
 
         assert _FakeGarmin.instances[0].login_calls == [str(garth_home)]
 
+    def test_read_only_resume_does_not_repair_but_publishes_backend(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        garth_home = tmp_path / "garth"
+        garth_home.mkdir()
+        garth_home.chmod(0o755)
+        (garth_home / "garmin_tokens.json").write_text('{"di_token":"abc"}')
+        monkeypatch.setattr(backend, "Garmin", _FakeGarmin)
+
+        backend.resume(str(garth_home), read_only=True)
+
+        # Published so later endpoint calls use (and refresh) this one client.
+        assert backend._backend is _FakeGarmin.instances[0]
+        assert stat.S_IMODE(garth_home.stat().st_mode) == 0o755
+
+    def test_read_only_resume_refuses_symlinked_home(self, tmp_path: Path) -> None:
+        real = tmp_path / "real"
+        real.mkdir(mode=0o700)
+        (tmp_path / "garth").symlink_to(real)
+
+        with pytest.raises(GarminCliError, match="symlink"):
+            backend.resume(str(tmp_path / "garth"), read_only=True)
+
+    @pytest.mark.parametrize("read_only", [True, False])
+    def test_resume_refuses_symlinked_token_file(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, read_only: bool
+    ) -> None:
+        garth_home = tmp_path / "garth"
+        garth_home.mkdir(mode=0o700)
+        (tmp_path / "real.json").write_text('{"di_token":"abc"}')
+        (garth_home / "garmin_tokens.json").symlink_to(tmp_path / "real.json")
+        monkeypatch.setattr(backend, "Garmin", _FakeGarmin)
+
+        with pytest.raises(OSError, match="symlink"):
+            backend.resume(str(garth_home), read_only=read_only)
+        assert backend._backend is None
+
 
 class TestLogin:
     def test_login_uses_explicit_garth_home_for_fresh_auth(
@@ -123,12 +163,13 @@ class TestLogin:
         monkeypatch.setenv("GARMINTOKENS", str(tmp_path / "ignored.json"))
         monkeypatch.setattr(backend, "Garmin", _FakeGarmin)
 
-        backend.login("user@example.com", "secret", garth_home=str(garth_home))
+        client = backend.login("user@example.com", "secret", garth_home=str(garth_home))
 
         instance = _FakeGarmin.instances[0]
+        assert client is instance
         assert instance.login_calls == [None]
         assert instance.garmintokens_env_at_login is None
-        assert backend._garth_home == str(garth_home)
+        assert backend._backend is None  # published only by save()
 
     def test_login_returns_pending_mfa_when_challenged(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -147,7 +188,7 @@ class TestLogin:
         assert pending.garth_home == str(garth_home)
         assert backend._backend is None  # not activated until MFA completes
 
-    def test_login_without_mfa_challenge_returns_none_and_reloads_profile(
+    def test_login_without_mfa_challenge_returns_client_and_reloads_profile(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         garth_home = tmp_path / "garth"
@@ -158,15 +199,14 @@ class TestLogin:
             "user@example.com", "secret", garth_home=str(garth_home), return_on_mfa=True
         )
 
-        assert result is None
         instance = _FakeGarmin.instances[0]
-        assert backend._backend is instance
+        assert result is instance
         # Second login call replays from in-memory tokens to load the
         # profile/settings that upstream's return_on_mfa mode skips.
         assert len(instance.login_calls) == 2
         assert instance.login_calls[1] is not None
 
-    def test_resume_mfa_login_activates_backend(
+    def test_resume_mfa_login_returns_client_for_save(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         garth_home = tmp_path / "garth"
@@ -178,12 +218,12 @@ class TestLogin:
             "user@example.com", "secret", garth_home=str(garth_home), return_on_mfa=True
         )
         assert isinstance(pending, backend.PendingMFA)
-        backend.resume_mfa_login(pending, "123456")
+        client = backend.resume_mfa_login(pending, "123456")
 
         instance = _FakeGarmin.instances[0]
         assert instance.resume_login_calls == [({"signin_params": "opaque"}, "123456")]
-        assert backend._backend is instance
-        assert backend._garth_home == str(garth_home)
+        assert client is instance
+        assert backend._backend is None  # published only by save()
 
     def test_resume_rejects_legacy_tokens_without_new_tokenstore(self, tmp_path: Path) -> None:
         garth_home = tmp_path / "garth"
@@ -199,14 +239,39 @@ class TestSave:
     def test_save_creates_secure_directory_and_token_file(self, tmp_path: Path) -> None:
         garth_home = tmp_path / "garth"
         fake = SimpleNamespace(client=_FakeClient())
-        backend._backend = fake  # type: ignore[assignment]
 
-        backend.save(str(garth_home))
+        backend.save(str(garth_home), fake)  # type: ignore[arg-type]
 
         token_file = garth_home / "garmin_tokens.json"
         assert token_file.exists()
         assert stat.S_IMODE(garth_home.stat().st_mode) == 0o700
         assert stat.S_IMODE(token_file.stat().st_mode) == 0o600
+        assert backend._backend is fake
+
+    def test_save_persists_the_login_client_not_a_concurrently_resumed_one(
+        self, tmp_path: Path
+    ) -> None:
+        fresh = SimpleNamespace(client=_FakeClient())
+        stale = SimpleNamespace(client=_FakeClient())
+        # A status check's read-only resume published a stale client between
+        # the login finishing and its session being saved.
+        backend._backend = stale  # type: ignore[assignment]
+
+        backend.save(str(tmp_path / "garth"), fresh)  # type: ignore[arg-type]
+
+        assert fresh.client.dump_calls and not stale.client.dump_calls
+        assert backend._backend is fresh  # published after saving
+
+    def test_save_refuses_dangling_token_symlink(self, tmp_path: Path) -> None:
+        garth_home = tmp_path / "garth"
+        garth_home.mkdir(mode=0o700)
+        (garth_home / "garmin_tokens.json").symlink_to(tmp_path / "missing.json")
+        fake = SimpleNamespace(client=_FakeClient())
+
+        with pytest.raises(OSError, match="symlink"):
+            backend.save(str(garth_home), fake)  # type: ignore[arg-type]
+        assert not fake.client.dump_calls
+        assert backend._backend is None
 
 
 class TestTypedWriteWrappers:

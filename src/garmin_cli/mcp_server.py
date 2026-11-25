@@ -52,7 +52,9 @@ ToolError text with `error_code`, `category`, `message`, `recovery_hint`, and
 limits, non-positive ids) raise plain-text ToolError messages instead, so
 attempt JSON parsing only when the text starts with `{`. Use the error code
 and recovery hint to decide whether to fix input, authenticate, wait, or stop.
-Do not retry immediately after a rate-limit error.
+Do not retry immediately after a rate-limit error. An AUTH_FAILED or
+RATE_LIMITED login error with a non-null `retry_after_seconds` means new
+Garmin logins are paused for that long after a failed login or MFA code.
 
 Hard limits: date ranges are capped at 90 days and ordinary list `limit`
 values are capped at 100. Some endpoints have tighter documented limits, such

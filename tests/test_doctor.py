@@ -15,8 +15,10 @@ from garmin_cli.bearer_token import BEARER_ENV, BEARER_TOKEN_HINT, MIN_BEARER_TO
 from garmin_cli.cli import cli
 from garmin_cli.config import CliConfig
 from garmin_cli.doctor import (
+    check_config,
     check_python_version,
     check_session,
+    check_token_store,
     check_write_surface,
     run_checks,
 )
@@ -27,6 +29,7 @@ def _secure_home(path: Path, *, token: bool = True) -> None:
     path.chmod(0o700)
     if token:
         (path / "garmin_tokens.json").write_text("{}")
+        (path / "garmin_tokens.json").chmod(0o600)
 
 
 def test_fast_checks_skip_network(tmp_path: Path, mocker: Any) -> None:
@@ -64,6 +67,86 @@ def test_legacy_token_layout_is_reported(tmp_path: Path) -> None:
 
     assert token.ok is False
     assert "Legacy" in token.detail
+
+
+def test_token_file_with_loose_mode_is_reported(tmp_path: Path) -> None:
+    home = tmp_path / "garmin"
+    _secure_home(home)
+    (home / "garmin_tokens.json").chmod(0o644)
+
+    token = check_token_store(CliConfig(garth_home=str(home)))
+
+    assert token.ok is False
+    assert token.error_code == "AUTH_FAILED"
+    assert "0644" in token.detail
+    assert token.recovery_hint == "Restrict garmin_tokens.json to owner read/write (mode 600)."
+
+
+def test_symlinked_token_file_is_reported(tmp_path: Path) -> None:
+    home = tmp_path / "garmin"
+    _secure_home(home, token=False)
+    real = tmp_path / "real.json"
+    real.write_text("{}")
+    real.chmod(0o600)
+    (home / "garmin_tokens.json").symlink_to(real)
+
+    token = check_token_store(CliConfig(garth_home=str(home)))
+
+    assert token.ok is False
+    assert token.error_code == "AUTH_FAILED"
+    assert "symlink" in token.detail
+
+
+def test_dangling_token_symlink_is_reported_as_symlink(tmp_path: Path) -> None:
+    home = tmp_path / "garmin"
+    _secure_home(home, token=False)
+    (home / "garmin_tokens.json").symlink_to(tmp_path / "missing.json")
+
+    token = check_token_store(CliConfig(garth_home=str(home)))
+
+    assert token.error_code == "AUTH_FAILED"
+    assert "symlink" in token.detail
+
+
+def test_non_regular_token_file_is_reported(tmp_path: Path) -> None:
+    home = tmp_path / "garmin"
+    _secure_home(home, token=False)
+    (home / "garmin_tokens.json").mkdir()
+
+    token = check_token_store(CliConfig(garth_home=str(home)))
+
+    assert token.error_code == "AUTH_FAILED"
+    assert "regular file" in token.detail
+
+
+def test_uninspectable_token_store_is_a_failure_not_internal_error(
+    tmp_path: Path, mocker: Any
+) -> None:
+    home = tmp_path / "garmin"
+    _secure_home(home)
+    mocker.patch.object(Path, "lstat", side_effect=PermissionError("denied"))
+
+    token = check_token_store(CliConfig(garth_home=str(home)))
+
+    assert token.ok is False
+    assert token.error_code == "AUTH_FAILED"
+
+
+def test_json_garmin_home_is_invalid_input(tmp_path: Path) -> None:
+    config = check_config(CliConfig(garth_home=str(tmp_path / "tokens.json")))
+
+    assert config.error_code == "INVALID_INPUT"
+    assert "must be a directory" in config.detail
+
+
+def test_symlinked_home_component_is_named_in_config_failure(tmp_path: Path) -> None:
+    (tmp_path / "real" / "garmin").mkdir(parents=True)
+    (tmp_path / "link").symlink_to(tmp_path / "real")
+
+    config = check_config(CliConfig(garth_home=str(tmp_path / "link" / "garmin")))
+
+    assert config.error_code == "AUTH_FAILED"
+    assert str(tmp_path / "link") in config.detail
 
 
 def test_failed_session_probe_is_captured(mocker: Any) -> None:

@@ -12,7 +12,11 @@ ERROR_CODE_TABLE: dict[str, dict[str, str]] = {
     },
     "MFA_REQUIRED": {
         "category": "authentication",
-        "recovery_hint": "Complete the pending challenge with submit_mfa_code.",
+        "recovery_hint": (
+            "Complete the pending challenge with submit_mfa_code (MCP), or run "
+            "garmin-cli login in a terminal to enter the code (CLI); --mfa-code only "
+            "works for a code valid for a new challenge, such as an authenticator app's."
+        ),
     },
     "INVALID_INPUT": {
         "category": "validation",

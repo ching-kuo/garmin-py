@@ -7,6 +7,7 @@ import threading
 import types
 from dataclasses import dataclass
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
@@ -18,6 +19,8 @@ from garmin_cli.token_store import (
     ensure_secure_directory,
     has_tokenstore,
     secure_token_file,
+    tokenstore_path,
+    validate_garmin_home,
 )
 
 logger = logging.getLogger(__name__)
@@ -178,13 +181,14 @@ def login(
     garth_home: str | None = None,
     prompt_mfa: Any = None,
     return_on_mfa: bool = False,
-) -> PendingMFA | None:
-    """Authenticate with Garmin Connect without persisting the tokenstore yet.
+) -> PendingMFA | Garmin:
+    """Authenticate with Garmin Connect without persisting or publishing yet.
 
     With ``return_on_mfa=True`` an MFA challenge does not block on
     ``prompt_mfa``; instead the half-finished login is returned as a
     :class:`PendingMFA` for the caller to complete via
-    :func:`resume_mfa_login`. Returns ``None`` when login finished cleanly.
+    :func:`resume_mfa_login`. Otherwise returns the authenticated client,
+    which :func:`save` persists and then publishes as the process backend.
     """
     normalized_home = _normalize_home(garth_home)
     client = Garmin(email, password, prompt_mfa=prompt_mfa, return_on_mfa=return_on_mfa)
@@ -204,28 +208,35 @@ def login(
         # skipping the profile/settings load that displayName-scoped endpoints
         # need. Replay login from the in-memory tokens to load them.
         client.login(tokenstore=client.client.dumps())
-    _activate(client, normalized_home)
     logger.debug("Garmin login succeeded for configured account")
-    return None
+    return client
 
 
-def _activate(client: Garmin, garth_home: str | None) -> None:
-    """Make *client* the process-wide backend, pinned to *garth_home*."""
-    if garth_home is not None:
-        client.client._tokenstore_path = garth_home
-    _set_backend(client, garth_home)
-
-
-def resume_mfa_login(pending: PendingMFA, mfa_code: str) -> None:
-    """Complete a login previously halted for MFA and activate the backend."""
+def resume_mfa_login(pending: PendingMFA, mfa_code: str) -> Garmin:
+    """Complete a login previously halted for MFA; :func:`save` publishes it."""
     pending.client.resume_login(pending.client_state, mfa_code)
-    _activate(pending.client, pending.garth_home)
     logger.debug("Garmin MFA login completed")
+    return pending.client
 
 
-def resume(garth_home: str) -> None:
-    """Restore an authenticated client from the configured Garmin home."""
-    ensure_secure_directory(garth_home)
+def _refuse_symlinked_token_file(garth_home: str | Path) -> None:
+    if tokenstore_path(str(garth_home)).is_symlink():  # dangling links included
+        raise OSError(f"Token file in '{garth_home}' is a symlink — refusing for security")
+
+
+def resume(garth_home: str, *, read_only: bool = False) -> None:
+    """Restore an authenticated client from the configured Garmin home.
+
+    ``read_only=True`` is for status surfaces: it never repairs permissions or
+    migrates legacy tokens. Both modes refuse symlinks (home path and token
+    file). The loaded client becomes the process backend either way, so later
+    calls use it and a token refresh is never split across two clients.
+    """
+    if read_only:
+        validate_garmin_home(garth_home)
+    else:
+        ensure_secure_directory(garth_home)
+    _refuse_symlinked_token_file(garth_home)
 
     if detect_legacy_tokens(garth_home) and not has_tokenstore(garth_home):
         logger.debug(
@@ -245,11 +256,16 @@ def resume(garth_home: str) -> None:
     logger.debug("Garmin session resumed from %s", garth_home)
 
 
-def save(garth_home: str) -> None:
-    """Persist the current backend tokenstore into the configured Garmin home."""
+def save(garth_home: str, client: Garmin) -> None:
+    """Persist a freshly authenticated *client*, then publish it as the backend.
+
+    The client is passed explicitly: a concurrent status resume may have
+    swapped the process backend since this login finished.
+    """
     with _backend_lock:
-        client = _require_backend()
         directory = ensure_secure_directory(garth_home, create=True)
+        _refuse_symlinked_token_file(directory)
+        client.client._tokenstore_path = str(directory)
         client.client.dump(str(directory))
         secure_token_file(str(directory))
         _set_backend(client, str(directory))

@@ -57,11 +57,17 @@ garmin-cli login
 # Login successful. Token store saved at: ~/.garminconnect/garmin_tokens.json
 ```
 
-Use `--email` / `--password` to skip the prompts (useful for scripting):
+Prompts go to stderr. For scripting, skip them: the email comes from `--email` or `GARMIN_EMAIL`, the password from `GARMIN_PASSWORD` or the first line of piped stdin with `--password-stdin` (an empty line fails with `AUTH_MISSING`; it never falls back to `GARMIN_PASSWORD`), and an MFA code from `--mfa-code` or `GARMIN_MFA_CODE`. `--password` still works but is deprecated (it shows up in shell history and process listings).
+
+Each login starts a new MFA challenge, so `--mfa-code` / `GARMIN_MFA_CODE` only works for a code that is valid for that new challenge, such as one from an authenticator app. For emailed or SMS codes, run `garmin-cli login` in a terminal and enter the code when prompted, or use the MCP `submit_mfa_code` tool. At a terminal, `login` prompts for the code and ignores `GARMIN_MFA_CODE`; only an explicit `--mfa-code` skips the prompt.
 
 ```bash
-garmin-cli login --email your@email.com --password yourpassword
+printf '%s\n' "$GARMIN_PW" | garmin-cli --json login --email your@email.com --password-stdin
 ```
+
+Under `--json`, or when stdin is not a terminal, `login` never prompts: missing credentials fail with `AUTH_MISSING`, and an MFA challenge without a supplied code fails with `MFA_REQUIRED` (exit 1).
+
+In the MCP server, a login that Garmin rejects (bad credentials, 401/403) or throttles (429/427) pauses new login attempts for 60 seconds, doubling per consecutive failure up to 15 minutes; every such error, including the first, carries `retry_after_seconds`. The pause resets after a successful login or session resume, or when `GARMIN_EMAIL` / `GARMIN_PASSWORD` change. A rejected MFA code pauses logins too, so the next call does not immediately send a fresh code; after a 429 on `submit_mfa_code` the challenge is kept, but resubmitting waits out the pause. Network errors, timeouts and Garmin 5xx responses during login never pause logins: a 5xx reports `SERVER_ERROR`, and an unreachable Garmin reports `AUTH_FAILED` with a "could not reach Garmin" message instead of blaming the credentials.
 
 Check login status at any time:
 
@@ -72,6 +78,17 @@ garmin-cli login status
 garmin-cli --json login status
 # {"ok": true, "command": "login status", "count": 1, "data": [{"authenticated": true, "garmin_home": "..."}]}
 ```
+
+`login status` never repairs permissions or migrates legacy tokens. Status checks (`login status`, `doctor`, MCP `login_status`) may still refresh the session tokens on disk, as any authenticated request can.
+
+Log out by deleting the saved token file (`garmin_tokens.json` in the Garmin home). Symlinked token files and Garmin homes reached through a symlink are refused. For the default home it also deletes a legacy `~/.garth/garmin_tokens.json`, which would otherwise be migrated back on the next command:
+
+```bash
+garmin-cli --json login logout
+# {"ok": true, "command": "login logout", "count": 1, "data": [{"logged_out": true, "legacy_token_removed": false}]}
+```
+
+`logged_out` is `false`, still with exit code 0, when there was nothing to delete. The plain-text output lists every file it deleted. A running MCP server keeps the session it already loaded and may save refreshed tokens again after `login logout`, so stop the server before logging out. A legacy `~/.garth` that is a symlink or not a directory is left alone (migration ignores it too).
 
 ### Environment variables (alternative)
 
@@ -85,6 +102,7 @@ garmin-cli health sleep --days 1
 |----------|---------|-------------|
 | `GARMIN_EMAIL` | — | Account email for credential-based login |
 | `GARMIN_PASSWORD` | — | Account password for credential-based login |
+| `GARMIN_MFA_CODE` | — | MFA code for a non-interactive `garmin-cli login`; must be valid for the new challenge (authenticator app), so emailed/SMS codes need an interactive login |
 | `GARMIN_CLI_HTTP_TIMEOUT` | `30` | HTTP request timeout in seconds (float); invalid or non-positive values fall back to `30` |
 | `GARMIN_CLI_RETRY_DELAYS` | `2,4,8` | Comma-separated retry delay sequence in seconds (e.g. `1,2,4`); invalid values fall back to `2,4,8` |
 | `GARMIN_CLI_AUTH_PROBE_TTL` | `600` | Seconds to cache a successful auth probe in the MCP server (float); `0` disables caching and probes on every call |
@@ -98,9 +116,9 @@ garmin-cli --garmin-home /path/to/session login
 garmin-cli --garmin-home /path/to/session health sleep --days 1
 ```
 
-The default session directory is `~/.garminconnect`. It is created with `0o700` permissions. Symlinks are rejected. Do not share this directory.
+The default session directory is `~/.garminconnect`. It is created with `0o700` permissions. A home reached through a symlink is rejected (root-owned system links such as macOS `/tmp` are allowed), and `GARMIN_HOME` must be a directory: a `.json` file path fails with `INVALID_INPUT`. Do not share this directory.
 
-New sessions are stored as `garmin_tokens.json` inside `GARMIN_HOME`. If you still have an existing `~/.garth/garmin_tokens.json`, the CLI will copy it into the new default home on first use. `GARTH_HOME` / `--garth-home` still work as deprecated aliases when you need to keep an older path explicitly.
+New sessions are stored as `garmin_tokens.json` inside `GARMIN_HOME`. If you still have an existing `~/.garth/garmin_tokens.json`, the CLI will copy it into the new default home on first use (created 0600 from the start; a symlinked `~/.garth` or legacy token file is not copied). `GARTH_HOME` / `--garth-home` still work as deprecated aliases when you need to keep an older path explicitly.
 
 ## Troubleshooting
 
@@ -111,7 +129,7 @@ garmin-cli doctor
 garmin-cli doctor --fast --format json  # skip the live session probe
 ```
 
-The checks cover Python, configuration, token-store layout and permissions, the optional MCP install, the authenticated session, and MCP write-surface binding. Paths are home-relative where possible, and credentials are never included. MCP clients can run the same non-interactive checks with the read-only `server_doctor` tool.
+The checks cover Python, configuration, token-store layout and permissions (0700 directory; `garmin_tokens.json` a regular file, not a symlink, with mode 600), the optional MCP install, the authenticated session, and MCP write-surface binding. Paths are home-relative where possible, and credentials are never included. MCP clients can run the same non-interactive checks with the read-only `server_doctor` tool.
 
 ## Output Formats
 
@@ -357,7 +375,7 @@ garmin-cli --json activity list --limit 5
 |------|---------|
 | `AUTH_MISSING` | No credentials found (no session and no env vars) |
 | `AUTH_FAILED` | Credentials rejected by Garmin |
-| `MFA_REQUIRED` | Garmin sent a one-time MFA code; submit it to finish the login (MCP: `submit_mfa_code` tool, CLI: `garmin-cli login`) |
+| `MFA_REQUIRED` | Garmin sent a one-time MFA code; submit it to finish the login (MCP: `submit_mfa_code` tool, CLI: `garmin-cli login` at a terminal; `--mfa-code` / `GARMIN_MFA_CODE` only for authenticator-app codes) |
 | `NOT_FOUND` | API endpoint unavailable (404) |
 | `RATE_LIMITED` | 429 after 3 retries |
 | `SERVER_ERROR` | 5xx after 3 retries |

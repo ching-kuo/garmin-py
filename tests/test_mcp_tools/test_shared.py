@@ -206,6 +206,19 @@ class TestErrorPropagation:
         assert "retry" in payload["recovery_hint"].lower()
         assert payload["retry_after_seconds"] == 2
 
+    def test_login_backoff_reports_its_own_retry_after(self, mocker: Any) -> None:
+        mocker.patch(
+            "garmin_cli.mcp_tools._shared.ensure_authenticated",
+            side_effect=GarminCliError(
+                error="Authentication failed.", error_code="AUTH_FAILED", retry_after_seconds=42
+            ),
+        )
+        server = create_mcp_server(_config())
+        with pytest.raises(ToolError) as exc_info:
+            _call(server, "health_sleep", {"start_date": "2026-01-01", "end_date": "2026-01-01"})
+        payload = json.loads(str(exc_info.value).split(": ", 1)[1])
+        assert payload["retry_after_seconds"] == 42
+
     def test_auth_failed_no_login_hint(self, mocker: Any) -> None:
 
         mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated", side_effect=GarminCliError(error="garth_home path is a symlink", error_code="AUTH_FAILED"))

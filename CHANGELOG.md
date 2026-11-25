@@ -7,6 +7,21 @@
 - `GARMIN_MCP_BEARER_TOKEN` must be at least 32 characters of the RFC 6750 token alphabet (`A-Z a-z 0-9 - . _ ~ + /`, optional trailing `=`); `mcp-server` refuses to start otherwise (generate one with `python -c "import secrets;print(secrets.token_urlsafe(32))"`).
 - `GARMIN_MCP_BEARER_TOKEN` is now enforced on loopback HTTP binds too whenever the variable is present; a present-but-blank value refuses to start on any HTTP bind. Only stdio and loopback binds with the variable absent stay unauthenticated.
 - MCP `activity_download` and `activity_upload` only read and write inside `GARMIN_MCP_FILE_ROOT` (default `~/Downloads/garmin-py`, created 0700 on first download); relative paths resolve under it, absolute paths must use the root's resolved form, no path component may be a symlink (even one pointing inside the root), and the download default moved there from the server's working directory. A custom value must be an absolute path (`~` allowed); one still containing an unexpanded `${...}` placeholder falls back to the default. The CLI `activity download` / `activity upload` commands are unchanged.
+- `garmin-cli --json login` (and `login` with a non-terminal stdin) never prompts: missing credentials now fail with `AUTH_MISSING` (was `INVALID_INPUT`), and an MFA challenge without a supplied code fails with `MFA_REQUIRED`. Interactive prompts go to stderr.
+- `GARMIN_HOME` / `--garmin-home` must be a directory: a `.json` file path (any case) or an existing file fails with `INVALID_INPUT`, and a path reached through a user-owned symlink in any component fails with `AUTH_FAILED` (root-owned system links such as macOS `/tmp` are allowed).
+- After Garmin rejects (bad credentials, 401/403) or throttles (429/427) a login, the MCP server refuses new login attempts for 60 seconds, doubling per consecutive failure up to 15 minutes, and returns the cached error with `retry_after_seconds` (the first failure reports the wait it starts); a rejected MFA code pauses logins the same way, and a 429 on `submit_mfa_code` keeps the challenge but gates resubmission for the pause. The pause resets after a successful login or session resume, or when the configured email/password change. Network errors, timeouts and 5xx during login never pause logins.
+- Login failures are classified instead of always blaming the credentials: Garmin 5xx reports `SERVER_ERROR`, an unreachable Garmin reports `AUTH_FAILED` with a "could not reach Garmin" message, and a throttle in any upstream shape (including SSO 427) reports `RATE_LIMITED`.
+
+### Added
+
+- `garmin-cli login` reads the password from `GARMIN_PASSWORD` when `--password` is absent, accepts `--password-stdin` (piped stdin only; an empty line is `AUTH_MISSING`), and takes an MFA code from `--mfa-code` / `GARMIN_MFA_CODE` (only useful for codes valid for the new challenge, such as authenticator-app codes; emailed/SMS codes still need an interactive login, which prompts and ignores `GARMIN_MFA_CODE`). A rejected MFA code is reported as such, not as bad credentials. `--password` is deprecated (shell history and process-list exposure).
+- `garmin-cli login logout` deletes the saved `garmin_tokens.json` (refusing symlinks) and, for the default home, a legacy `~/.garth/garmin_tokens.json` that migration would otherwise restore; it reports `{"logged_out": true|false, "legacy_token_removed": true|false}` (plain text lists the deleted files) and exits 0 when there was nothing to delete. Stop a running MCP server first: it keeps its loaded session and may save refreshed tokens again.
+- `doctor` checks that `garmin_tokens.json` is a regular file (not a symlink, dangling or not) with mode 600, and names the offending symlink when the Garmin home path passes through one; an uninspectable token store is a check failure, not `INTERNAL_ERROR`.
+
+### Changed
+
+- The first-run `AUTH_MISSING` message leads with "Run `garmin-cli login`" before mentioning `GARMIN_EMAIL` / `GARMIN_PASSWORD`.
+- The `login` help text says it saves session tokens, not credentials.
 
 ### Security
 
@@ -17,6 +32,9 @@
 - `mcp-server --host` rejects empty, whitespace-only, and bracketed non-IPv6 values such as `[]`; they were treated as loopback (no token required) while the HTTP server bound every interface.
 - `CliConfig` no longer includes the password in its `repr`.
 - Install hints now say `pip install "garmin-py[mcp]"`; they named `garmin-cli`, an unrelated PyPI package.
+- Migrating `~/.garth/garmin_tokens.json` refuses a symlinked or non-regular legacy source (a FIFO no longer hangs it), creates the new token file 0600 from the start instead of copying it world-readable and then fixing the mode, never overwrites a token file that appeared meanwhile, works on filesystems without hard links, and can no longer block authentication when it fails.
+- `login status`, `doctor`, and the MCP `login_status` / session resources no longer chmod the Garmin home or migrate legacy tokens while checking status (they may still refresh tokens on disk). Every session resume and save refuses a symlinked `garmin_tokens.json`, dangling links included.
+- A fresh login now saves the client it authenticated, then publishes it; a concurrent status check could previously swap in a stale session that was saved instead.
 
 ### Fixed
 
@@ -25,6 +43,7 @@
 - `garmin-cli --json mcp-server` without the `mcp` extra now prints a JSON error envelope instead of plain text, and startup refusals (such as an invalid bearer token) report `INVALID_INPUT` instead of `INTERNAL_ERROR`.
 - `mcp-server --host [::1]` binds `::1`; the bracketed form previously reached the HTTP server unchanged.
 - HTTP binds on an IPv6 literal host (for example `--host ::1` with a token set) build a valid auth URL instead of failing at startup.
+- Concurrent MCP calls that queued behind an in-progress login for the same Garmin home no longer start a second login once the first succeeds; they re-resume and probe the saved session first and log in only if that fails.
 
 ## [2.13.0] - 2026-11-09
 

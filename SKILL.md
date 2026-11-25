@@ -50,7 +50,7 @@ Always use `--json` for machine-readable output. The tool returns a JSON envelop
 |------|---------|--------|
 | `AUTH_MISSING` | No credentials or session found | No -- configure auth |
 | `AUTH_FAILED` | Credentials rejected | No -- fix credentials |
-| `MFA_REQUIRED` | Garmin sent a one-time MFA code | Ask the user for the code, then `submit_mfa_code` (MCP) or `garmin-cli login` (CLI) |
+| `MFA_REQUIRED` | Garmin sent a one-time MFA code | Ask the user for the code, then `submit_mfa_code` (MCP), or `garmin-cli login` at a terminal (CLI); `--mfa-code` only works for authenticator-app codes |
 | `NOT_FOUND` | Endpoint returned 404 | No |
 | `RATE_LIMITED` | 429 after 3 retries | Yes -- wait and retry |
 | `SERVER_ERROR` | 5xx after 3 retries | Yes -- wait and retry |
@@ -489,12 +489,18 @@ garmin-cli --json device list
 # Interactive login (saves session to ~/.garminconnect)
 garmin-cli login
 
-# Non-interactive login (for scripting)
-garmin-cli login --email user@example.com --password secret
+# Non-interactive login (for scripting): password from GARMIN_PASSWORD or piped stdin,
+# MFA code from --mfa-code or GARMIN_MFA_CODE (--password is deprecated)
+printf '%s\n' "$GARMIN_PW" | garmin-cli --json login --email user@example.com --password-stdin
 
 # Check if a session is active
 garmin-cli --json login status
+
+# Log out: delete the saved token file
+garmin-cli --json login logout
 ```
+
+Under `--json` or with a non-terminal stdin, `login` never prompts: missing credentials fail with `AUTH_MISSING`, and an MFA challenge without a code fails with `MFA_REQUIRED` (exit 1). Every login starts a new challenge, so `--mfa-code` only works for a code valid for it (authenticator app); for emailed or SMS codes, have the user run `garmin-cli login` in a terminal. `--password-stdin` with an empty line fails with `AUTH_MISSING`. `login logout` returns `{"logged_out": true|false, "legacy_token_removed": true|false}` (exit 0 when nothing existed); it refuses symlinks and, for the default home, also deletes a legacy `~/.garth/garmin_tokens.json`. Stop a running MCP server before logging out: it keeps its loaded session and may save refreshed tokens again. Login failures from network errors or Garmin 5xx (`SERVER_ERROR`) are not credential problems; retry later instead of asking for a new password.
 
 `login status` returns `{"ok": true, ..., "data": [{"authenticated": true, "garmin_home": "..."}]}` when a session is present and `"authenticated": false` when not. Exit code is always `0` (it is an informational command).
 

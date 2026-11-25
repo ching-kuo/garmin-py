@@ -69,6 +69,15 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_writes)
 
 
+@pytest.fixture(autouse=True)
+def _reset_login_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the process-wide failed-login backoff from leaking across tests."""
+    from garmin_cli import login_backoff
+
+    monkeypatch.setattr(login_backoff, "_failure", None)
+    monkeypatch.setattr(login_backoff, "_generations", {})
+
+
 # ---------------------------------------------------------------------------
 # Garth mock
 # ---------------------------------------------------------------------------

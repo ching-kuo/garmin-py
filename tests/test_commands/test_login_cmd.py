@@ -8,10 +8,19 @@ from typing import Any
 from unittest.mock import ANY
 from unittest.mock import MagicMock
 
+import pytest
 from click.testing import CliRunner
 
 from garmin_cli.cli import cli
 from tests.helpers import make_http_error as _http_error
+
+
+@pytest.fixture(autouse=True)
+def _interactive_terminal(mocker: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests drive the prompts, so stdin counts as a terminal."""
+    mocker.patch("garmin_cli.commands.login._stdin_is_tty", return_value=True)
+    for name in ("GARMIN_EMAIL", "GARMIN_PASSWORD", "GARMIN_MFA_CODE"):
+        monkeypatch.delenv(name, raising=False)
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +120,8 @@ class TestLoginCommand:
             input="user@example.com\npassword\n",
             tmp_path=tmp_path,
         )
-        assert "email" in result.output.lower()
+        assert "email" in result.stderr.lower()
+        assert "Email:" not in result.stdout  # prompts never pollute stdout
 
     def test_login_prompts_for_password(self, mocker: Any, tmp_path: Path) -> None:
         result, _ = _run_login(
@@ -120,7 +130,7 @@ class TestLoginCommand:
             input="user@example.com\npassword\n",
             tmp_path=tmp_path,
         )
-        assert "password" in result.output.lower()
+        assert "password" in result.stderr.lower()
 
     def test_login_accepts_email_and_password_as_options(
         self, mocker: Any, tmp_path: Path
@@ -160,7 +170,7 @@ class TestLoginCommand:
         assert result.exit_code == 1
         parsed = json.loads(result.output)
         assert parsed["ok"] is False
-        assert parsed["error_code"] == "INVALID_INPUT"
+        assert parsed["error_code"] == "AUTH_MISSING"
 
     def test_login_repairs_insecure_garth_home_permissions(
         self, mocker: Any, tmp_path: Path
@@ -180,7 +190,7 @@ class TestLoginCommand:
 
         assert result.exit_code == 0
         assert stat.S_IMODE(garth_dir.stat().st_mode) == 0o700
-        mock_garth.save.assert_called_once_with(str(garth_dir))
+        mock_garth.save.assert_called_once_with(str(garth_dir), mock_garth.login.return_value)
 
     def test_login_rejects_symlink_garth_home(
         self, mocker: Any, tmp_path: Path
@@ -214,6 +224,76 @@ class TestLoginCommand:
 # ---------------------------------------------------------------------------
 # garmin-cli login — failure paths
 # ---------------------------------------------------------------------------
+
+class TestInteractiveMfa:
+
+    @staticmethod
+    def _login_that_asks_for_mfa(seen: list[str], error: Exception | None = None) -> Any:
+        def _login(*_args: Any, prompt_mfa: Any = None, **_kwargs: Any) -> MagicMock:
+            seen.append(prompt_mfa())
+            if error is not None:
+                raise error
+            return MagicMock()
+
+        return _login
+
+    def test_tty_prompts_for_mfa_even_with_env_code(
+        self, mocker: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GARMIN_MFA_CODE", "111111")
+        seen: list[str] = []
+        mock_garth = MagicMock()
+        mock_garth.login.side_effect = self._login_that_asks_for_mfa(seen)
+        mocker.patch("garmin_cli.commands.login.garth", mock_garth)
+        result = CliRunner(mix_stderr=False).invoke(
+            cli,
+            ["--garmin-home", str(tmp_path / "garth"), "login", "--email", "a@example.com",
+             "--password", "p"],
+            input="222222\n",
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0, result.output
+        assert seen == ["222222"]  # prompted; the env code is ignored at a terminal
+
+    def test_tty_uses_explicit_mfa_code_option(self, mocker: Any, tmp_path: Path) -> None:
+        seen: list[str] = []
+        mock_garth = MagicMock()
+        mock_garth.login.side_effect = self._login_that_asks_for_mfa(seen)
+        mocker.patch("garmin_cli.commands.login.garth", mock_garth)
+
+        result = CliRunner(mix_stderr=False).invoke(
+            cli,
+            ["--garmin-home", str(tmp_path / "garth"), "login", "--email", "a@example.com",
+             "--password", "p", "--mfa-code", "333333"],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0, result.output
+        assert seen == ["333333"]
+
+    def test_rejected_mfa_code_has_its_own_message(self, mocker: Any, tmp_path: Path) -> None:
+        from garminconnect import GarminConnectAuthenticationError
+
+        seen: list[str] = []
+        mock_garth = MagicMock()
+        mock_garth.login.side_effect = self._login_that_asks_for_mfa(
+            seen, GarminConnectAuthenticationError("Widget MFA failed")
+        )
+        mocker.patch("garmin_cli.commands.login.garth", mock_garth)
+
+        result = CliRunner(mix_stderr=False).invoke(
+            cli,
+            ["--json", "--garmin-home", str(tmp_path / "garth"), "login",
+             "--email", "a@example.com", "--password", "p", "--mfa-code", "000000"],
+            catch_exceptions=False,
+        )
+
+        payload = json.loads(result.stdout)
+        assert payload["error_code"] == "AUTH_FAILED"
+        assert "MFA code was rejected" in payload["error"]
+        assert "credentials" not in payload["error"]
+
 
 class TestLoginCommandFailure:
 

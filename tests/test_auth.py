@@ -100,6 +100,9 @@ class TestEnsureAuthenticatedNoCredentials:
         with pytest.raises(GarminCliError) as exc_info:
             ensure_authenticated(config)
         assert exc_info.value.error_code == "AUTH_MISSING"
+        # First-run guidance leads with the interactive login, then env vars.
+        message = exc_info.value.error
+        assert message.index("garmin-cli login") < message.index("GARMIN_EMAIL")
 
 
 
@@ -288,7 +291,10 @@ class TestMFALogin:
         complete_mfa_login(config, "123456")
 
         mock_garth.resume_mfa_login.assert_called_once_with(pending, "123456")
-        mock_garth.save.assert_called_once_with(str(garth_dir))
+        # The verified client is saved explicitly, not whatever the backend is now.
+        mock_garth.save.assert_called_once_with(
+            str(garth_dir), mock_garth.resume_mfa_login.return_value
+        )
         assert auth_module._pending_mfa is None
 
     def test_complete_mfa_login_records_probe_so_next_call_skips_resume(
@@ -442,7 +448,7 @@ class TestMFALogin:
         config = _make_config(garth_home=str(tmp_path / "other_home"))
         complete_mfa_login(config, "123456")
 
-        mock_garth.save.assert_called_once_with(str(pending_dir))
+        assert mock_garth.save.call_args.args[0] == str(pending_dir)
 
     def test_complete_mfa_login_without_pending_raises_invalid_input(
         self, mocker: Any, tmp_path: Path
@@ -809,6 +815,15 @@ class TestProbeSessionStatusReadOnly:
         # The probe is a read surface: it must not chmod the directory.
         assert stat.S_IMODE(garth_dir.stat().st_mode) == 0o755
 
+    def test_probe_uses_read_only_resume(self, mocker: Any, tmp_path: Path) -> None:
+        mock_garth = MagicMock()
+        mocker.patch("garmin_cli.auth.garth", mock_garth)
+
+        probe_session_status(_make_config(garth_home=str(tmp_path)))
+
+        mock_garth.resume.assert_called_once_with(str(tmp_path), read_only=True)
+        mock_garth.connectapi.assert_called_once()
+
     def test_symlinked_home_fails_without_touching_backend(
         self, mocker: Any, tmp_path: Path
     ) -> None:
@@ -816,14 +831,19 @@ class TestProbeSessionStatusReadOnly:
         real.mkdir(mode=0o700)
         link = tmp_path / "garth"
         link.symlink_to(real)
-        mock_garth = MagicMock()
-        mocker.patch("garmin_cli.auth.garth", mock_garth)
+        # Real backend.resume: its read-only validation must refuse the link
+        # before any client is built or published.
+        garmin_cls = mocker.patch("garmin_cli.backend.Garmin")
+        mocker.patch("garmin_cli.backend._backend", None)
 
         result = probe_session_status(_make_config(garth_home=str(link)))
 
         assert result.authenticated is False
         assert result.error_code == "AUTH_FAILED"
-        mock_garth.resume.assert_not_called()
+        garmin_cls.assert_not_called()
+        from garmin_cli import backend
+
+        assert backend._backend is None
 
 
 # ---------------------------------------------------------------------------
