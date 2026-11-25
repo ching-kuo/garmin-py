@@ -174,11 +174,20 @@ class TestBuildGarminPayload:
         payload = build_garmin_payload(workout)
         step = payload["workoutSegments"][0]["workoutSteps"][0]
         target = step["targetType"]
-        assert target["workoutTargetTypeKey"] == "cadence.zone"
+        # Garmin's catalog key for type 3 is "cadence" (no "cadence.zone").
+        assert target["workoutTargetTypeKey"] == "cadence"
         assert target["workoutTargetTypeId"] == 3
         assert step.get("targetValueOne") == 170
         assert step.get("targetValueTwo") == 180
         assert "zoneNumber" not in step
+
+    def test_open_target_maps_to_no_target(self) -> None:
+        # Garmin has no "open" target; id 6 is pace.zone.
+        workout = _running_workout(steps=[
+            {"type": "interval", "duration": {"type": "time", "value": 300}, "target": {"type": "open"}}
+        ])
+        step = build_garmin_payload(workout)["workoutSegments"][0]["workoutSteps"][0]
+        assert step["targetType"] == {"workoutTargetTypeId": 1, "workoutTargetTypeKey": "no.target"}
 
     def test_repeat_step_uses_repeat_group_dto(self) -> None:
         workout = _running_workout(steps=[

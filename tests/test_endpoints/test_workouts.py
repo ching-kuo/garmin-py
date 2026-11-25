@@ -1,7 +1,7 @@
 """Tests for garmin_cli.endpoints.workouts — list_workouts, get_workout, get_calendar_range."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -9,6 +9,7 @@ import pytest
 
 from garmin_cli.endpoints.workouts import (
     get_calendar_range,
+    get_calendar_range_counted,
     get_workout,
     list_workouts,
 )
@@ -183,6 +184,170 @@ class TestGetCalendarRange:
         get_calendar_range(date(2026, 3, 11), date(2026, 3, 17))
         call_str = str(mock_garth.connectapi.call_args_list[0])
         assert "/calendar-service/year/2026/month/2/day/11/start/1" in call_str
+
+
+class TestCalendarWeekWalk:
+    """Live: each page is the Monday-Sunday week containing the requested day."""
+
+    def _patch(
+        self,
+        mocker: Any,
+        items: list[dict[str, Any]],
+        by_period: Any = None,
+        *,
+        first_weekday: int = 0,
+        end_date: str | None = None,
+        bounds: bool = True,
+    ) -> MagicMock:
+        """Pages are the week (starting on *first_weekday*, Monday=0) containing the day."""
+        mock_garth = MagicMock()
+
+        def connectapi(path: str, **kwargs: Any) -> Any:
+            if path.startswith("/workout-service/schedule/workoutScheduleByPeriod"):
+                return [] if by_period is None else by_period
+            parts = path.split("/")
+            day = date(int(parts[3]), int(parts[5]) + 1, int(parts[7]))
+            week_start = day - timedelta(days=(day.weekday() - first_weekday) % 7)
+            week_end = week_start + timedelta(days=6)
+            page: dict[str, Any] = {
+                "calendarItems": [
+                    item for item in items if week_start.isoformat() <= item["date"] <= week_end.isoformat()
+                ],
+            }
+            if bounds:
+                page.update(startDate=week_start.isoformat(), endDate=end_date or week_end.isoformat())
+            return page
+
+        mock_garth.connectapi.side_effect = connectapi
+        mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
+        return mock_garth
+
+    def test_wednesday_to_next_tuesday_fetches_the_week_containing_end(self, mocker: Any) -> None:
+        items = [
+            {"id": 1, "itemType": "activity", "date": "2026-11-17", "workoutId": None},
+            {"id": 2, "itemType": "workout", "date": "2026-11-19", "workoutId": 7},
+            {"id": 3, "itemType": "weight", "date": "2026-11-23", "workoutId": None},
+            {"id": 4, "itemType": "nap", "date": "2026-11-24", "workoutId": None},
+            {"id": 5, "itemType": "activity", "date": "2026-11-25", "workoutId": None},
+        ]
+        self._patch(mocker, items)
+
+        result = get_calendar_range(date(2026, 11, 18), date(2026, 11, 24))
+
+        assert [item["id"] for item in result] == [2, 3, 4]
+
+    def test_pages_are_deduplicated_across_overlapping_requests(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        page = {"calendarItems": [{"id": 2, "itemType": "workout", "date": "2026-11-19", "workoutId": 7}]}
+        mock_garth.connectapi.side_effect = lambda path, **kwargs: [] if "ByPeriod" in path else page
+        mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
+
+        # No startDate/endDate in the pages: the walk aligns to Monday and refetches.
+        result = get_calendar_range(date(2026, 11, 18), date(2026, 11, 24))
+
+        assert [item["id"] for item in result] == [2]
+
+    def test_non_workout_item_id_does_not_hide_a_schedule(self, mocker: Any) -> None:
+        items = [{"id": 9001, "itemType": "activity", "date": "2026-11-19", "workoutId": None}]
+        self._patch(mocker, items, [_by_period_entry(9001, "2026-11-19")])
+
+        result = get_calendar_range(date(2026, 11, 18), date(2026, 11, 24))
+
+        assert [(item["itemType"], item["id"]) for item in result] == [("activity", 9001), ("workout", 9001)]
+        rows = serialize_calendar_workout({"calendarItems": result})
+        assert [row["workout_schedule_id"] for row in rows] == [None, 9001]
+
+    def test_sunday_start_pages_cover_the_range(self, mocker: Any) -> None:
+        items = [
+            {"id": 1, "itemType": "activity", "date": "2026-11-22", "workoutId": None},
+            {"id": 2, "itemType": "workout", "date": "2026-11-24", "workoutId": 7},
+        ]
+        mock_garth = self._patch(mocker, items, first_weekday=6)
+
+        result = get_calendar_range(date(2026, 11, 18), date(2026, 11, 24))
+
+        assert [item["id"] for item in result] == [1, 2]
+        assert mock_garth.connectapi.call_count == 3  # two pages plus the by-period lookup
+
+    def test_stale_end_date_falls_back_to_week_alignment(self, mocker: Any) -> None:
+        items = [{"id": 3, "itemType": "weight", "date": "2026-11-24", "workoutId": None}]
+        mock_garth = self._patch(mocker, items, end_date="2020-01-01")
+
+        result = get_calendar_range(date(2026, 11, 18), date(2026, 12, 8))
+
+        assert [item["id"] for item in result] == [3]
+        # 21 days: at most ceil(21 / 7) + 1 page reads, plus the by-period lookup.
+        assert mock_garth.connectapi.call_count <= 4 + 1
+
+    def test_null_calendar_items_and_date_max_are_safe(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.connectapi.side_effect = lambda path, **kwargs: [] if "ByPeriod" in path else {"calendarItems": None}
+        mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
+
+        assert get_calendar_range(date.max - timedelta(days=2), date.max) == []
+
+    def test_schedule_dedupe_matches_the_serializer(self, mocker: Any) -> None:
+        # No itemType, schedule id only under workoutScheduleId: still a schedule.
+        legacy = {"workoutScheduleId": 9003, "date": "2026-11-21", "workoutId": 77}
+        on_calendar = {"id": 9004, "itemType": "workout", "date": "2026-11-22", "workoutId": 77}
+        # An unknown type naming a workout (Garmin Coach) is a schedule.
+        coach = {"id": 9005, "itemType": "fbtAdaptiveWorkout", "date": "2026-11-23", "workoutId": 78}
+        # A known non-schedule item naming a workout is not, whatever its id.
+        activity = {"id": 9001, "itemType": "activity", "date": "2026-11-19", "workoutId": 77}
+        idless = {"itemType": "workout", "date": "2026-11-24", "workoutId": 79}
+        by_period = [
+            _by_period_entry(9001, "2026-11-19"),
+            _by_period_entry(9002, "2026-11-20"),
+            _by_period_entry(9002, "2026-11-20"),
+            _by_period_entry(9003, "2026-11-21"),
+            _by_period_entry(9004, "2026-11-22"),
+            _by_period_entry(9005, "2026-11-23", workout_id=78),
+        ]
+        self._patch(mocker, [legacy, on_calendar, coach, activity, idless], by_period)
+
+        result = get_calendar_range(date(2026, 11, 18), date(2026, 11, 24))
+        rows = serialize_calendar_workout({"calendarItems": result})
+
+        assert [(row["date"], row["workout_schedule_id"]) for row in rows] == [
+            ("2026-11-19", None),
+            ("2026-11-19", 9001),
+            ("2026-11-20", 9002),
+            ("2026-11-21", 9003),
+            ("2026-11-22", 9004),
+            ("2026-11-23", 9005),
+            ("2026-11-24", None),
+        ]
+
+    def test_missing_bounds_still_query_the_end_date_page(self, mocker: Any) -> None:
+        # Sunday-start account, pages without startDate/endDate, Wed..Sun.
+        items = [{"id": 6, "itemType": "nap", "date": "2026-11-22", "workoutId": None}]
+        mock_garth = self._patch(mocker, items, first_weekday=6, bounds=False)
+
+        result = get_calendar_range(date(2026, 11, 18), date(2026, 11, 22))
+
+        assert [item["id"] for item in result] == [6]
+        assert mock_garth.connectapi.call_count <= 2 + 1
+
+    @pytest.mark.parametrize(
+        ("page", "by_period"),
+        [({"calendarItems": None}, []), ({}, []), (None, []), ({"calendarItems": []}, None), ({"calendarItems": []}, {})],
+    )
+    def test_strict_read_rejects_unusable_responses(self, mocker: Any, page: Any, by_period: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.connectapi.side_effect = lambda path, **kwargs: by_period if "ByPeriod" in path else page
+        mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
+
+        with pytest.raises(GarminCliError):
+            get_calendar_range(date(2026, 11, 18), date(2026, 11, 18), strict=True)
+        # Non-strict reads still treat them as empty.
+        assert get_calendar_range(date(2026, 11, 18), date(2026, 11, 18)) == []
+
+    def test_request_count_reports_pages_plus_lookup(self, mocker: Any) -> None:
+        self._patch(mocker, [])
+
+        items, requests = get_calendar_range_counted(date(2026, 11, 18), date(2026, 11, 24))
+
+        assert (items, requests) == ([], 3)
 
 
 def _by_period_entry(schedule_id: int, day: str, workout_id: int = 77) -> dict[str, Any]:

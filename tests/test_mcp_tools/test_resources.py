@@ -11,6 +11,7 @@ import pytest
 pytest.importorskip("mcp", reason="mcp extra not installed")
 
 from garmin_cli import auth as auth_module  # noqa: E402
+from garmin_cli import login_backoff  # noqa: E402
 from garmin_cli.auth import SessionProbeResult  # noqa: E402
 from garmin_cli.mcp_server import create_mcp_server  # noqa: E402
 from garmin_cli.mcp_tools import resources as resources_module  # noqa: E402
@@ -21,6 +22,7 @@ from tests.test_mcp_tools.support import _config  # noqa: E402
 def _fresh_caches(monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate the profile cache and shared auth-probe cache between tests."""
     monkeypatch.setattr(resources_module, "_profile_cache", {})
+    monkeypatch.setattr(login_backoff, "_generations", {})
     auth_module._invalidate_probe_cache()
 
 
@@ -137,6 +139,10 @@ def test_sleep_template_cold_start_uses_probe_resumed_backend(
     ("uri", "error_code"),
     [
         ("garmin://activity/not-an-id", "INVALID_INPUT"),
+        ("garmin://activity/+12", "INVALID_INPUT"),
+        ("garmin://activity/1_2", "INVALID_INPUT"),
+        ("garmin://activity/0", "INVALID_INPUT"),
+        ("garmin://activity/" + "9" * 21, "INVALID_INPUT"),
         ("garmin://health/sleep/not-a-date", "INVALID_INPUT"),
     ],
 )
@@ -319,3 +325,161 @@ def test_profile_cache_hit_makes_no_upstream_calls(
     assert first == second
     assert probe.call_count == 1
     assert thresholds.call_count == 1
+
+
+def _authenticated_profile_mocks(mocker: Any, monkeypatch: Any) -> Any:
+    monkeypatch.setenv("GARMIN_CLI_AUTH_PROBE_TTL", "600")
+    mocker.patch(
+        "garmin_cli.mcp_tools.resources._auth_state",
+        return_value=("authenticated", {"state": "authenticated"}),
+    )
+    mocker.patch("garmin_cli.mcp_tools.resources.get_latest_vo2max", return_value=[])
+    mocker.patch("garmin_cli.mcp_tools.resources.get_race_predictions", return_value={})
+    mocker.patch("garmin_cli.mcp_tools.resources.list_activities", return_value=[])
+    return mocker.patch(
+        "garmin_cli.mcp_tools.resources.get_all_thresholds",
+        return_value={"thresholds": []},
+    )
+
+
+def test_profile_vo2max_keeps_the_latest_row_per_sport(mocker: Any, monkeypatch: Any) -> None:
+    _authenticated_profile_mocks(mocker, monkeypatch)
+    mocker.patch(
+        "garmin_cli.mcp_tools.resources.get_latest_vo2max",
+        return_value=[
+            {"calendarDate": "2026-01-01", "vo2MaxValue": 50, "sport": "running"},
+            {"calendarDate": "2026-01-03", "vo2MaxValue": 58, "sport": "cycling"},
+            {"calendarDate": "2026-01-05", "vo2MaxValue": 52, "sport": "running"},
+            # A newer day without a value must not hide the latest real one.
+            {"calendarDate": "2026-01-07", "vo2MaxValue": None, "sport": "cycling"},
+        ],
+    )
+
+    profile = _read(create_mcp_server(_config()), "garmin://athlete/profile")
+
+    assert sorted(profile["data"]["vo2max"], key=lambda row: row["sport"]) == [
+        {"date": "2026-01-03", "vo2max": 58, "sport": "cycling"},
+        {"date": "2026-01-05", "vo2max": 52, "sport": "running"},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("errors", "cached"),
+    [
+        (["RATE_LIMITED"], False),
+        (["SERVER_ERROR"], False),
+        (["NETWORK_ERROR"], False),
+        (["NOT_FOUND"], True),
+        (["NOT_FOUND", "RATE_LIMITED"], False),
+        ([None], False),  # a non-Garmin exception
+    ],
+)
+def test_profile_caches_only_when_every_failure_is_not_found(
+    mocker: Any, monkeypatch: Any, errors: list[str | None], cached: bool
+) -> None:
+    from garmin_cli.exceptions import GarminCliError
+
+    def failure(code: str | None) -> Exception:
+        return RuntimeError("boom") if code is None else GarminCliError(error="boom", error_code=code)
+
+    thresholds = _authenticated_profile_mocks(mocker, monkeypatch)
+    thresholds.side_effect = failure(errors[0])
+    if len(errors) > 1:
+        mocker.patch("garmin_cli.mcp_tools.resources.get_race_predictions", side_effect=failure(errors[1]))
+    server = create_mcp_server(_config())
+
+    first = _read(server, "garmin://athlete/profile")
+    _read(server, "garmin://athlete/profile")
+
+    assert first["unavailable"][0] == {"section": "thresholds", "reason": "unavailable"}
+    assert thresholds.call_count == (1 if cached else 2)
+
+
+def test_profile_cache_is_dropped_when_the_token_file_changes(
+    mocker: Any, monkeypatch: Any, tmp_path: Any
+) -> None:
+    # A login or logout in another process rewrites or removes the token file.
+    thresholds = _authenticated_profile_mocks(mocker, monkeypatch)
+    token_file = tmp_path / "garmin_tokens.json"
+    token_file.write_text("{}")
+    server = create_mcp_server(_config(garth_home=str(tmp_path)))
+
+    _read(server, "garmin://athlete/profile")
+    _read(server, "garmin://athlete/profile")
+    token_file.write_text('{"rotated": true}')
+    _read(server, "garmin://athlete/profile")
+    token_file.unlink()
+    _read(server, "garmin://athlete/profile")
+
+    assert thresholds.call_count == 3
+
+
+@pytest.mark.parametrize("change", ["logout", "account_switch"])
+def test_cross_process_session_change_refreshes_auth_and_profile(
+    mocker: Any, monkeypatch: Any, tmp_path: Any, change: str
+) -> None:
+    # The real auth-state path: a warm probe cache, then another process
+    # logs out (token file removed) or logs in as someone else (rewritten).
+    monkeypatch.setenv("GARMIN_CLI_AUTH_PROBE_TTL", "600")
+    token_file = tmp_path / "garmin_tokens.json"
+    token_file.write_text("{}")
+    auth_module._record_probe_ok(auth_module._home_key(str(tmp_path)))
+    probe = mocker.patch(
+        "garmin_cli.mcp_tools.resources.probe_session_status",
+        return_value=SessionProbeResult(
+            authenticated=change == "account_switch", garmin_home=str(tmp_path), latency_ms=1.0, detail=""
+        ),
+    )
+    thresholds = mocker.patch(
+        "garmin_cli.mcp_tools.resources.get_all_thresholds", return_value={"thresholds": []}
+    )
+    mocker.patch("garmin_cli.mcp_tools.resources.get_latest_vo2max", return_value=[])
+    mocker.patch("garmin_cli.mcp_tools.resources.get_race_predictions", return_value={})
+    mocker.patch("garmin_cli.mcp_tools.resources.list_activities", return_value=[])
+    server = create_mcp_server(_config(garth_home=str(tmp_path)))
+
+    assert _read(server, "garmin://athlete/profile")["auth_state"] == "authenticated"
+    probe.assert_not_called()  # the warm probe cache answered
+    if change == "logout":
+        token_file.unlink()
+    else:
+        token_file.write_text('{"account": "other"}')
+    second = _read(server, "garmin://athlete/profile")
+
+    probe.assert_called_once()
+    if change == "logout":
+        assert second["auth_state"] == "unauthenticated"
+        assert thresholds.call_count == 1
+    else:
+        assert second["auth_state"] == "authenticated"
+        assert thresholds.call_count == 2
+
+
+def test_profile_snapshot_is_not_cached_when_the_session_changes_mid_fetch(
+    mocker: Any, monkeypatch: Any, tmp_path: Any
+) -> None:
+    thresholds = _authenticated_profile_mocks(mocker, monkeypatch)
+    token_file = tmp_path / "garmin_tokens.json"
+    token_file.write_text("{}")
+    mocker.patch(
+        "garmin_cli.mcp_tools.resources.get_race_predictions",
+        side_effect=lambda: token_file.write_text('{"rotated": true}') and {},
+    )
+    server = create_mcp_server(_config(garth_home=str(tmp_path)))
+
+    _read(server, "garmin://athlete/profile")
+    _read(server, "garmin://athlete/profile")
+
+    assert thresholds.call_count == 2
+
+
+def test_profile_cache_is_dropped_after_a_new_login(mocker: Any, monkeypatch: Any) -> None:
+    thresholds = _authenticated_profile_mocks(mocker, monkeypatch)
+    config = _config()
+    server = create_mcp_server(config)
+
+    _read(server, "garmin://athlete/profile")
+    login_backoff.record_success(auth_module._home_key(config.garth_home))
+    _read(server, "garmin://athlete/profile")
+
+    assert thresholds.call_count == 2

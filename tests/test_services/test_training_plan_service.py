@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
+
+from garmin_cli.serializers import serialize_workout_detail
 from garmin_cli.services.training_plan import preview_training_plan, validate_training_plan
+from garmin_cli.workout_builder import build_garmin_payload
 
 
 def _plan() -> dict:
@@ -139,6 +143,74 @@ def test_preview_reapplied_move_is_a_keep_not_a_conflict() -> None:
     )
     assert result["complete"] is True
     assert result["operations"][0]["action"] == "keep"
+
+
+def test_preview_keeps_an_applied_inline_workout_with_open_target() -> None:
+    # "open" is sent as no.target and reads back as no.target; a reapply must match.
+    workout = {
+        "name": "Easy",
+        "sport": "running",
+        "steps": [
+            {"type": "warmup", "duration": {"type": "time", "value": 300}, "target": {"type": "open"}},
+            {"type": "interval", "duration": {"type": "time", "value": 600}, "target": {"type": "no.target"}},
+        ],
+    }
+    payload = {**build_garmin_payload(workout), "workoutId": 10}
+    projection = serialize_workout_detail(payload)[0]["write_projection"]
+    plan = _plan()
+    plan["entries"] = [{"entry_id": "run-1", "date": "2026-07-10", "workout": workout}]
+
+    result = preview_training_plan(
+        plan,
+        [{"date": "2026-07-10", "workout_id": 10, "workout_schedule_id": 99}],
+        {10: projection},
+    )
+
+    assert [operation["action"] for operation in result["operations"]] == ["keep"]
+    assert result["conflicts"] == []
+
+
+def test_preview_inline_match_ignores_int_float_and_null_target_differences() -> None:
+    workout = {
+        "name": "Cadence",
+        "sport": "running",
+        "steps": [
+            {"type": "interval", "duration": {"type": "time", "value": 120}, "target": {"type": "cadence.zone", "min": 170, "max": 180}},
+            {"type": "rest", "duration": {"type": "time", "value": 60}, "target": {"type": "open"}},
+        ],
+    }
+    # Garmin reads values back as floats, and a rest step's target as null.
+    projection = {
+        "name": "Cadence",
+        "sport": "running",
+        "steps": [
+            {"type": "interval", "duration": {"type": "time", "value": 120.0}, "target": {"type": "cadence.zone", "min": 170.0, "max": 180.0}},
+            {"type": "rest", "duration": {"type": "time", "value": 60.0}, "target": None},
+        ],
+    }
+    plan = _plan()
+    plan["entries"] = [{"entry_id": "run-1", "date": "2026-07-10", "workout": workout}]
+
+    result = preview_training_plan(plan, [{"date": "2026-07-10", "workout_id": 10, "workout_schedule_id": 99}], {10: projection})
+
+    assert [operation["action"] for operation in result["operations"]] == ["keep"]
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"date": "2026-07-10", "workout_id": 10, "workout_schedule_id": None, "item_type": "activity"},
+        {"date": "2026-07-10", "workout_id": 10, "workout_schedule_id": None},  # id-less schedule
+    ],
+)
+def test_preview_keep_requires_a_positive_destination_schedule_id(row: dict) -> None:
+    plan = _plan()
+    plan["entries"][0].update({"move_from_schedule_id": 20, "expected_source_date": "2026-07-05"})
+    source = {"date": "2026-07-05", "workout_id": 10, "workout_schedule_id": 20}
+
+    result = preview_training_plan(plan, [source, row], {10: None})
+
+    assert "keep" not in [operation["action"] for operation in result["operations"]]
 
 
 def test_preview_flags_destination_occupied_by_unrelated_workout() -> None:

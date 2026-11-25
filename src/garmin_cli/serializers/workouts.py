@@ -21,6 +21,7 @@ from garmin_cli.workout_schema import (
     STEP_TYPES,
     TARGET_TYPES,
     ZONE_TARGETS,
+    calendar_schedule_id,
     validate_workout_input,
 )
 
@@ -84,6 +85,7 @@ _CALENDAR_WORKOUT_TABLE = FieldTable(
         FieldEntry("date", (("date",),)),
         FieldEntry("id", (("workoutId",), ("id",))),
         FieldEntry("workout_id", (("workoutId",),)),
+        # Overwritten by calendar_schedule_id(), which also drops non-schedule rows.
         FieldEntry("workout_schedule_id", (("workoutScheduleId",), ("id",))),
         FieldEntry("name", (("title",),)),
         # Live calendar workout items carry only ``sportTypeKey`` (verified
@@ -101,17 +103,15 @@ _CALENDAR_WORKOUT_TABLE = FieldTable(
 
 
 def serialize_calendar_workout(raw: Any) -> list[dict[str, Any]]:
-    items = raw.get("calendarItems", []) if isinstance(raw, dict) else []
-    rows = _CALENDAR_WORKOUT_TABLE.project_all(
-        [item for item in items if isinstance(item, dict)]
-    )
+    items = raw.get("calendarItems") if isinstance(raw, dict) else None
+    dict_items = [item for item in items or [] if isinstance(item, dict)]
+    rows = _CALENDAR_WORKOUT_TABLE.project_all(dict_items)
     # Live calendar items carry the schedule id in ``id`` (verified against
     # the live API on 2026-07-27; ``workoutScheduleId`` is absent there and
-    # only appears in schedule-write responses). ``id`` on race/event rows is
-    # not a schedule id, so the fallback applies only to scheduled workouts.
-    for row in rows:
-        if row["workout_id"] is None:
-            row["workout_schedule_id"] = None
+    # only appears in schedule-write responses). ``id`` on activity, weight or
+    # nap rows is not a schedule id; the calendar merge uses the same rule.
+    for item, row in zip(dict_items, rows, strict=True):
+        row["workout_schedule_id"] = calendar_schedule_id(item)
     return rows
 
 
@@ -138,11 +138,18 @@ def _target_type_key(step: dict[str, Any]) -> Any:
     return _coalesce(target_type, _get_nested(step, "target", "targetType"))
 
 
+# Garmin wire key -> user-facing write-schema name, for keys that differ
+# (pace.zone -> speed.zone, cadence -> cadence.zone); no.target stays itself.
+_TARGET_NAMES_BY_WIRE_KEY = {
+    wire_key: name for name, (wire_key, _type_id) in TARGET_TYPES.items() if wire_key not in TARGET_TYPES
+}
+
+
 def _normalize_target(step: dict[str, Any]) -> dict[str, Any] | None:
     target_type = _target_type_key(step)
     if target_type is None:
         return None
-    target_type = "speed.zone" if target_type == "pace.zone" else target_type
+    target_type = _TARGET_NAMES_BY_WIRE_KEY.get(target_type, target_type)
     target: dict[str, Any] = {"type": target_type}
     if target_type in ZONE_TARGETS:
         target["zone"] = _coalesce(step.get("zoneNumber"), step.get("targetValueOne"))

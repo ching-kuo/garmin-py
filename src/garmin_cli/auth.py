@@ -22,7 +22,7 @@ from garmin_cli.exceptions import (
     raise_unless_rejected,
     resume_error,
 )
-from garmin_cli.token_store import ensure_secure_directory, expand_garth_home
+from garmin_cli.token_store import ensure_secure_directory, expand_garth_home, token_file_identity
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,9 @@ logger = logging.getLogger(__name__)
 _DEFAULT_PROBE_TTL: float = 600.0
 
 _probe_cache_lock: threading.Lock = threading.Lock()
-# Map of garth_home -> timestamp of last successful probe (monotonic clock).
-_last_probe_ok: dict[str, float] = {}
+# Map of garth_home -> (monotonic time of the last successful probe, token
+# file identity then); a login or logout in any process changes the identity.
+_last_probe_ok: dict[str, tuple[float, tuple[int, int, int] | None]] = {}
 # The garth_home for which the backend is currently loaded.
 _cached_garth_home: str | None = None
 
@@ -59,24 +60,26 @@ def _get_probe_ttl() -> float:
 
 
 def _probe_cache_hit(garth_home: str, ttl: float) -> bool:
-    """Return True when the cache entry is valid (TTL > 0 and not expired)."""
+    """Return True when the entry is valid: TTL > 0, not expired, same token file."""
     if ttl == 0:
         return False
     with _probe_cache_lock:
         if _cached_garth_home != garth_home:
             return False
-        last = _last_probe_ok.get(garth_home)
-        if last is None:
-            return False
-        return (time.monotonic() - last) < ttl
+        entry = _last_probe_ok.get(garth_home)
+    if entry is None:
+        return False
+    last, identity = entry
+    return (time.monotonic() - last) < ttl and token_file_identity(garth_home) == identity
 
 
 def _record_probe_ok(garth_home: str) -> None:
-    """Record a successful probe for *garth_home*."""
+    """Record a successful probe for *garth_home* and its current token file."""
+    identity = token_file_identity(garth_home)
     with _probe_cache_lock:
         global _cached_garth_home
         _cached_garth_home = garth_home
-        _last_probe_ok[garth_home] = time.monotonic()
+        _last_probe_ok[garth_home] = (time.monotonic(), identity)
 
 
 def _invalidate_probe_cache(garth_home: str | None = None) -> None:

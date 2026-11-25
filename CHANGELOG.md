@@ -20,6 +20,10 @@
 - A workout update must include at least one of `name`, `sport`, `description`, or `steps`; an empty `{}` update is `INVALID_INPUT`.
 - Workout `description` is capped at 1024 characters.
 - `training_plan_reschedule` returns a `destination_occupied` conflict without writing when the new date already holds a different workout; it used to schedule on top of it.
+- Workout target `open` is sent to Garmin as `no.target` (id 1); it was sent as id 6, which is `pace.zone`. `cadence.zone` targets are sent with Garmin's key `cadence`.
+- `coach_snapshot` / `coach snapshot` accept `recent_daily_days` 1-9 (was 1-14, but anything above 9 always exceeded the request cap), and the request cap is 32 (was 31) because the seven-day plan window can span two calendar weeks.
+- Activity, workout, and schedule ids must be positive integers: `0`, negative ids, booleans, and floats are `INVALID_INPUT` (CLI) or a tool validation error (MCP). CLI ids and `garmin://activity/{id}` must be plain ASCII digits, at most 20 (no sign, spaces, or `_`); MCP id parameters are strict integers, so `true`, `1.0`, and `"1"` fail schema validation instead of being coerced to `1`.
+- Calendar items of type activity, weight, or nap never report a `workout_schedule_id`, even when they carry a `workoutId`; other items with a `workoutId` (including Garmin Coach types) do. Training plans no longer treat such items as occupying or satisfying a date.
 
 ### Added
 
@@ -31,6 +35,12 @@
 
 - The first-run `AUTH_MISSING` message leads with "Run `garmin-cli login`" before mentioning `GARMIN_EMAIL` / `GARMIN_PASSWORD`.
 - The `login` help text says it saves session tokens, not credentials.
+- CLI `--days`, `--ahead`, and default date ranges (and `health status` / `activity list` relative dates) count from today in the Garmin profile timezone, like the MCP server, instead of the host date; explicit `--date` / `--from` / `--to` are unchanged.
+- Paces are rounded to the nearest second instead of truncated (2.778 m/s reads 6:00, not 5:59); NaN, infinite, negative, and boolean values give no pace.
+- `garmin://athlete/profile` returns the latest VO2max row per sport (ignoring days without a value), caches a snapshot only when every failed section was `NOT_FOUND` and the session did not change while it was fetched, and drops its cached snapshot after a login, MFA completion, or logout in any process (it watches the token file's metadata, never its contents).
+- The MCP server's cached session check is dropped when `garmin_tokens.json` changes, so a `garmin-cli login` or `login logout` in another process takes effect on the next call instead of after the probe TTL.
+- Strict calendar reads (training-plan rechecks) fail, and report `unknown`, when a calendar page or the schedule lookup returns no item list, instead of reading it as empty.
+- `coach_snapshot` `provenance.completed_requests` counts the calendar pages actually read (one or two) instead of always charging the maximum.
 
 ### Security
 
@@ -74,6 +84,13 @@
 - The `training_plan_apply` and `training_plan_reschedule` rechecks no longer treat a schedule as gone when Garmin's supplemental schedule lookup failed and only the calendar pages were read.
 - `training_plan_apply` rollback records a failure of any kind in one cleanup step as an `unknown` operation with its `error_code` and continues with the remaining cleanup, instead of escaping with an internal error.
 - `training_plan_reschedule` reports `destination_occupied` when the new date holds a different workout even if the same workout is also there.
+- Stress rows use Garmin's `calendarDate`; they were dated with the raw epoch-millisecond sample timestamp (for example `"1795446000000"`), which dropped every stress day from `coach_snapshot` baselines.
+- `workout calendar` and every calendar-based tool fetch each Garmin calendar week the range touches (walking by the week each page returns), so a range such as Wednesday to the next Tuesday no longer drops the last week's items; items repeated across pages are listed once, only workout schedule items count as already-scheduled when merging Garmin Coach sessions, and a page with `calendarItems: null` or inconsistent bounds no longer breaks the walk.
+- Planned-versus-actual reconciliation scores heart-rate zone intervals with Garmin's live time-in-zone data, which has only zone floors (a zone runs up to, not including, the next zone's floor; zone 5 is open-ended; a missing next zone is `insufficient_data`), instead of marking every interval `insufficient_data`.
+- `training_plan_preview` / `training_plan_apply` treat an inline workout as already applied when Garmin holds it with `open` read back as `no.target` or a null target, or whole numbers read back as floats (180 vs 180.0), instead of reporting `destination_occupied`; a date only counts as already holding the workout when its schedule id is known, and apply never removes a source without a verified destination schedule.
+- `training_plan_reschedule` onto a date that already holds the same workout rechecks the calendar when removing the source fails in a way that may have landed: a source that is gone is `complete`, an unreadable recheck is `unknown`.
+- Running cadence targets are scored against full steps per minute (`directDoubleCadence`, or `directRunCadence` doubled when its median is below 120, i.e. per foot); the per-foot stream made every running cadence sample read about half.
+- `workout get` maps Garmin's `cadence` target key back to `cadence.zone`, so cadence workouts get a `write_projection`.
 
 ## [2.13.0] - 2026-11-09
 

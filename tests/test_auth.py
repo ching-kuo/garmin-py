@@ -560,6 +560,27 @@ class TestProbeTtlCache:
         mock_garth.resume.assert_not_called()
         mock_garth.connectapi.assert_not_called()
 
+    def test_token_file_change_from_another_process_re_probes(
+        self, mocker: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A login/logout elsewhere rewrites or removes the token file: no cache hit."""
+        monkeypatch.setenv("GARMIN_CLI_AUTH_PROBE_TTL", "600")
+        garth_dir = tmp_path / "garth"
+        garth_dir.mkdir(mode=0o700)
+        token_file = garth_dir / "garmin_tokens.json"
+        token_file.write_text("{}")
+        mock_garth = MagicMock()
+        mocker.patch("garmin_cli.auth.garth", mock_garth)
+        config = _make_config(garth_home=str(garth_dir))
+
+        ensure_authenticated(config)
+        ensure_authenticated(config)
+        assert mock_garth.resume.call_count == 1
+
+        token_file.write_text('{"account": "other"}')
+        ensure_authenticated(config)
+        assert mock_garth.resume.call_count == 2
+
     def test_ttl_expiry_re_probes(
         self, mocker: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

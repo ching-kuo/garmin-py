@@ -17,6 +17,69 @@ from garmin_cli.mcp_tools._shared import _envelope  # noqa: E402
 from tests.test_mcp_tools.support import _call, _config  # noqa: E402
 
 
+_ID_TOOLS = [
+    ("activity_get", "activity_id", {}),
+    ("activity_weather", "activity_id", {}),
+    ("activity_laps", "activity_id", {}),
+    ("activity_hr_zones", "activity_id", {}),
+    ("activity_metrics_describe", "activity_id", {}),
+    ("activity_detail_metrics", "activity_id", {}),
+    ("activity_download", "activity_id", {}),
+    ("activity_delete", "activity_id", {}),
+    ("activity_rename", "activity_id", {"name": "x"}),
+    ("activity_set_type", "activity_id", {"type_key": "running"}),
+    ("workout_get", "workout_id", {}),
+    ("workout_schedule", "workout_id", {"date": "2026-03-11"}),
+    ("workout_update", "workout_id", {"workout": {"name": "x"}}),
+    ("workout_delete", "workout_id", {}),
+    ("workout_unschedule", "schedule_id", {}),
+    ("training_plan_reschedule", "schedule_id", {"new_date": "2026-03-12", "expected_date": "2026-03-11"}),
+]
+
+
+@pytest.mark.parametrize(("tool", "id_arg", "extra"), _ID_TOOLS)
+@pytest.mark.parametrize("value", [True, 1.0, "1"])
+def test_id_parameters_reject_coercible_non_ints_at_schema_validation(
+    mocker: Any, tool: str, id_arg: str, extra: dict[str, Any], value: Any
+) -> None:
+    # A coerced id must never reach auth or a (destructive) handler.
+    reached = RuntimeError("handler reached")
+    for module in ("_shared", "workouts", "activities_write"):
+        mocker.patch(f"garmin_cli.mcp_tools.{module}.ensure_authenticated", side_effect=reached)
+    server = create_mcp_server(_config())
+
+    with pytest.raises(ToolError) as exc_info:
+        _call(server, tool, {id_arg: value, **extra})
+    assert "handler reached" not in str(exc_info.value)
+    assert id_arg in str(exc_info.value)
+
+
+@pytest.mark.parametrize("value", [True, False, 1.0, 2.5, 0, -3, "7"])
+def test_validate_positive_id_rejects_non_int_and_non_positive(value: Any) -> None:
+    from garmin_cli.mcp_tools._shared import _validate_positive_id
+
+    with pytest.raises(ToolError, match="positive integer"):
+        _validate_positive_id(value, "activity_id")
+
+
+@pytest.mark.parametrize(
+    "value", [True, 1.0, 2.5, 0, -3, "-3", "abc", None, " 12\n", "+12", "1_2", "١٢", "0", "9" * 21, "9" * 5000]
+)
+def test_validate_numeric_id_rejects_bool_float_and_non_positive(value: Any) -> None:
+    from garmin_cli.endpoints._base import _validate_numeric_id
+
+    with pytest.raises(GarminCliError) as exc_info:
+        _validate_numeric_id(value, "activity_id")
+    assert exc_info.value.error_code == "INVALID_INPUT"
+
+
+def test_validate_numeric_id_accepts_ints_and_digit_strings() -> None:
+    from garmin_cli.endpoints._base import _validate_numeric_id
+
+    assert _validate_numeric_id(12, "activity_id") == 12
+    assert _validate_numeric_id("12", "activity_id") == 12
+
+
 def test_envelope_without_cap_preserves_legacy_shape() -> None:
     rows = [{"id": 1}, {"id": 2}]
 

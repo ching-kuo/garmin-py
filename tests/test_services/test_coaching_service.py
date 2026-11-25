@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+import pytest
+
 from garmin_cli.services.coaching import (
     aggregate_activity_load,
     build_coach_snapshot,
     coach_snapshot_request_budget,
 )
+from garmin_cli.services.coaching_snapshot import MAX_SNAPSHOT_REQUESTS, validate_snapshot_inputs
 
 
 def _daily_rows(field: str, as_of: date, values: list[int]) -> list[dict[str, object]]:
@@ -18,11 +21,17 @@ def _daily_rows(field: str, as_of: date, values: list[int]) -> list[dict[str, ob
 class TestCoachSnapshotRequestBudget:
     def test_default_budget_is_within_cap(self) -> None:
         # 9-day daily window: two missing-day slack over the 7-sample minimum.
-        # Calendar costs two requests (weekly page + workoutScheduleByPeriod).
-        assert coach_snapshot_request_budget(28, 9, False) == 31
+        # Calendar costs three requests: the seven-date window can span two
+        # weekly pages, plus workoutScheduleByPeriod.
+        assert coach_snapshot_request_budget(28, 9, False) == 32
 
     def test_extended_daily_baselines_charge_the_full_window(self) -> None:
-        assert coach_snapshot_request_budget(28, 7, True) == 69
+        assert coach_snapshot_request_budget(28, 7, True) == 70
+
+    def test_recent_daily_days_range_matches_the_request_cap(self) -> None:
+        assert validate_snapshot_inputs(28, 9, False, None) == MAX_SNAPSHOT_REQUESTS
+        with pytest.raises(ValueError, match="between 1 and 9"):
+            validate_snapshot_inputs(28, 10, False, None)
 
 
 class TestCoachSnapshotAggregation:

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-import json
 from collections import Counter
 from datetime import date
 from typing import Any
 
-from garmin_cli.workout_schema import is_positive_id, unknown_key_errors, validate_workout_input
+from garmin_cli.workout_schema import (
+    NON_SCHEDULE_ITEM_TYPES,
+    is_positive_id,
+    unknown_key_errors,
+    validate_workout_input,
+)
 
 _PLAN_FIELDS = frozenset({"name", "description", "start_date", "end_date", "entries", "removals"})
 _ENTRY_FIELDS = frozenset(
@@ -161,20 +165,26 @@ def validate_training_plan(plan: Any) -> list[str]:
     return errors
 
 
-def _normalized_json(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+_NO_TARGETS = (None, {"type": "no.target"}, {"type": "open"})
 
 
 def _comparable_workout(value: Any) -> Any:
-    """Normalize optional no-target and null-description fields for semantic comparisons."""
+    """Normalize a workout for semantic comparison with ``==``.
+
+    Numbers compare by value (Garmin reads 180 back as 180.0; bools stay
+    distinct), and a missing, null, no.target or ``open`` target (sent to
+    Garmin as no.target) all mean no target; a null description is absent.
+    """
     if isinstance(value, list):
         return [_comparable_workout(item) for item in value]
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
     if not isinstance(value, dict):
         return value
     return {
         key: _comparable_workout(item)
         for key, item in value.items()
-        if not (key == "target" and item == {"type": "no.target"}) and not (key == "description" and item is None)
+        if not (key == "target" and item in _NO_TARGETS) and not (key == "description" and item is None)
     }
 
 
@@ -198,9 +208,18 @@ def claims_row(vacated: dict[Any, str | None], row: dict[str, Any], entry_id: st
     return vacated.get(row.get("workout_schedule_id"), entry_id) == entry_id
 
 
+def is_schedule_row(row: dict[str, Any]) -> bool:
+    """A calendar row that may be a scheduled workout, with or without a known schedule id.
+
+    Logged activities and other known non-schedule items can carry a
+    ``workout_id`` but never occupy a date.
+    """
+    return row.get("workout_id") is not None and row.get("item_type") not in NON_SCHEDULE_ITEM_TYPES
+
+
 def blocking_occupants(rows: list[dict[str, Any]], source_id: int | None) -> list[dict[str, Any]]:
     """Scheduled workouts other than the entry's own source (a same-date replace)."""
-    return [row for row in rows if row.get("workout_id") is not None and row.get("workout_schedule_id") != source_id]
+    return [row for row in rows if is_schedule_row(row) and row.get("workout_schedule_id") != source_id]
 
 
 def vacated_schedule_owners(plan: dict[str, Any], schedules: dict[int, dict[str, Any]]) -> dict[Any, str | None]:
@@ -257,15 +276,16 @@ def preview_training_plan(
         ]
         workout_id = entry.get("workout_id")
         inline = entry.get("workout")
+        # Only a row with a positive schedule id can satisfy an entry: apply
+        # removes the source on the strength of it.
         equivalent = next(
             (
                 row
                 for row in same_date
-                if (workout_id is not None and row.get("workout_id") == workout_id)
-                or (
-                    inline is not None
-                    and _normalized_json(_comparable_workout(projection_for(row)))
-                    == _normalized_json(_comparable_workout(inline))
+                if is_positive_id(row.get("workout_schedule_id"))
+                and (
+                    (workout_id is not None and row.get("workout_id") == workout_id)
+                    or (inline is not None and _comparable_workout(projection_for(row)) == _comparable_workout(inline))
                 )
             ),
             None,

@@ -500,6 +500,46 @@ class TestSerializeWorkoutDetailStructure:
             }],
         }
 
+    def test_live_cadence_key_and_null_rest_target_round_trip(self) -> None:
+        def step(order: int, step_type: str, **extra: Any) -> dict[str, Any]:
+            return {
+                "type": "ExecutableStepDTO",
+                "stepOrder": order,
+                "stepType": {"stepTypeKey": step_type},
+                "endCondition": {"conditionTypeKey": "time"},
+                "endConditionValue": 120.0,
+                **extra,
+            }
+
+        raw = {
+            "workoutId": 9,
+            "workoutName": "Cadence",
+            "sportType": {"sportTypeKey": "running"},
+            "workoutSegments": [{"workoutSteps": [
+                step(
+                    1,
+                    "interval",
+                    targetType={"workoutTargetTypeId": 3, "workoutTargetTypeKey": "cadence"},
+                    targetValueOne=170.0,
+                    targetValueTwo=180.0,
+                    zoneNumber=None,
+                ),
+                # Live rest steps carry targetType null, not a no.target object.
+                step(2, "rest", targetType=None),
+            ]}],
+        }
+
+        projection = serialize_workout_detail(raw)[0]["write_projection"]
+
+        assert projection["steps"] == [
+            {
+                "type": "interval",
+                "duration": {"type": "time", "value": 120.0},
+                "target": {"type": "cadence.zone", "min": 170.0, "max": 180.0},
+            },
+            {"type": "rest", "duration": {"type": "time", "value": 120.0}},
+        ]
+
 # ---------------------------------------------------------------------------
 # serialize_thresholds
 # ---------------------------------------------------------------------------
@@ -638,7 +678,8 @@ class TestPerformanceSerializers:
         sample_lactate_threshold_live_raw: Any,
     ) -> None:
         assert serialize_zones(sample_lactate_threshold_live_raw) == [
-            {"sport": "running", "lt_hr_bpm": 177, "lt_pace": "4:26"}
+            # 3.75 m/s is 266.67 s/km, which rounds to 4:27.
+            {"sport": "running", "lt_hr_bpm": 177, "lt_pace": "4:27"}
         ]
 
 
@@ -1736,6 +1777,56 @@ class TestSerializeBodyBatteryReportsDaily:
         assert serialize_body_battery([{"date": "2026-07-04", "bodyBatteryValuesArray": []}]) == []
 
 
+class TestSerializeStressLiveShape:
+    """Live dailyStress: calendarDate plus epoch-ms [timestamp, level] samples."""
+
+    ITEM = {
+        "calendarDate": "2026-07-04",
+        "avgStressLevel": 31,
+        "maxStressLevel": 90,
+        # Local midnight in UTC+9 is 15:00 UTC on the previous day.
+        "stressValuesArray": [[1783090800000, 25], [1783094400000, 40]],
+    }
+
+    def test_calendar_date_wins_over_epoch_sample(self) -> None:
+        assert serialize_stress(self.ITEM) == [{"date": "2026-07-04", "avg_stress": 31, "max_stress": 90}]
+
+    def test_epoch_sample_without_calendar_date_gives_no_date(self) -> None:
+        item = {key: value for key, value in self.ITEM.items() if key != "calendarDate"}
+        assert serialize_stress(item)[0]["date"] is None
+
+
 def test_workout_detail_tolerates_null_segments() -> None:
     rows = serialize_workout_detail({"workoutId": 1, "workoutName": "X", "workoutSegments": None})
     assert rows[0]["steps"] == []
+
+
+@pytest.mark.parametrize(
+    ("speed", "pace"),
+    [(2.778, "6:00"), (1000 / 359.4, "5:59"), (1000 / 359.6, "6:00"), (1000 / 299.7, "5:00"), (4.0, "4:10")],
+)
+def test_pace_from_speed_rounds_to_nearest_second(speed: float, pace: str) -> None:
+    from garmin_cli.units import pace_from_speed
+
+    assert pace_from_speed(speed) == pace
+
+
+@pytest.mark.parametrize(("seconds", "pace"), [(359.6, "6:00"), (359.4, "5:59"), (250, "4:10"), ("299.7", "5:00")])
+def test_format_pace_seconds_rounds_to_nearest_second(seconds: Any, pace: str) -> None:
+    from garmin_cli.units import format_pace_seconds
+
+    assert format_pace_seconds(seconds) == pace
+
+
+def test_threshold_pace_rejects_a_boolean_speed() -> None:
+    from garmin_cli.units import parse_flat_lactate
+
+    assert parse_flat_lactate([{"speed": True}])["running"]["lactateThresholdPace"] is None
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -1.0, True, False])
+def test_pace_helpers_reject_non_finite_negative_and_bool(value: Any) -> None:
+    from garmin_cli.units import format_pace_seconds, pace_from_speed
+
+    assert pace_from_speed(value) is None
+    assert format_pace_seconds(value) is None

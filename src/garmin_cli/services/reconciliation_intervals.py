@@ -56,26 +56,36 @@ def _lap_value(lap: dict[str, Any], target_type: str) -> float | None:
     return _number(lap.get("avg_hr"))
 
 
+_TOP_HR_ZONE = 5
+
+
 def _band(
     target: dict[str, Any],
     target_type: str,
-    hr_zones: list[dict[str, Any]],
-) -> tuple[dict[str, Any], float | None, float | None]:
+    rows: dict[Any, dict[str, Any]],
+) -> tuple[dict[str, Any], float | None, float | None, bool]:
+    """Return (prescribed band, low, high, whether high is inclusive).
+
+    *rows* maps HR zone number to its time-in-zone row.
+    """
     if "zone" not in target:
         prescribed = {"min": target.get("min"), "max": target.get("max")}
-        return prescribed, _number(target.get("min")), _number(target.get("max"))
+        return prescribed, _number(target.get("min")), _number(target.get("max")), True
     prescribed = {"zone": target.get("zone")}
     if target_type != "hr":
-        return prescribed, None, None
-    row = next(
-        (zone for zone in hr_zones if zone.get("zone") == target.get("zone")),
-        {},
-    )
-    return (
-        prescribed,
-        _number(row.get("zone_low_bpm")),
-        _number(row.get("zone_high_bpm")),
-    )
+        return prescribed, None, None, True
+    zone = target.get("zone")
+    row = rows.get(zone, {})
+    low = _number(row.get("zone_low_bpm"))
+    high = _number(row.get("zone_high_bpm"))
+    if high is not None or low is None:
+        return prescribed, low, high, True
+    # Live time-in-zone rows carry floors only: a zone ends just below the next
+    # zone's floor (exclusive), and only the top zone is open-ended.
+    if zone == _TOP_HR_ZONE:
+        return prescribed, low, math.inf, True
+    next_floor = _number(rows.get(zone + 1, {}).get("zone_low_bpm")) if isinstance(zone, int) else None
+    return prescribed, low, next_floor, False
 
 
 def compare_interval_completion(
@@ -94,6 +104,7 @@ def compare_interval_completion(
             "actual_laps": len(laps),
         }
     intervals: list[dict[str, Any]] = []
+    zones_by_number = {row.get("zone"): row for row in hr_zones}
     for index, (step, lap) in enumerate(zip(steps, laps, strict=True), start=1):
         if step.get("type") not in {"interval", "recovery"}:
             continue
@@ -110,7 +121,7 @@ def compare_interval_completion(
         if target_type is None or not isinstance(target, dict):
             intervals.append({**row, "state": "not_targeted", "in_band": None})
             continue
-        prescribed, low, high = _band(target, target_type, hr_zones)
+        prescribed, low, high, high_inclusive = _band(target, target_type, zones_by_number)
         value = _lap_value(lap, target_type)
         row["prescribed_band"] = prescribed
         if low is None or high is None:
@@ -136,6 +147,6 @@ def compare_interval_completion(
             intervals.append({
                 **row,
                 "state": "completed",
-                "in_band": low <= value <= high,
+                "in_band": low <= value <= high if high_inclusive else low <= value < high,
             })
     return {"state": "mapped", "intervals": intervals}

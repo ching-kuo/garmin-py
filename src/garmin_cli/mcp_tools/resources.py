@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 import threading
 import time
 from collections.abc import Callable
@@ -12,11 +11,11 @@ from typing import Any
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ResourceError
 
-from garmin_cli import __version__
-from garmin_cli.auth import _get_probe_ttl, _probe_cache_hit, probe_session_status
+from garmin_cli import __version__, login_backoff
+from garmin_cli.auth import _get_probe_ttl, _home_key, _probe_cache_hit, probe_session_status
 from garmin_cli.config import CliConfig
 from garmin_cli.date_utils import today
-from garmin_cli.endpoints._base import _resolve_retry_delays
+from garmin_cli.endpoints._base import _resolve_retry_delays, _validate_numeric_id
 from garmin_cli.endpoints.activities import list_activities
 from garmin_cli.endpoints.health import get_sleep
 from garmin_cli.endpoints.performance import (
@@ -29,22 +28,26 @@ from garmin_cli.exceptions import TRANSIENT_ERROR_CODES, GarminCliError
 from garmin_cli.mcp_tools._shared import _envelope, _error_text
 from garmin_cli.mcp_tools.activities import _AUTO_CELL_BUDGET, _activity_get_result
 from garmin_cli.mcp_tools.coaching import TARGET_SAMPLE_BUDGET, TARGET_STREAM_LIMIT
+from garmin_cli.token_store import token_file_identity
 from garmin_cli.serializers import (
     serialize_activity_summary,
     serialize_race_predictions,
     serialize_sleep,
     serialize_thresholds,
     serialize_vo2max,
+    select_latest_dated_rows,
 )
 
 _profile_cache_lock = threading.Lock()
-_profile_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+# garmin_home -> (monotonic time, session identity, snapshot); a login or
+# logout in any process changes the identity and invalidates the entry.
+_profile_cache: dict[str, tuple[float, tuple[Any, ...], dict[str, Any]]] = {}
 
 
 def _auth_state(config: CliConfig) -> tuple[str, dict[str, Any]]:
     # A recent successful probe (recorded by ensure_authenticated) makes a
     # fresh network round trip redundant for these read-only resources.
-    if _probe_cache_hit(os.path.expanduser(config.garth_home), _get_probe_ttl()):
+    if _probe_cache_hit(_home_key(config.garth_home), _get_probe_ttl()):
         return "authenticated", {
             "state": "authenticated",
             "latency_ms": 0.0,
@@ -123,33 +126,64 @@ def _load_summary(
     }
 
 
+def _session_identity(garmin_home: str) -> tuple[Any, ...]:
+    """This process's login count plus the token file's metadata (never its contents).
+
+    A login or logout here bumps the generation; one in another process
+    (``garmin-cli login`` / ``login logout``) rewrites or removes the file.
+    """
+    return (login_backoff.generation(garmin_home), token_file_identity(garmin_home))
+
+
+def _latest_vo2max_per_sport(raw: Any) -> list[dict[str, Any]]:
+    by_sport: dict[Any, list[dict[str, Any]]] = {}
+    for row in serialize_vo2max(raw):
+        if row.get("vo2max") is not None:
+            by_sport.setdefault(row.get("sport"), []).append(row)
+    return [row for rows in by_sport.values() for row in select_latest_dated_rows(rows)]
+
+
 def _build_profile_snapshot(config: CliConfig) -> dict[str, Any]:
     # Cache first: a hit must cost zero network calls, including the auth probe.
-    garmin_home = os.path.expanduser(config.garth_home)
+    garmin_home = _home_key(config.garth_home)
     ttl = _get_probe_ttl()
     now = time.monotonic()
     with _profile_cache_lock:
         cached = _profile_cache.get(garmin_home)
-        if cached is not None and ttl > 0 and now - cached[0] < ttl:
-            return dict(cached[1])
+        if (
+            cached is not None
+            and ttl > 0
+            and now - cached[0] < ttl
+            and cached[1] == _session_identity(garmin_home)
+        ):
+            return dict(cached[2])
 
     state, auth = _auth_state(config)
     if state != "authenticated":
         return {"auth_state": state, "auth": auth, "data": None}
+    # The session the data is fetched under; a change during the fetches
+    # (any process logging in or out) makes the snapshot uncacheable.
+    identity = _session_identity(garmin_home)
 
     as_of = today()
     unavailable: list[dict[str, str]] = []
+    # Only absent data (NOT_FOUND) is stable enough to cache; a throttle,
+    # outage or unexpected error would otherwise be served for the whole TTL.
+    cacheable = True
 
     def fetch(section: str, call: Any, serialize: Any) -> list[dict[str, Any]]:
+        nonlocal cacheable
         try:
             return serialize(call())
-        except Exception:
+        except Exception as exc:
             unavailable.append({"section": section, "reason": "unavailable"})
+            if not (isinstance(exc, GarminCliError) and exc.error_code == "NOT_FOUND"):
+                cacheable = False
             return []
 
     # Request budget: thresholds=3, VO2max=1, predictions=1, activities=1.
     thresholds = fetch("thresholds", get_all_thresholds, serialize_thresholds)
-    vo2max = fetch("vo2max", get_latest_vo2max, serialize_vo2max)
+    vo2max = fetch("vo2max", get_latest_vo2max, _latest_vo2max_per_sport)
     race_predictions = fetch(
         "race_predictions",
         get_race_predictions,
@@ -184,8 +218,9 @@ def _build_profile_snapshot(config: CliConfig) -> dict[str, Any]:
     }
     if unavailable:
         result["unavailable"] = unavailable
-    with _profile_cache_lock:
-        _profile_cache[garmin_home] = (now, dict(result))
+    if cacheable and _session_identity(garmin_home) == identity:
+        with _profile_cache_lock:
+            _profile_cache[garmin_home] = (now, identity, dict(result))
     return result
 
 
@@ -194,17 +229,13 @@ def _resource_validation_error(message: str) -> ResourceError:
 
 
 def _parse_resource_activity_id(value: str) -> int:
+    # The same strict rule as CLI ids: ASCII digits only, no sign, spaces or "_".
     try:
-        activity_id = int(value)
-    except (TypeError, ValueError) as exc:
+        return _validate_numeric_id(value, "activity_id")
+    except GarminCliError as exc:
         raise _resource_validation_error(
             f"activity_id must be a positive integer, got '{value}'"
         ) from exc
-    if activity_id <= 0:
-        raise _resource_validation_error(
-            f"activity_id must be a positive integer, got {activity_id}"
-        )
-    return activity_id
 
 
 def _parse_resource_date(value: str) -> date:

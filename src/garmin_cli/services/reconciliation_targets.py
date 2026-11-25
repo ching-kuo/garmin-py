@@ -1,6 +1,7 @@
 """Pure target-comparison helpers for planned-versus-actual reconciliation."""
 from __future__ import annotations
 
+import statistics
 from typing import Any
 
 from garmin_cli.metrics.registry import CYCLING_TYPE_KEYS, RUNNING_TYPE_KEYS
@@ -14,10 +15,14 @@ from garmin_cli.services.reconciliation_intervals import (
 )
 
 SUPPORTED_SPORTS = RUNNING_TYPE_KEYS | CYCLING_TYPE_KEYS
-_STREAM_KEYS = {
+# Stream keys in preference order. Live running streams carry
+# directDoubleCadence in full steps/min (matching the summary and workout
+# cadence targets) and directRunCadence per foot, about half of that.
+_STREAM_KEYS: dict[str, tuple[str, ...]] = {
     "pace": ("directSpeed", "speed"),
     "power": ("directPower", "power"),
     "cadence": (
+        "directDoubleCadence",
         "directRunCadence",
         "directRunningCadence",
         "directBikeCadence",
@@ -25,6 +30,19 @@ _STREAM_KEYS = {
         "cadence",
     ),
 }
+_PER_FOOT_MEDIAN_LIMIT = 120.0
+
+
+def _run_cadence_scale(rows: list[dict[str, Any]]) -> float:
+    """2.0 when the directRunCadence stream looks per-foot, else 1.0.
+
+    shortcut: both cadence descriptors say stepsPerMinute, so the unit cannot be
+    read from the payload; live per-foot medians are ~88 and running step rates
+    are rarely under 120, so a median below 120 is taken as per-foot. Upgrade
+    when Garmin exposes the unit.
+    """
+    values = [value for row in rows if (value := _number(row.get("directRunCadence"))) is not None]
+    return 2.0 if values and statistics.median(values) < _PER_FOOT_MEDIAN_LIMIT else 1.0
 
 
 def _pct(numerator: float, denominator: float) -> float:
@@ -103,7 +121,7 @@ def required_stream_metrics(
             _lap_cadence(row) is not None for row in laps
         ):
             required.append(
-                "directRunCadence"
+                "directDoubleCadence"
                 if workout.get("sport") in RUNNING_TYPE_KEYS
                 else "directBikeCadence"
             )
@@ -197,11 +215,12 @@ def _sample_values(
     target_type: str,
 ) -> list[tuple[float | None, float]]:
     keys = _STREAM_KEYS[target_type]
+    scales = {"directRunCadence": _run_cadence_scale(rows)} if target_type == "cadence" else {}
     values: list[tuple[float | None, float]] = []
     for row in rows:
         value = next(
             (
-                parsed
+                parsed * scales.get(key, 1.0)
                 for key in keys
                 if (parsed := _number(row.get(key))) is not None
             ),

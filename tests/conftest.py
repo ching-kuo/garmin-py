@@ -177,10 +177,12 @@ def sample_body_battery_raw() -> dict:
 
 @pytest.fixture()
 def sample_stress_raw() -> dict:
+    # Live shape: calendarDate plus GMT epoch-ms samples.
     return {
+        "calendarDate": "2026-03-11",
         "stressValuesArray": [
-            ["2026-03-11T08:00:00", 25],
-            ["2026-03-11T14:00:00", 45],
+            [1773154800000, 25],
+            [1773176400000, 45],
         ],
         "avgStressLevel": 35,
         "maxStressLevel": 72,

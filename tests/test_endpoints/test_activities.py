@@ -226,13 +226,13 @@ class TestGetActivityTypedSplits:
 
         assert get_activity_typed_splits(1) == {}
 
-    def test_negative_id_is_accepted(self, mocker: Any) -> None:
+    def test_negative_id_is_rejected(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.get_activity_typed_splits.return_value = {}
         mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
 
-        get_activity_typed_splits(-1)
-        mock_garth.get_activity_typed_splits.assert_called_once_with(-1)
+        with pytest.raises(GarminCliError):
+            get_activity_typed_splits(-1)
+        mock_garth.get_activity_typed_splits.assert_not_called()
 
     @pytest.mark.parametrize("invalid", ["abc", "12.5", "not_a_number"])
     def test_non_numeric_id_raises_invalid_input(self, mocker: Any, invalid: str) -> None:
@@ -306,13 +306,13 @@ class TestGetActivityHrInTimezones:
         result = get_activity_hr_in_timezones(1)
         assert result == zones_list
 
-    def test_negative_id_accepted(self, mocker: Any) -> None:
+    def test_negative_id_rejected(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.get_activity_hr_in_timezones.return_value = []
         mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
 
-        get_activity_hr_in_timezones(-1)
-        mock_garth.get_activity_hr_in_timezones.assert_called_once_with(-1)
+        with pytest.raises(GarminCliError):
+            get_activity_hr_in_timezones(-1)
+        mock_garth.get_activity_hr_in_timezones.assert_not_called()
 
     @pytest.mark.parametrize("invalid", ["abc", "12.5"])
     def test_non_numeric_id_raises_invalid_input(self, mocker: Any, invalid: str) -> None:
@@ -350,13 +350,13 @@ class TestGetActivityDetails:
 
         assert get_activity_details(1) == {}
 
-    def test_negative_id_accepted(self, mocker: Any) -> None:
+    def test_negative_id_rejected(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.get_activity_details.return_value = {}
         mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
 
-        get_activity_details(-1)
-        mock_garth.get_activity_details.assert_called_once_with(-1)
+        with pytest.raises(GarminCliError):
+            get_activity_details(-1)
+        mock_garth.get_activity_details.assert_not_called()
 
     @pytest.mark.parametrize("invalid", ["abc", "12.5"])
     def test_non_numeric_id_raises_invalid_input(self, mocker: Any, invalid: str) -> None:

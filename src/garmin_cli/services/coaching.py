@@ -15,9 +15,10 @@ from typing import Any
 _MIN_BASELINE_SAMPLES = 7
 
 
-# Calendar requests per snapshot: one weekly calendar page plus the
-# workoutScheduleByPeriod lookup that catches adaptive-plan sessions.
-CALENDAR_REQUESTS = 2
+# Calendar requests per snapshot: the seven-date window spans up to two
+# weekly calendar pages, plus the workoutScheduleByPeriod lookup that catches
+# adaptive-plan sessions.
+CALENDAR_REQUESTS = 3
 
 
 def coach_snapshot_request_budget(
@@ -28,8 +29,8 @@ def coach_snapshot_request_budget(
     """Return the number of Garmin requests in a non-paginated snapshot.
 
     Five range endpoints, one activity list, readiness, SpO2, and training
-    status are single requests; the calendar is two (one weekly page plus
-    ``workoutScheduleByPeriod`` for adaptive-plan sessions). Resting HR and
+    status are single requests; the calendar is up to three (two weekly pages
+    plus ``workoutScheduleByPeriod`` for adaptive-plan sessions). Resting HR and
     stress are daily endpoints and therefore account for two requests per
     prior-day window plus current.
     """

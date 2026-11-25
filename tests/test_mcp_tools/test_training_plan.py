@@ -386,6 +386,87 @@ def test_reschedule_existing_destination_removes_source(mocker: Any) -> None:
     unschedule.assert_called_once_with(50)
 
 
+@pytest.mark.parametrize(
+    ("recheck", "outcome"),
+    [
+        ([], "complete"),  # the failed unschedule landed: source gone
+        (RuntimeError("calendar unreadable"), "unknown"),
+        ([{"date": "2026-07-05", "workoutId": 10, "workoutScheduleId": 50}], "partial"),
+    ],
+)
+def test_reschedule_existing_destination_rechecks_a_failed_unschedule(
+    mocker: Any, recheck: Any, outcome: str
+) -> None:
+    from garmin_cli.exceptions import GarminCliError
+
+    mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+    mocker.patch(
+        "garmin_cli.mcp_tools.training_plan.get_calendar_range",
+        side_effect=[
+            [{"date": "2026-07-05", "workoutId": 10, "workoutScheduleId": 50}],
+            [{"date": "2026-07-10", "workoutId": 10, "workoutScheduleId": 99}],
+            recheck,
+        ],
+    )
+    mocker.patch(
+        "garmin_cli.mcp_tools.training_plan.unschedule_workout",
+        side_effect=GarminCliError(error="boom", error_code="SERVER_ERROR"),
+    )
+    server = create_mcp_server(_config())
+
+    result = _call(
+        server,
+        "training_plan_reschedule",
+        {"schedule_id": 50, "expected_date": "2026-07-05", "new_date": "2026-07-10"},
+    )
+
+    assert result["outcome"] == outcome
+    assert result["complete"] is (outcome == "complete")
+    unschedule_op = {"action": "unschedule", "schedule_id": 50, "state": "failed", "error_code": "SERVER_ERROR"}
+    if outcome == "complete":
+        assert result["operations"] == [{"action": "move", "state": "verified", "schedule_id": 99}, unschedule_op]
+    else:
+        assert result["operations"] == [unschedule_op]
+        assert result["errors"] == [{"error_code": "SERVER_ERROR", "message": "Source unschedule did not complete."}]
+
+
+def test_reschedule_negative_id_gets_the_positive_integer_message() -> None:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    with pytest.raises(ToolError, match="schedule_id must be a positive integer, got -1"):
+        _call(
+            create_mcp_server(_config()),
+            "training_plan_reschedule",
+            {"schedule_id": -1, "expected_date": "2026-07-05", "new_date": "2026-07-10"},
+        )
+
+
+def test_reschedule_ignores_a_logged_activity_on_the_destination(mocker: Any) -> None:
+    mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+    mocker.patch(
+        "garmin_cli.mcp_tools.training_plan.get_calendar_range",
+        side_effect=[
+            [{"date": "2026-07-05", "workoutId": 10, "workoutScheduleId": 50}],
+            [{"date": "2026-07-10", "workoutId": 10, "id": 777, "itemType": "activity"}],
+            [{"date": "2026-07-10", "workoutId": 10, "workoutScheduleId": 1000}],
+        ],
+    )
+    schedule = mocker.patch(
+        "garmin_cli.mcp_tools.training_plan.schedule_workout", return_value={"workoutScheduleId": 1000}
+    )
+    unschedule = mocker.patch("garmin_cli.mcp_tools.training_plan.unschedule_workout")
+
+    result = _call(
+        create_mcp_server(_config()),
+        "training_plan_reschedule",
+        {"schedule_id": 50, "expected_date": "2026-07-05", "new_date": "2026-07-10"},
+    )
+
+    assert result["outcome"] == "complete", result
+    schedule.assert_called_once()
+    unschedule.assert_called_once_with(50)
+
+
 def test_reschedule_cleans_unverified_destination(mocker: Any) -> None:
     mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
     mocker.patch(

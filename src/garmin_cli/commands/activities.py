@@ -8,7 +8,7 @@ from typing import Any
 import click
 
 from garmin_cli.auth import ensure_authenticated
-from garmin_cli.commands._options import validate_limit
+from garmin_cli.commands._options import resolve_after_login, validate_limit
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.date_utils import CLICK_DATE_TYPE, resolve_click_dates
 from garmin_cli.endpoints.activities import (
@@ -107,8 +107,12 @@ def list_cmd(
     start_date = None
     end_date = None
     if has_date_args:
-        start_date, end_date = resolve_click_dates(value_date, days, None, date_from, date_to)
-    ensure_authenticated(ctx.obj["config"])
+        start_date, end_date = resolve_after_login(
+            lambda: resolve_click_dates(value_date, days, None, date_from, date_to),
+            lambda: ensure_authenticated(ctx.obj["config"]),
+        )
+    else:
+        ensure_authenticated(ctx.obj["config"])
     raw = list_activities(
         limit=limit, start=0, activity_type=activity_type, search=search,
         start_date=start_date, end_date=end_date,

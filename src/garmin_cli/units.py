@@ -7,6 +7,7 @@ import from here without creating a cross-layer dependency.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -30,22 +31,29 @@ def to_kmh(value: Any) -> float | None:
     return None if value is None else value * 3.6
 
 
+def _mmss(seconds: float) -> str | None:
+    """Format seconds as M:SS, rounded to the nearest second; None unless finite and >= 0."""
+    if not math.isfinite(seconds) or seconds < 0:
+        return None
+    # Rounding happens on the total, so divmod carries 59.6 s into the next minute.
+    minutes, secs = divmod(round(seconds), 60)
+    return f"{minutes}:{secs:02d}"
+
+
 def pace_from_speed(speed: Any) -> str | None:
-    if speed is None:
+    if speed is None or isinstance(speed, bool):
         return None
     try:
         speed_value = float(speed)
     except (TypeError, ValueError):
         return None
-    if speed_value <= 0:
+    if not math.isfinite(speed_value) or speed_value <= 0:
         return None
-    total_seconds = int(1000 / speed_value)
-    minutes, seconds = divmod(total_seconds, 60)
-    return f"{minutes}:{seconds:02d}"
+    return _mmss(1000 / speed_value)
 
 
 def format_pace_seconds(value: Any) -> str | None:
-    if value is None:
+    if value is None or isinstance(value, bool):
         return None
     if isinstance(value, str):
         if ":" in value:
@@ -55,14 +63,12 @@ def format_pace_seconds(value: Any) -> str | None:
         except ValueError:
             return value
     if isinstance(value, (int, float)):
-        total_seconds = int(value)
-        minutes, seconds = divmod(total_seconds, 60)
-        return f"{minutes}:{seconds:02d}"
+        return _mmss(value)
     return None
 
 
 def _garmin_pace(speed: Any) -> str | None:
-    if speed is None:
+    if speed is None or isinstance(speed, bool):
         return None
     try:
         return pace_from_speed(float(speed) * 10)

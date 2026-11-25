@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import math
-from typing import TypeGuard
+from typing import Any, TypeGuard
 
 SPORT_TYPES: dict[str, int] = {
     "running": 1,
@@ -33,13 +33,17 @@ END_CONDITIONS: dict[str, int] = {
     "iterations": 7,
 }
 
-TARGET_TYPES: dict[str, int] = {
-    "no.target": 1,
-    "power.zone": 2,
-    "cadence.zone": 3,
-    "heart.rate.zone": 4,
-    "speed.zone": 5,
-    "open": 6,
+# User-facing target name -> (Garmin wire key, Garmin type id), per upstream
+# garminconnect TargetType and the server's workoutTargetTypes catalog.
+# speed.zone is sent as pace.zone (m/s), Garmin's cadence key is "cadence",
+# and Garmin has no "open" target, so it is sent as no.target.
+TARGET_TYPES: dict[str, tuple[str, int]] = {
+    "no.target": ("no.target", 1),
+    "power.zone": ("power.zone", 2),
+    "cadence.zone": ("cadence", 3),
+    "heart.rate.zone": ("heart.rate.zone", 4),
+    "speed.zone": ("pace.zone", 6),
+    "open": ("no.target", 1),
 }
 
 _VALID_DURATION_TYPES = {"time", "distance"}
@@ -73,6 +77,24 @@ _ZONE_LIMITS = {
 _MAX_EXPANDED_STEPS = 1_000
 _MAX_TOTAL_DURATION_SECONDS = 86_400
 _MAX_TOTAL_DISTANCE_METERS = 1_000_000
+
+
+# Live calendar item types that are never workout schedules (2026-11-25 probe).
+NON_SCHEDULE_ITEM_TYPES = frozenset({"activity", "weight", "nap"})
+
+
+def calendar_schedule_id(item: dict) -> Any:
+    """The schedule id of a raw calendar item, or None when it is not a schedule.
+
+    A schedule names a workout (live items of every type carry ``workoutId``,
+    null except on workouts) and is not a known non-schedule type; unknown
+    types such as Garmin Coach sessions count. The id is ``workoutScheduleId``
+    (schedule-write and legacy shapes) or else ``id`` (live calendar items).
+    """
+    if item.get("workoutId") is None or item.get("itemType") in NON_SCHEDULE_ITEM_TYPES:
+        return None
+    schedule_id = item.get("workoutScheduleId")
+    return item.get("id") if schedule_id is None else schedule_id
 
 
 def is_positive_id(value: object) -> TypeGuard[int]:

@@ -7,7 +7,7 @@ from typing import Any
 import click
 
 from garmin_cli.auth import ensure_authenticated
-from garmin_cli.commands._options import validate_limit
+from garmin_cli.commands._options import resolve_after_login, validate_limit
 from garmin_cli.date_utils import CLICK_DATE_TYPE, resolve_date_range
 from garmin_cli.endpoints.workouts import (
     create_workout,
@@ -85,15 +85,17 @@ def calendar_cmd(
     if all(value is None for value in (date_from, date_to, days, ahead)):
         ahead = 7
 
-    start, end = resolve_date_range(
-        None,
-        date_from.date() if date_from else None,
-        date_to.date() if date_to else None,
-        days,
-        ahead,
-        default_days=7,
+    start, end = resolve_after_login(
+        lambda: resolve_date_range(
+            None,
+            date_from.date() if date_from else None,
+            date_to.date() if date_to else None,
+            days,
+            ahead,
+            default_days=7,
+        ),
+        lambda: ensure_authenticated(ctx.obj["config"]),
     )
-    ensure_authenticated(ctx.obj["config"])
     raw = get_calendar_range(start, end)
     items = raw if isinstance(raw, list) else []
     data = serialize_calendar_workout({"calendarItems": items})

@@ -19,6 +19,7 @@ from garmin_cli.exceptions import (
     may_have_been_processed,
     upstream_error,
 )
+from garmin_cli.workout_schema import is_positive_id
 
 _RETRY_DELAYS: list[float] = [2, 4, 8]
 # Retried unless retry_transient=False; rate limits are always retried.
@@ -101,13 +102,17 @@ def _resolve_retry_delays() -> list[float]:
 
 
 def _validate_numeric_id(value: Any, name: str) -> int:
-    try:
-        return int(value)
-    except (ValueError, TypeError) as exc:
-        raise GarminCliError(
-            error=f"{name} must be a valid integer",
-            error_code="INVALID_INPUT",
-        ) from exc
+    """Accept a positive int or an ASCII digit string of at most 20 digits (CLI arguments) only."""
+    error = GarminCliError(error=f"{name} must be a positive integer", error_code="INVALID_INPUT")
+    parsed = value
+    if isinstance(value, str) and value.isascii() and value.isdigit() and len(value) <= 20:
+        try:
+            parsed = int(value)
+        except ValueError as exc:  # defensive: int() limits differ across interpreters
+            raise error from exc
+    if not is_positive_id(parsed):
+        raise error
+    return parsed
 
 
 def _retry_loop(

@@ -252,3 +252,10 @@ class TestToday:
     def test_falls_back_to_the_host_date(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.backend.profile_today", return_value=None)
         assert today() == date.today()
+
+    @pytest.mark.parametrize("kwargs", [{"days": 0}, {"days": 91}, {"ahead": 0}, {"ahead": 91}])
+    def test_bound_errors_never_look_up_today(self, mocker: Any, kwargs: dict[str, int]) -> None:
+        lookup = mocker.patch("garmin_cli.date_utils.today")
+        with pytest.raises(click.UsageError):
+            _resolve(**kwargs)
+        lookup.assert_not_called()

@@ -260,8 +260,9 @@ def status(
     value_date: datetime | None,
 ) -> None:
     """Get training status for a single day."""
-    start, end = resolve_click_dates(value_date, None, None, None, None)
     ensure_authenticated(ctx.obj["config"])
+    # After login: the default day is today in the profile timezone.
+    start, end = resolve_click_dates(value_date, None, None, None, None)
     data = serialize_training_status(get_training_status(start))
     render_output(
         ctx.obj["config"].output_format,

@@ -36,6 +36,78 @@ class TestSleepCommand:
         result = runner.invoke(cli, ["health", "sleep", "--days", "1"])
         assert result.exit_code == 0
 
+    def test_relative_range_uses_profile_today_after_login(self, mocker: Any) -> None:
+        from datetime import date
+
+        logged_in: list[bool] = []
+        mocker.patch(
+            "garmin_cli.commands._options.ensure_authenticated",
+            side_effect=lambda config: logged_in.append(True),
+        )
+        # The profile timezone is only known once a session exists.
+        mocker.patch(
+            "garmin_cli.backend.profile_today",
+            side_effect=lambda: date(2030, 1, 2) if logged_in else None,
+        )
+        get_sleep = mocker.patch("garmin_cli.commands.health.get_sleep", return_value=[])
+        runner = CliRunner(mix_stderr=False)
+
+        result = runner.invoke(cli, ["health", "sleep", "--days", "2"])
+
+        assert result.exit_code == 0, result.output
+        get_sleep.assert_called_once_with(date(2030, 1, 1), date(2030, 1, 2))
+
+    @pytest.mark.parametrize(
+        ("module", "getter", "args", "expected"),
+        [
+            ("activities", "list_activities", ["activity", "list", "--days", "2"], None),
+            ("workouts", "get_calendar_range", ["workout", "calendar", "--ahead", "2"], ("2030-01-02", "2030-01-03")),
+            ("health", "get_training_status", ["health", "status"], ("2030-01-02",)),
+        ],
+    )
+    def test_other_relative_dates_use_profile_today_after_login(
+        self, mocker: Any, module: str, getter: str, args: list[str], expected: tuple[str, ...] | None
+    ) -> None:
+        from datetime import date
+
+        logged_in: list[bool] = []
+        mocker.patch(
+            f"garmin_cli.commands.{module}.ensure_authenticated",
+            side_effect=lambda config: logged_in.append(True),
+        )
+        mocker.patch(
+            "garmin_cli.backend.profile_today",
+            side_effect=lambda: date(2030, 1, 2) if logged_in else None,
+        )
+        fetch = mocker.patch(f"garmin_cli.commands.{module}.{getter}", return_value=[])
+
+        result = CliRunner(mix_stderr=False).invoke(cli, args)
+
+        assert result.exit_code == 0, result.output
+        if expected is None:
+            assert (fetch.call_args.kwargs["start_date"], fetch.call_args.kwargs["end_date"]) == (
+                date(2030, 1, 1),
+                date(2030, 1, 2),
+            )
+        else:
+            assert fetch.call_args.args == tuple(date.fromisoformat(day) for day in expected)
+
+    @pytest.mark.parametrize(
+        ("seam", "args"),
+        [
+            ("activities", ["activity", "list", "--days", "0"]),
+            ("workouts", ["workout", "calendar", "--days", "2", "--ahead", "2"]),
+            ("_options", ["health", "sleep", "--days", "91"]),
+        ],
+    )
+    def test_date_usage_errors_fail_before_login(self, mocker: Any, seam: str, args: list[str]) -> None:
+        auth = mocker.patch(f"garmin_cli.commands.{seam}.ensure_authenticated")
+
+        result = CliRunner(mix_stderr=False).invoke(cli, args)
+
+        assert result.exit_code != 0
+        auth.assert_not_called()
+
     def test_sleep_json_flag_outputs_json_envelope(self, mocker: Any) -> None:
         mocker.patch("garmin_cli.commands._options.ensure_authenticated")
         mocker.patch(

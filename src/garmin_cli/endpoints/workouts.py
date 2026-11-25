@@ -1,12 +1,14 @@
 """Workout endpoint helpers backed by Garmin Connect APIs."""
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date, timedelta
 from typing import Any
 
 from garmin_cli import backend as garth
 from garmin_cli.exceptions import GarminCliError
+from garmin_cli.workout_schema import calendar_schedule_id
 from garmin_cli.endpoints._base import (
     _NOT_FOUND_ERRORS,
     _make_request,
@@ -128,7 +130,14 @@ def _get_scheduled_by_period(start: date, end: date, *, strict: bool = False) ->
         reason = exc.error_code if isinstance(exc, GarminCliError) else type(exc).__name__
         logger.debug("workoutScheduleByPeriod unavailable (%s); calendar only", reason)
         return []
+    if strict and not isinstance(result, list):
+        raise _unusable("workoutScheduleByPeriod lookup")
     return result if isinstance(result, list) else []
+
+
+def _unusable(what: str) -> GarminCliError:
+    """A strict calendar read cannot treat an unexpected payload as empty."""
+    return GarminCliError(error=f"Garmin {what} returned no item list.", error_code="SERVER_ERROR")
 
 
 def _in_range(item: Any, start: date, end: date) -> bool:
@@ -142,16 +151,33 @@ def _in_range(item: Any, start: date, end: date) -> bool:
 
 
 def get_calendar_range(start: date, end: date, *, strict: bool = False) -> list:
+    """Calendar items in [start, end]; see :func:`get_calendar_range_counted`."""
+    return get_calendar_range_counted(start, end, strict=strict)[0]
+
+
+def get_calendar_range_counted(start: date, end: date, *, strict: bool = False) -> tuple[list, int]:
     """Collect calendarItems week by week, plus schedules the calendar omits.
 
-    Costs one request per calendar week plus one ``workoutScheduleByPeriod``
-    request. Merged schedules are deduplicated by schedule id (a calendar
-    workout item's ``id``) and the result is ordered by date. With *strict*,
-    a failed ``workoutScheduleByPeriod`` lookup raises instead of returning
-    the calendar pages alone, so callers can trust an absence.
+    Returns the items and the number of requests made (calendar pages plus
+    the ``workoutScheduleByPeriod`` lookup; retries are not counted).
+
+    Each page is the calendar week containing the requested day (live: Monday
+    to Sunday, with its own ``startDate``/``endDate``); the walk continues from
+    the day after the page's ``endDate``. A page without usable bounds advances
+    7 days (never skipping a week whatever its first weekday), and the page of
+    ``end`` itself is always read, so the walk makes at most ceil(days / 7) + 1
+    page reads. Items repeated across pages are kept once by
+    ``(itemType, id, date)``; supplemental schedules are skipped when their
+    schedule id is already a schedule on the calendar, and the result is
+    ordered by date. With *strict*, a failed ``workoutScheduleByPeriod``
+    lookup or a page or lookup without a list of items raises instead of
+    reading as empty, so callers can trust an absence.
     """
     all_items: list = []
+    # Pages overlap only after a page without usable bounds.
+    seen: set[tuple[Any, Any, Any]] = set()
     current = start
+    pages = 0
 
     while current <= end:
         url = (
@@ -159,18 +185,47 @@ def get_calendar_range(start: date, end: date, *, strict: bool = False) -> list:
             f"/day/{current.day}/start/1"
         )
         response = _request(url)
-        if isinstance(response, dict):
-            all_items.extend(
-                item for item in response.get("calendarItems", []) if _in_range(item, start, end)
+        pages += 1
+        response = response if isinstance(response, dict) else {}
+        page_items = response.get("calendarItems")
+        if strict and not isinstance(page_items, list):
+            raise _unusable("calendar page")
+        for item in page_items if isinstance(page_items, list) else []:
+            if not _in_range(item, start, end):
+                continue
+            # An id-less item can only be recognised as a repeat by its content.
+            key = (
+                (item.get("itemType"), item.get("id"), item.get("date"))
+                if item.get("id") is not None
+                else (None, None, json.dumps(item, sort_keys=True, default=str))
             )
-        current = current + timedelta(days=7)
+            if key in seen:
+                continue
+            seen.add(key)
+            all_items.append(item)
+        try:
+            page_end: date | None = date.fromisoformat(str(response.get("endDate")))
+        except ValueError:
+            page_end = None
+        if page_end is not None and page_end >= current:
+            if page_end >= end:
+                break  # before stepping past end (date.max cannot step)
+            current = page_end + timedelta(days=1)
+        elif current == end:
+            break
+        else:
+            # Unknown coverage: a week holds 7 days, so +7 cannot skip one; end's
+            # own page is read last.
+            current += timedelta(days=min(7, (end - current).days))
 
-    on_calendar = {item.get("id") for item in all_items}
+    on_calendar = {schedule_id for item in all_items if (schedule_id := calendar_schedule_id(item)) is not None}
     for entry in _get_scheduled_by_period(start, end, strict=strict):
         if not isinstance(entry, dict) or entry.get("workoutScheduleId") in on_calendar:
             continue
         item = _schedule_as_calendar_item(entry)
         if _in_range(item, start, end):
             all_items.append(item)
+            if item["id"] is not None:
+                on_calendar.add(item["id"])
 
-    return sorted(all_items, key=lambda item: item["date"])
+    return sorted(all_items, key=lambda item: item["date"]), pages + 1

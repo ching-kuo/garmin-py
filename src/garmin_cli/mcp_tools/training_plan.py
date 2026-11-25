@@ -7,7 +7,6 @@ from datetime import date
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
-from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
 
 from garmin_cli.config import CliConfig
@@ -20,12 +19,13 @@ from garmin_cli.endpoints.workouts import (
     unschedule_workout,
 )
 from garmin_cli.exceptions import TRANSIENT_ERROR_CODES, GarminCliError
-from garmin_cli.mcp_tools._shared import _authenticated, _parse_date
+from garmin_cli.mcp_tools._shared import StrictId, _authenticated, _parse_date, _validate_positive_id
 from garmin_cli.serializers import serialize_calendar_workout, serialize_workout_detail
 from garmin_cli.services.training_plan import (
     blocking_occupants,
     claims_row,
     entry_source_id,
+    is_schedule_row,
     preview_training_plan,
     source_by_schedule,
     vacated_schedule_owners,
@@ -315,7 +315,14 @@ def _apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
                 vacated_rows: Rows = []
                 for row in live_rows:
                     (destination_rows if claims_row(vacated, row, entry_id) else vacated_rows).append(row)
-                existing = next((row for row in destination_rows if row.get("workout_id") == workout_id), None)
+                existing = next(
+                    (
+                        row
+                        for row in destination_rows
+                        if row.get("workout_id") == workout_id and is_positive_id(row.get("workout_schedule_id"))
+                    ),
+                    None,
+                )
                 if existing is not None:
                     destination_schedule_id = existing.get("workout_schedule_id")
                     operations.append(
@@ -385,6 +392,9 @@ def _apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
                         }
                     )
             if source_id is not None and source_id != destination_schedule_id:
+                if not is_positive_id(destination_schedule_id):
+                    # Never remove a source without a verified destination.
+                    raise GarminCliError("Destination schedule could not be verified.", "SERVER_ERROR")
                 # Preview (run on this same calendar snapshot) already turned a
                 # moved source into a conflict; an absent one means an earlier
                 # apply finished the move, so there is nothing left to remove.
@@ -442,7 +452,7 @@ def register_training_plan_tools(mcp: MCPServer, config: CliConfig) -> None:
         return _authenticated(config, lambda: _apply_plan(plan))
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
-    def training_plan_reschedule(schedule_id: int, new_date: str, expected_date: str) -> dict[str, Any]:
+    def training_plan_reschedule(schedule_id: StrictId, new_date: str, expected_date: str) -> dict[str, Any]:
         """Move a known schedule destination-first, then remove its source.
 
         ``expected_date`` is required because Garmin exposes no direct lookup by
@@ -450,8 +460,7 @@ def register_training_plan_tools(mcp: MCPServer, config: CliConfig) -> None:
         A new date that already holds a different workout returns a
         ``destination_occupied`` conflict without writing.
         """
-        if not is_positive_id(schedule_id):
-            raise ToolError("schedule_id must be a positive integer")
+        _validate_positive_id(schedule_id, "schedule_id")
         destination = _parse_date(new_date, "new_date")
         source_date = _parse_date(expected_date, "expected_date")
 
@@ -463,18 +472,30 @@ def register_training_plan_tools(mcp: MCPServer, config: CliConfig) -> None:
                 return _result("no_op", [{"action": "move", "state": "no_op", "schedule_id": schedule_id}], complete=True)
             workout_id = source["workout_id"]
             destination_rows = _calendar(destination, destination)
-            if any(row.get("workout_id") not in {None, workout_id} for row in destination_rows):
+            # Logged activities on the date carry workout ids but are not schedules.
+            destination_schedules = [row for row in destination_rows if is_schedule_row(row)]
+            if any(row.get("workout_id") != workout_id for row in destination_schedules):
                 return _conflict("destination_occupied")
-            existing = next((row for row in destination_rows if row.get("workout_id") == workout_id), None)
+            existing = next(iter(destination_schedules), None)
             if existing is not None:
                 existing_schedule_id = existing.get("workout_schedule_id")
-                if not isinstance(existing_schedule_id, int):
+                if not is_positive_id(existing_schedule_id):
                     return _conflict("destination_schedule_id_unavailable")
+                verified_op = {"action": "move", "state": "verified", "schedule_id": existing_schedule_id}
                 try:
                     unschedule_workout(schedule_id)
                 except GarminCliError as exc:
-                    return _result("partial", [{"action": "move", "state": "failed", "error_code": exc.error_code}])
-                verified_op = {"action": "move", "state": "verified", "schedule_id": existing_schedule_id}
+                    failed_op = {"action": "unschedule", "schedule_id": schedule_id, "state": "failed", "error_code": exc.error_code}
+                    errors = [{"error_code": exc.error_code, "message": "Source unschedule did not complete."}]
+                    if _may_have_landed(exc):
+                        # The failed delete may still have removed the source remotely.
+                        try:
+                            source_remains = _still_scheduled(schedule_id, source_date)
+                        except Exception:
+                            return _result("unknown", [failed_op], errors=errors)
+                        if not source_remains:
+                            return _result("complete", [verified_op, failed_op], complete=True)
+                    return _result("partial", [failed_op], errors=errors)
                 return _result("complete", [verified_op], complete=True)
             try:
                 raw = schedule_workout(workout_id, destination)

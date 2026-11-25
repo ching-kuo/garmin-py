@@ -68,8 +68,6 @@ def resolve_date_range(
     Raises:
         click.UsageError: On conflicting or invalid arguments.
     """
-    today = date.today()
-
     # ── Conflict detection ────────────────────────────────────────────────
     if date_ is not None and (from_date is not None or to_date is not None):
         raise click.UsageError("Cannot use --date with --from/--to")
@@ -90,24 +88,6 @@ def resolve_date_range(
     if date_ is not None:
         return (date_, date_)
 
-    if days is not None:
-        if days <= 0:
-            raise click.UsageError("--days must be a positive integer")
-        if days > _MAX_DAYS:
-            raise click.UsageError(
-                f"Date range cannot exceed {_MAX_DAYS} days (got --days {days})"
-            )
-        return (today - timedelta(days=days - 1), today)
-
-    if ahead is not None:
-        if ahead <= 0:
-            raise click.UsageError("--ahead must be a positive integer")
-        if ahead > _MAX_DAYS:
-            raise click.UsageError(
-                f"Date range cannot exceed {_MAX_DAYS} days (got --ahead {ahead})"
-            )
-        return (today, today + timedelta(days=ahead - 1))
-
     if from_date is not None and to_date is not None:
         if from_date > to_date:
             raise click.UsageError(
@@ -121,7 +101,31 @@ def resolve_date_range(
             )
         return (from_date, to_date)
 
+    # Relative ranges count from today in the Garmin profile timezone once a
+    # session exists (host date before login). Bounds are checked first so a
+    # usage error never triggers the timezone lookup.
+    if days is not None:
+        if days <= 0:
+            raise click.UsageError("--days must be a positive integer")
+        if days > _MAX_DAYS:
+            raise click.UsageError(
+                f"Date range cannot exceed {_MAX_DAYS} days (got --days {days})"
+            )
+        current = today()
+        return (current - timedelta(days=days - 1), current)
+
+    if ahead is not None:
+        if ahead <= 0:
+            raise click.UsageError("--ahead must be a positive integer")
+        if ahead > _MAX_DAYS:
+            raise click.UsageError(
+                f"Date range cannot exceed {_MAX_DAYS} days (got --ahead {ahead})"
+            )
+        current = today()
+        return (current, current + timedelta(days=ahead - 1))
+
+    current = today()
     # Default: past default_days days (inclusive of today)
     if default_days <= 1:
-        return (today, today)
-    return (today - timedelta(days=default_days - 1), today)
+        return (current, current)
+    return (current - timedelta(days=default_days - 1), current)

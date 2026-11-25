@@ -147,6 +147,21 @@ def test_apply_swaps_two_scheduled_workouts(mocker: Any) -> None:
     assert fake.calls[:2] == [("unschedule", 1), ("schedule", 20, "2026-07-07")]
 
 
+def test_apply_move_onto_a_completed_activity_of_the_workout_schedules_it(mocker: Any) -> None:
+    # A logged activity carries the workout's id but is not a schedule: it must
+    # neither satisfy the move (keep) nor block it.
+    fake = _FakeCalendar([("2026-07-05", 10, 1)])
+    fake.rows.append({"date": "2026-07-10", "workoutId": 10, "workoutScheduleId": None, "id": 777, "itemType": "activity"})
+    fake.install(mocker)
+    plan = _plan()
+    plan["entries"][0].update({"move_from_schedule_id": 1, "expected_source_date": "2026-07-05"})
+
+    result = _apply(plan)
+
+    assert result["outcome"] == "complete", result
+    assert fake.calls == [("schedule", 10, "2026-07-10"), ("unschedule", 1)]
+
+
 def test_apply_swap_failure_restores_early_removed_sources(mocker: Any) -> None:
     fake = _swap_fake(mocker, schedule=["ok", "fail"])
 

@@ -50,6 +50,22 @@ class TestCoachSnapshot:
         hrv.assert_called_once()
         body_battery.assert_not_called()
 
+    def test_completed_requests_counts_calendar_pages_actually_read(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+        for name in (
+            "get_sleep", "get_hrv", "get_body_battery_range", "get_steps_range", "get_weight",
+            "list_activities", "get_resting_hr_range", "get_resting_hr", "get_stress_range",
+            "get_stress", "get_training_readiness", "get_spo2", "get_training_status",
+        ):
+            mocker.patch(f"garmin_cli.services.coaching_snapshot.{name}", return_value=[])
+        # The seven-date window fit in one calendar week: one page plus the lookup.
+        mocker.patch("garmin_cli.services.coaching_snapshot.get_calendar_range_counted", return_value=([], 2))
+
+        result = _call(create_mcp_server(_config()), "coach_snapshot", {"date": "2026-07-13"})
+
+        assert result["provenance"]["estimated_requests"] == 32
+        assert result["provenance"]["completed_requests"] == 31
+
     def test_timed_out_section_is_recorded_and_snapshot_completes(
         self, mocker: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -58,9 +74,9 @@ class TestCoachSnapshot:
             "get_sleep", "get_body_battery_range", "get_steps_range", "get_weight",
             "list_activities", "get_resting_hr_range", "get_resting_hr", "get_stress_range",
             "get_stress", "get_training_readiness", "get_spo2", "get_training_status",
-            "get_calendar_range",
         ):
             mocker.patch(f"garmin_cli.services.coaching_snapshot.{name}", return_value=[])
+        mocker.patch("garmin_cli.services.coaching_snapshot.get_calendar_range_counted", return_value=([], 3))
         # The real get_hrv runs; its transport times out on every attempt.
         mocker.patch(
             "garmin_cli.endpoints.health.garth.connectapi",

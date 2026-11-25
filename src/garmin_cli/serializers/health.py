@@ -270,13 +270,7 @@ def serialize_body_battery(raw: Any) -> list[dict[str, Any]]:
             for entry in values
             if isinstance(entry, list) and len(entry) > 1 and isinstance(entry[1], (int, float))
         ]
-        date_str = item.get("date") or item.get("calendarDate")
-        if not date_str:
-            # legacy per-day shape carried ISO timestamps; epoch millis (the
-            # reports/daily shape) can't yield a date here, so leave it None
-            first = values[0] if isinstance(values[0], list) else []
-            timestamp = first[0] if first else None
-            date_str = timestamp.split("T", 1)[0] if isinstance(timestamp, str) and "T" in timestamp else None
+        date_str = item.get("date") or item.get("calendarDate") or _sample_iso_date(values)
         rows.append(
             {
                 "date": date_str,
@@ -288,19 +282,24 @@ def serialize_body_battery(raw: Any) -> list[dict[str, Any]]:
     return rows
 
 
+def _sample_iso_date(values: Any) -> str | None:
+    """Date of the first ``[timestamp, value]`` sample when it is an ISO string.
+
+    Legacy per-day shapes carried ISO timestamps. Live samples are GMT epoch
+    millis, whose UTC date can be the day before the account-local date, so
+    those yield None instead of a wrong date.
+    """
+    first = values[0] if isinstance(values, list) and values and isinstance(values[0], list) else []
+    timestamp = first[0] if first else None
+    return timestamp.split("T", 1)[0] if isinstance(timestamp, str) and "T" in timestamp else None
+
+
 def serialize_stress(raw: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for item in _listify(raw):
-        values = item.get("stressValuesArray")
-        if not isinstance(values, list) or not values:
-            date_str = item.get("calendarDate")
-        else:
-            first_value = values[0] if isinstance(values[0], list) else []
-            timestamp = first_value[0] if len(first_value) > 0 else None
-            date_str = str(timestamp).split("T", 1)[0] if timestamp else item.get("calendarDate")
         rows.append(
             {
-                "date": date_str,
+                "date": item.get("calendarDate") or _sample_iso_date(item.get("stressValuesArray")),
                 "avg_stress": item.get("avgStressLevel"),
                 "max_stress": item.get("maxStressLevel"),
             }

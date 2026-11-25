@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from datetime import date
 
+import pytest
+
+from garmin_cli.serializers import serialize_activity_hr_zones
 from garmin_cli.services.reconciliation import reconcile_plan
-from garmin_cli.services.reconciliation_targets import compare_activity_targets
+from garmin_cli.services.reconciliation_targets import compare_activity_targets, required_stream_metrics
 
 
 def _reconcile(calendar: list[dict], activities: list[dict], today: date | None = None) -> dict:
@@ -279,6 +282,95 @@ def test_targets_leave_lap_structure_mismatch_at_summary_level() -> None:
     assert all(
         target["quality"] == "lap_summary_aggregate" for target in result["targets"]
     )
+
+
+def test_running_cadence_samples_use_full_step_rate() -> None:
+    # Live: directRunCadence is per-foot (~half); directDoubleCadence is full steps/min.
+    workout = _target_workout([_step("interval", {"type": "cadence.zone", "min": 170, "max": 180})])
+
+    assert required_stream_metrics(workout, []) == ("directDoubleCadence",)
+    result = compare_activity_targets(
+        sport="running",
+        workout=workout,
+        laps=[],
+        hr_zones=[],
+        samples=[{"directRunCadence": 88.0, "directDoubleCadence": 177.0}, {"directRunCadence": 86.0}],
+    )
+
+    assert result["targets"][0]["time_in_band_pct"] == 100.0
+
+
+@pytest.mark.parametrize(
+    "run_cadence",
+    [[88.0, 86.0, 89.0], [175.0, 172.0, 178.0]],  # per-foot stream, full-rate stream
+)
+def test_run_cadence_only_stream_is_doubled_only_when_per_foot(run_cadence: list[float]) -> None:
+    workout = _target_workout([_step("interval", {"type": "cadence.zone", "min": 170, "max": 180})])
+
+    result = compare_activity_targets(
+        sport="running",
+        workout=workout,
+        laps=[],
+        hr_zones=[],
+        samples=[{"directRunCadence": value} for value in run_cadence],
+    )
+
+    assert result["targets"][0]["time_in_band_pct"] == 100.0
+
+
+def test_hr_zone_intervals_derive_high_bound_from_next_zone_low() -> None:
+    # Live hrTimeInZones carries zoneLowBoundary only (no zoneHighBoundary).
+    hr_zones = serialize_activity_hr_zones([
+        {"zoneNumber": number, "secsInZone": 60.0, "zoneLowBoundary": low}
+        for number, low in ((1, 110), (2, 135), (3, 155), (4, 165), (5, 175))
+    ])
+    workout = _target_workout([
+        _step("interval", {"type": "heart.rate.zone", "zone": 3}),
+        _step("interval", {"type": "heart.rate.zone", "zone": 3}),
+        _step("interval", {"type": "heart.rate.zone", "zone": 5}),
+    ])
+    laps = [
+        {"lap_index": 1, "duration_min": 1.0, "avg_hr": 164.5},
+        {"lap_index": 2, "duration_min": 1.0, "avg_hr": 165},
+        {"lap_index": 3, "duration_min": 1.0, "avg_hr": 199},
+    ]
+
+    result = compare_activity_targets(sport="running", workout=workout, laps=laps, hr_zones=hr_zones, samples=[])
+
+    intervals = result["interval_mapping"]["intervals"]
+    assert [interval["state"] for interval in intervals] == ["completed"] * 3
+    # The derived ceiling is exclusive: 164.5 is zone 3, 165 is zone 4's floor.
+    assert [interval["in_band"] for interval in intervals] == [True, False, True]
+
+
+@pytest.mark.parametrize(
+    "floors",
+    [
+        {3: 155},  # zone-3-only payload: no ceiling
+        {1: 110, 2: 135, 3: 155, 5: 175},  # zone 4 missing
+    ],
+)
+def test_hr_zone_interval_without_adjacent_floor_is_insufficient(floors: dict[int, int]) -> None:
+    hr_zones = serialize_activity_hr_zones([
+        {"zoneNumber": number, "secsInZone": 60.0, "zoneLowBoundary": low} for number, low in floors.items()
+    ])
+    workout = _target_workout([_step("interval", {"type": "heart.rate.zone", "zone": 3})])
+    laps = [{"lap_index": 1, "duration_min": 1.0, "avg_hr": 160}]
+
+    result = compare_activity_targets(sport="running", workout=workout, laps=laps, hr_zones=hr_zones, samples=[])
+
+    interval = result["interval_mapping"]["intervals"][0]
+    assert (interval["state"], interval["reason"]) == ("insufficient_data", "missing_hr_target_boundaries")
+
+
+def test_explicit_hr_zone_ceiling_stays_inclusive() -> None:
+    hr_zones = [{"zone": 3, "zone_low_bpm": 155, "zone_high_bpm": 164, "seconds_in_zone": 60}]
+    workout = _target_workout([_step("interval", {"type": "heart.rate.zone", "zone": 3})])
+    laps = [{"lap_index": 1, "duration_min": 1.0, "avg_hr": 164}]
+
+    result = compare_activity_targets(sport="running", workout=workout, laps=laps, hr_zones=hr_zones, samples=[])
+
+    assert result["interval_mapping"]["intervals"][0]["in_band"] is True
 
 
 def test_targets_report_stream_budget_exhaustion_and_unsupported_sports() -> None:

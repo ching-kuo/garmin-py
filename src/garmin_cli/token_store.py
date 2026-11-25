@@ -94,6 +94,19 @@ def tokenstore_path(path: str) -> Path:
     return expand_garth_home(path) / TOKEN_FILE_NAME
 
 
+def token_file_identity(path: str) -> tuple[int, int, int] | None:
+    """``(mtime_ns, size, inode)`` of the token file, or None when absent.
+
+    Metadata only, never the contents: a login or logout in any process
+    changes it, so per-process session caches can tell they are stale.
+    """
+    try:
+        info = os.stat(tokenstore_path(path), follow_symlinks=False)
+    except OSError:
+        return None
+    return (info.st_mtime_ns, info.st_size, info.st_ino)
+
+
 def has_tokenstore(path: str) -> bool:
     """Return True when the new tokenstore exists."""
     return tokenstore_path(path).exists()

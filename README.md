@@ -198,9 +198,9 @@ garmin-cli --json coach snapshot [--date DATE] [--baseline-days N] [--recent-dai
                                   [--include-extended-daily-baselines] [--sport TYPE]...
 ```
 
-The default snapshot uses the 28 prior days for ranged signals and activities, nine prior days plus the current date for daily resting-HR and stress calls (leaving slack over the seven-sample baseline minimum for days without data), and at most 31 upstream requests (the calendar costs two: one weekly page plus the by-period schedule lookup that catches Garmin Coach sessions). Baseline medians exclude the current date and require seven valid samples; the resting-HR and stress signals report the shorter daily window they were actually fetched over. Missing and stale values remain explicit in `data_quality`; the server returns neutral facts and does not assign a proprietary readiness score or decide whether a workout is safe.
+The default snapshot uses the 28 prior days for ranged signals and activities, nine prior days plus the current date for daily resting-HR and stress calls (leaving slack over the seven-sample baseline minimum for days without data), and at most 32 upstream requests (the calendar costs up to three: the seven-day plan window can span two weekly pages, plus the by-period schedule lookup that catches Garmin Coach sessions). `--recent-daily-days` accepts 1-9, the most that fits the cap. The cap counts Garmin data requests only: the session check or login, the profile-timezone lookup, and retries are extra. `provenance.completed_requests` reports the data requests that completed sections actually made (one fewer calendar page when the window fits in one week). Baseline medians exclude the current date and require seven valid samples; the resting-HR and stress signals report the shorter daily window they were actually fetched over. Missing and stale values remain explicit in `data_quality`; the server returns neutral facts and does not assign a proprietary readiness score or decide whether a workout is safe.
 
-Extended daily baselines are rejected if their estimated cost exceeds the 31-request cap. A terminal rate limit stops further Garmin calls while preserving completed sections with `complete: false` and `aborted: true`.
+Extended daily baselines are rejected if their estimated cost exceeds the 32-request cap. A terminal rate limit stops further Garmin calls while preserving completed sections with `complete: false` and `aborted: true`.
 
 ### Activities
 
@@ -330,6 +330,8 @@ Recent fixes normalized several JSON payloads for agent-safe output:
 
 Maximum range: 90 days. Conflicting options (e.g., `--date` with `--days`) produce a clear error.
 
+"Today" for `--days`, `--ahead` and the no-option default is the current date in your Garmin profile timezone (the same day the MCP server uses), falling back to the host date when the profile timezone is unavailable. Explicit `--date`/`--from`/`--to` dates are used as given.
+
 ## Examples
 
 ```bash
@@ -402,7 +404,7 @@ The MCP server exposes primitive health, activity, workout, performance, and dev
 MCP clients can preload two resources:
 
 - `garmin://server/manifest` describes the runtime tool inventory, annotations, error recovery contracts, envelopes, and response limits.
-- `garmin://athlete/profile` returns a cached, bounded thresholds, VO2max, race-prediction, and 7/28-day load snapshot. An unauthenticated read returns a structured unauthenticated body.
+- `garmin://athlete/profile` returns a cached, bounded thresholds, latest VO2max, race-prediction, and 7/28-day load snapshot. An unauthenticated read returns a structured unauthenticated body. A snapshot with a rate-limited, server or network failure is not cached, and a new login drops the cached snapshot.
 
 The server also publishes connection-time instructions with the authentication, response, error, limit, and write-approval contracts. Every typed tool envelope advertises the same contract through its machine-readable `outputSchema`.
 

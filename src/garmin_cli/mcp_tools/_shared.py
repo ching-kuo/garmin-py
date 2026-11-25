@@ -14,9 +14,10 @@ from concurrent.futures import Future
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import date
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
 from mcp.server.mcpserver.exceptions import ToolError
+from pydantic import Field
 
 from garmin_cli.auth import ensure_authenticated
 from garmin_cli.config import CliConfig
@@ -28,8 +29,13 @@ from garmin_cli.endpoints._base import (
 from garmin_cli.error_contracts import error_contract
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.mcp_tools._schemas import Envelope, WriteEnvelope
+from garmin_cli.workout_schema import is_positive_id
 
 _MAX_DAYS = 90
+
+# Tool id parameter type: strict, so JSON true, 1.0 and "1" fail schema
+# validation instead of being coerced to 1 and reaching a (destructive) handler.
+StrictId = Annotated[int, Field(strict=True)]
 
 
 def _parse_date(value: str, name: str) -> date:
@@ -51,8 +57,8 @@ def _parse_date_range(start_date: str, end_date: str) -> tuple[date, date]:
 
 
 def _validate_positive_id(value: int, name: str) -> int:
-    if value <= 0:
-        raise ToolError(f"{name} must be a positive integer, got {value}")
+    if not is_positive_id(value):
+        raise ToolError(f"{name} must be a positive integer, got {value!r}")
     return value
 
 

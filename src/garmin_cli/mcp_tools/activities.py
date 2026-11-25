@@ -21,6 +21,7 @@ from garmin_cli.endpoints.activities import (
     list_activities,
 )
 from garmin_cli.mcp_tools._shared import (
+    StrictId,
     _authenticated,
     _envelope,
     _parse_date_range,
@@ -154,20 +155,20 @@ def register_activity_tools(mcp: MCPServer, config: CliConfig) -> None:
         )
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def activity_get(activity_id: int, detail: bool = False) -> ActivityGetEnvelope:
+    def activity_get(activity_id: StrictId, detail: bool = False) -> ActivityGetEnvelope:
         """Get a single activity by ID. For multisport activities (triathlon etc.), includes child activities with per-sport details. Returns compact activity fields by default, or extended sport-aware metrics including elapsed_time_min (total wall-clock time incl. stops; duration_min is moving time), running dynamics (GCT, vertical oscillation/ratio, stride length), cycling power suite (avg/max/normalized power, TSS, IF) and cadence, swim aggregates (SWOLF, strokes), and training response (aerobic/anaerobic training effect, training_effect_label, training_load, vO2max, recovery time) when detail=True. detail=True also returns workout_id: the scheduled structured workout this activity was executed from (null for free activities), linking back to workout_calendar/workout_get for prescribed-vs-actual comparison. When detail=True, the response carries an additional ``unavailable`` array (when non-empty) annotating which registry-known metrics are not applicable to this sport (``not_applicable_to_sport``) or unexpectedly absent (``absent_in_response``)."""
         _validate_positive_id(activity_id, "activity_id")
 
         return _authenticated(config, lambda: _activity_get_result(activity_id, detail))
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def activity_weather(activity_id: int) -> Envelope:
+    def activity_weather(activity_id: StrictId) -> Envelope:
         """Get weather for an activity. Returns temperature, apparent_temp, dew_point, humidity, wind_speed, wind_gust, wind_direction, wind_direction_compass, and condition. Temperature fields are in the Garmin account's display unit (often Fahrenheit). Garmin's activity-weather feed has no precipitation-probability or icon-code field."""
         _validate_positive_id(activity_id, "activity_id")
         return _run_tool(config, lambda: get_activity_weather(activity_id), serialize_activity_weather)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def activity_laps(activity_id: int, offset: int = 0) -> Envelope:
+    def activity_laps(activity_id: StrictId, offset: int = 0) -> Envelope:
         """Get lap-by-lap data for an activity, capped at 100 rows. Use ``offset`` with ``next_offset`` to page. For pool-swim activities returns per-pool-length rows with SWOLF, stroke type, and stroke counts; for run/bike activities returns per-lap rows with start_time_gmt/start_time_local, HR, power and cadence (cycling), and running dynamics. For multisport parents (triathlon etc.), returns each child leg's laps concatenated with a 0-based ``leg_index`` stamped on every row."""
         _validate_positive_id(activity_id, "activity_id")
         _validate_offset(offset)
@@ -181,20 +182,20 @@ def register_activity_tools(mcp: MCPServer, config: CliConfig) -> None:
         )
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def activity_hr_zones(activity_id: int) -> Envelope:
+    def activity_hr_zones(activity_id: StrictId) -> Envelope:
         """Get HR time-in-zone breakdown for an activity. Returns one row per zone: zone, zone_low_bpm, zone_high_bpm, seconds_in_zone, minutes_in_zone."""
         _validate_positive_id(activity_id, "activity_id")
         return _run_tool(config, lambda: get_activity_hr_in_timezones(activity_id), serialize_activity_hr_zones)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-    def activity_metrics_describe(activity_id: int) -> Envelope:
+    def activity_metrics_describe(activity_id: StrictId) -> Envelope:
         """Describe the dynamic metric schema of an activity's detail stream. Returns one row per metric descriptor: key, unit, metricsIndex. Use this to discover what metrics a watch recorded for a specific activity before requesting samples."""
         _validate_positive_id(activity_id, "activity_id")
         return _run_tool(config, lambda: get_activity_details(activity_id), serialize_metrics_descriptors)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def activity_detail_metrics(
-        activity_id: int,
+        activity_id: StrictId,
         metrics: str = "",
         max_samples: int = 0,
     ) -> ActivityDetailMetricsEnvelope:

@@ -15,6 +15,18 @@ from garmin_cli.output import render_output
 F = TypeVar("F", bound=Callable[..., Any])
 
 
+def resolve_after_login[T](resolve: Callable[[], T], login: Callable[[], None]) -> T:
+    """Resolve dates, log in, then resolve again.
+
+    The first pass reports usage errors before any login; the second uses the
+    profile-timezone today, which needs a session. Callers pass *login* so each
+    command keeps its own ``ensure_authenticated`` seam.
+    """
+    resolve()
+    login()
+    return resolve()
+
+
 def date_range_options(*, include_ahead: bool = False) -> Callable[[F], F]:
     """Decorator factory that stacks the standard date-range Click options.
 
@@ -62,8 +74,10 @@ def render_date_range(
     meaningful for commands that stack the ``--ahead`` option (health sleep);
     performance commands leave it ``None`` and behave identically to before.
     """
-    start, end = resolve_click_dates(value_date, days, ahead, date_from, date_to)
-    ensure_authenticated(ctx.obj["config"])
+    start, end = resolve_after_login(
+        lambda: resolve_click_dates(value_date, days, ahead, date_from, date_to),
+        lambda: ensure_authenticated(ctx.obj["config"]),
+    )
     data = serializer(getter(start, end))
     render_output(
         ctx.obj["config"].output_format,

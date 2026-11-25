@@ -15,12 +15,6 @@ from garmin_cli.workout_schema import (
     is_positive_id,
 )
 
-# "speed.zone" in user input maps to Garmin's "pace.zone" with ID 6.
-_SPEED_ZONE_KEY = "pace.zone"
-_SPEED_ZONE_ID = 6
-
-_NO_TARGET = {"workoutTargetTypeId": 1, "workoutTargetTypeKey": "no.target"}
-
 
 def _estimate_step_metrics(step: dict) -> tuple[int, int]:
     """Return estimated (duration_secs, distance_meters) for one simplified step."""
@@ -68,23 +62,10 @@ def _build_target(target: dict | None) -> tuple[dict, dict]:
         - targetType dict (workoutTargetTypeId, workoutTargetTypeKey)
         - extra fields to merge into the step (e.g. zoneNumber, targetValueOne/Two)
     """
-    if target is None:
-        return dict(_NO_TARGET), {}
-
+    target = target or {}
     target_type_key = target.get("type", "no.target")
-
-    # Resolve Garmin API key and ID (speed.zone remaps to pace.zone)
-    if target_type_key == "speed.zone":
-        api_key = _SPEED_ZONE_KEY
-        type_id = _SPEED_ZONE_ID
-    else:
-        api_key = target_type_key
-        type_id = TARGET_TYPES.get(target_type_key, 1)
-
-    target_type = {
-        "workoutTargetTypeId": type_id,
-        "workoutTargetTypeKey": api_key,
-    }
+    api_key, type_id = TARGET_TYPES.get(target_type_key, (target_type_key, 1))
+    target_type = {"workoutTargetTypeId": type_id, "workoutTargetTypeKey": api_key}
 
     if target_type_key in RANGE_TARGETS:
         extra: dict = {}

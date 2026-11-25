@@ -31,6 +31,7 @@ from garmin_cli.endpoints.activities import (
 )
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.mcp_tools._shared import (
+    StrictId,
     WriteLogEvent,
     _validate_positive_id,
     _validation_envelope,
@@ -180,7 +181,7 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
         )
     )
     def activity_download(
-        activity_id: int,
+        activity_id: StrictId,
         fmt: str = "original",
         output_path: str | None = None,
         overwrite: bool = False,
@@ -288,7 +289,7 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
             }])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
-    def activity_delete(activity_id: int) -> WriteEnvelope:
+    def activity_delete(activity_id: StrictId) -> WriteEnvelope:
         """Delete an activity by ID.
 
         Destructive: the activity is permanently removed. Returns
@@ -309,7 +310,7 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
             }])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
-    def activity_rename(activity_id: int, name: str) -> WriteEnvelope:
+    def activity_rename(activity_id: StrictId, name: str) -> WriteEnvelope:
         """Rename an activity. The name must be non-empty.
 
         Destructive: the activity's stored title is replaced. On an empty name
@@ -339,7 +340,7 @@ def register_activity_write_tools(mcp: MCPServer, config: CliConfig) -> None:
             }])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
-    def activity_set_type(activity_id: int, type_key: str) -> WriteEnvelope:
+    def activity_set_type(activity_id: StrictId, type_key: str) -> WriteEnvelope:
         """Set an activity's sport type from a Garmin ``typeKey`` (e.g. running).
 
         The key is resolved against Garmin's live sport-type table, so any key

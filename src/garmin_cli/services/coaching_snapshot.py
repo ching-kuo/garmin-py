@@ -21,7 +21,7 @@ from garmin_cli.endpoints.health import (
     get_training_status,
     get_weight,
 )
-from garmin_cli.endpoints.workouts import get_calendar_range
+from garmin_cli.endpoints.workouts import get_calendar_range_counted
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.serializers import (
     serialize_activity_summary,
@@ -38,14 +38,16 @@ from garmin_cli.serializers import (
     serialize_weight,
 )
 from garmin_cli.services.coaching import (
-    CALENDAR_REQUESTS,
     build_coach_snapshot,
     coach_snapshot_request_budget,
 )
 
-# 31 keeps the default window (28-day baselines, 9 recent days) inside the
-# cap after the calendar grew a second request for adaptive-plan sessions.
-MAX_SNAPSHOT_REQUESTS = 31
+# 32 keeps the default window (28-day baselines, 9 recent days) inside the
+# cap with the calendar charged for two weekly pages plus the adaptive-plan
+# lookup.
+MAX_SNAPSHOT_REQUESTS = 32
+# Largest recent_daily_days whose non-extended budget fits the cap.
+MAX_RECENT_DAILY_DAYS = (MAX_SNAPSHOT_REQUESTS - coach_snapshot_request_budget(0, 0, False)) // 2
 
 
 def _snapshot_error(section: str, exc: GarminCliError) -> dict[str, Any]:
@@ -77,8 +79,8 @@ def validate_snapshot_inputs(
     """Validate snapshot options and return their estimated request cost."""
     if baseline_days < 7 or baseline_days > 90:
         raise ValueError("baseline_days must be between 7 and 90")
-    if recent_daily_days < 1 or recent_daily_days > 14:
-        raise ValueError("recent_daily_days must be between 1 and 14")
+    if recent_daily_days < 1 or recent_daily_days > MAX_RECENT_DAILY_DAYS:
+        raise ValueError(f"recent_daily_days must be between 1 and {MAX_RECENT_DAILY_DAYS}")
     if sports is not None and (not all(isinstance(sport, str) and sport for sport in sports) or len(set(sports)) != len(sports)):
         raise ValueError("sports must be a list of unique non-empty strings")
     budget = coach_snapshot_request_budget(baseline_days, recent_daily_days, include_extended_daily_baselines)
@@ -114,16 +116,17 @@ def collect_snapshot(
         section: str,
         call: Callable[[], Any],
         serialize: Callable[[Any], list[dict[str, Any]]],
-        cost: int = 1,
+        cost: int | Callable[[Any], int] = 1,
     ) -> bool:
         # ``completed_requests`` counts fully completed sections; a fan-out
-        # aborted mid-range charges nothing, so it is a lower bound.
+        # aborted mid-range charges nothing, so it is a lower bound. A callable
+        # cost reads the request count the call itself reported.
         nonlocal complete, aborted, completed_requests
         if aborted:
             return False
         try:
             raw = call()
-            completed_requests += cost
+            completed_requests += cost(raw) if callable(cost) else cost
             rows = serialize(raw)
             sections[section] = rows
             if not rows:
@@ -174,15 +177,14 @@ def collect_snapshot(
     fetch("training_readiness", lambda: get_training_readiness(as_of), serialize_training_readiness)
     fetch("spo2", lambda: get_spo2(as_of), serialize_spo2)
     fetch("training_status", lambda: get_training_status(as_of), serialize_training_status)
-    # Seven dates (today plus six): the weekly calendar walk steps 7 days from
-    # its start, so this window costs one calendar page plus the by-period
-    # schedule lookup; an 8th date would trigger a second week and blow the
-    # documented budget.
+    # Seven dates (today plus six) touch at most two calendar weeks, so this
+    # window costs up to CALENDAR_REQUESTS (two pages plus the by-period
+    # lookup); an 8th date could touch a third week and blow the budget.
     fetch(
         "calendar",
-        lambda: get_calendar_range(as_of, as_of + timedelta(days=6)),
-        lambda raw: serialize_calendar_workout({"calendarItems": raw}),
-        cost=CALENDAR_REQUESTS,
+        lambda: get_calendar_range_counted(as_of, as_of + timedelta(days=6)),
+        lambda raw: serialize_calendar_workout({"calendarItems": raw[0]}),
+        cost=lambda raw: raw[1],
     )
     return build_coach_snapshot(
         as_of=as_of,
