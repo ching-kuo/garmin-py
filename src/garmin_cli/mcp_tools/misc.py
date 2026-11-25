@@ -33,7 +33,7 @@ from garmin_cli.endpoints.health import (
 from garmin_cli.endpoints.metrics import get_endurance_score_range, get_race_predictions
 from garmin_cli.endpoints.workouts import get_calendar_range
 from garmin_cli.doctor import run_checks
-from garmin_cli.exceptions import GarminCliError
+from garmin_cli.exceptions import TRANSIENT_ERROR_CODES, GarminCliError
 from garmin_cli.mcp_tools._shared import (
     ReportSection,
     _authenticated,
@@ -111,12 +111,20 @@ def register_misc_tools(mcp: MCPServer, config: CliConfig) -> None:
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def login_status() -> SessionStatus:
-        """Check authentication status. Returns authenticated (bool) and garmin_home path. Never raises for missing sessions."""
+        """Check authentication status. Returns authenticated (bool) and garmin_home path. Never raises for missing sessions.
+
+        When Garmin could not be asked (throttled, 5xx, unreachable), error_code
+        and detail say why; authenticated=false then does not mean logged out.
+        """
         probe = probe_session_status(config)
-        return {
+        status: SessionStatus = {
             "authenticated": probe.authenticated,
             "garmin_home": probe.garmin_home,
         }
+        if probe.error_code in TRANSIENT_ERROR_CODES:
+            status["error_code"] = probe.error_code
+            status["detail"] = probe.detail
+        return status
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def server_doctor(fast: bool = False) -> Envelope:

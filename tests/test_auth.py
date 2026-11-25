@@ -17,7 +17,6 @@ from garmin_cli.config import CliConfig
 from garmin_cli.exceptions import GarminCliError
 from tests.helpers import make_http_error as _http_error
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -199,25 +198,6 @@ class TestEnsureAuthenticatedLoginSuccess:
             garth_home=str(garth_dir),
             return_on_mfa=True,
         )
-
-    def test_probe_server_error_raises_auth_failed(
-        self, mocker: Any, tmp_path: Path
-    ) -> None:
-        """Non-401/403 probe failure (e.g. 500) must surface as AUTH_FAILED, not fall through."""
-        garth_dir = tmp_path / "garth"
-        garth_dir.mkdir(mode=0o700)
-
-        mock_garth = MagicMock()
-        mock_garth.connectapi.side_effect = _http_error(500)
-        mocker.patch("garmin_cli.auth.garth", mock_garth)
-
-        config = _make_config(
-            garth_home=str(garth_dir), email="user@test.com", password="pass"
-        )
-        with pytest.raises(GarminCliError) as exc_info:
-            ensure_authenticated(config)
-        assert exc_info.value.error_code == "AUTH_FAILED"
-        mock_garth.login.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

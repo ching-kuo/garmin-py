@@ -55,6 +55,7 @@ def _snapshot_error(section: str, exc: GarminCliError) -> dict[str, Any]:
         "AUTH_MISSING": "authentication",
         "AUTH_FAILED": "authentication",
         "INVALID_INPUT": "validation",
+        "NETWORK_ERROR": "network",
     }.get(exc.error_code, "upstream")
     result: dict[str, Any] = {
         "section": section,
@@ -145,9 +146,9 @@ def collect_snapshot(
     fetch("sleep", lambda: get_sleep(baseline_start, as_of), serialize_sleep)
     fetch("hrv", lambda: get_hrv(baseline_start, as_of), serialize_hrv)
     fetch("body_battery", lambda: get_body_battery_range(baseline_start, as_of), serialize_body_battery)
-    # Garmin's daily-steps endpoint rejects spans wider than 28 dates (live
-    # 400: "difference ... cannot be more than 28 days"), so cap this window;
-    # steps feed the wellness section only, never the baselines.
+    # Garmin's daily-steps endpoint takes at most 28 dates per request; wider
+    # spans are chunked into more requests, so cap this window to keep steps at
+    # one request of the budget. Steps feed the wellness section only.
     steps_start = max(baseline_start, as_of - timedelta(days=27))
     fetch("steps", lambda: get_steps_range(steps_start, as_of), serialize_steps)
     fetch("weight", lambda: get_weight(baseline_start, as_of), serialize_weight)

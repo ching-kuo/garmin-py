@@ -12,10 +12,8 @@ import math
 import time
 from dataclasses import dataclass
 
-from garminconnect import GarminConnectAuthenticationError, GarminConnectTooManyRequestsError
-
 from garmin_cli.config import CliConfig
-from garmin_cli.exceptions import GarminCliError, extract_status_code
+from garmin_cli.exceptions import GarminCliError, failure_kind
 
 BACKOFF_START: float = 60.0
 BACKOFF_CAP: float = 900.0
@@ -83,21 +81,6 @@ def record_failure(
     )
 
 
-def failure_kind(exc: Exception) -> str:
-    """Classify a failed login/MFA step: throttled, rejected, server, or unreachable."""
-    chain: list[BaseException] = []
-    current: BaseException | None = exc
-    while current is not None and current not in chain:
-        chain.append(current)
-        current = current.__cause__ or current.__context__
-    status = extract_status_code(exc)
-    if status in (427, 429) or any(isinstance(e, GarminConnectTooManyRequestsError) for e in chain):
-        return "throttled"
-    if status in (401, 403) or any(isinstance(e, GarminConnectAuthenticationError) for e in chain):
-        return "rejected"
-    return "server" if status is not None and status >= 500 else "unreachable"
-
-
 def record_if_counted(
     config: CliConfig, exc: Exception, error: GarminCliError, *, mfa: bool = False
 ) -> GarminCliError:
@@ -106,7 +89,7 @@ def record_if_counted(
     Network errors, timeouts and 5xx say nothing about the credentials, so
     they return *error* unchanged and never pause logins.
     """
-    if failure_kind(exc) in ("throttled", "rejected"):
+    if failure_kind(exc, login=True) in ("throttled", "rejected"):
         return record_failure(config, error, mfa=mfa)
     return error
 

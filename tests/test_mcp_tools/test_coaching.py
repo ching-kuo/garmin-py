@@ -6,6 +6,7 @@ from datetime import date as Date
 from typing import Any
 
 import pytest
+import requests
 
 pytest.importorskip("mcp", reason="mcp extra not installed")
 
@@ -48,6 +49,38 @@ class TestCoachSnapshot:
         sleep.assert_called_once()
         hrv.assert_called_once()
         body_battery.assert_not_called()
+
+    def test_timed_out_section_is_recorded_and_snapshot_completes(
+        self, mocker: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+        for name in (
+            "get_sleep", "get_body_battery_range", "get_steps_range", "get_weight",
+            "list_activities", "get_resting_hr_range", "get_resting_hr", "get_stress_range",
+            "get_stress", "get_training_readiness", "get_spo2", "get_training_status",
+            "get_calendar_range",
+        ):
+            mocker.patch(f"garmin_cli.services.coaching_snapshot.{name}", return_value=[])
+        # The real get_hrv runs; its transport times out on every attempt.
+        mocker.patch(
+            "garmin_cli.endpoints.health.garth.connectapi",
+            side_effect=requests.Timeout("read timed out"),
+        )
+        mocker.patch("time.sleep")
+        monkeypatch.setenv("GARMIN_CLI_RETRY_DELAYS", "1")
+
+        result = _call(create_mcp_server(_config()), "coach_snapshot", {"date": "2026-07-15"})
+
+        assert result["complete"] is False
+        assert result["aborted"] is False
+        assert result["errors"] == [
+            {
+                "section": "hrv",
+                "error_code": "NETWORK_ERROR",
+                "category": "network",
+                "message": "Garmin data for this section was unavailable.",
+            }
+        ]
 
     def test_extended_baseline_above_budget_fails_before_auth(self, mocker: Any) -> None:
         auth = mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")

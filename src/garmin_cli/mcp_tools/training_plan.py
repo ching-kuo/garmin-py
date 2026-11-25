@@ -18,7 +18,7 @@ from garmin_cli.endpoints.workouts import (
     schedule_workout,
     unschedule_workout,
 )
-from garmin_cli.exceptions import GarminCliError
+from garmin_cli.exceptions import TRANSIENT_ERROR_CODES, GarminCliError
 from garmin_cli.mcp_tools._shared import _authenticated, _parse_date
 from garmin_cli.serializers import serialize_calendar_workout, serialize_workout_detail
 from garmin_cli.services.training_plan import preview_training_plan, validate_training_plan
@@ -74,6 +74,22 @@ def _source_schedule(calendar: list[dict[str, Any]], schedule_id: int, expected_
         (row for row in calendar if row.get("workout_schedule_id") == schedule_id and row.get("date") == expected_date),
         None,
     )
+
+
+# A create/schedule failing with these may still have been applied remotely
+# (a rate limit is rejected unprocessed).
+_MAY_HAVE_LANDED_CODES = (TRANSIENT_ERROR_CODES - {"RATE_LIMITED"}) | {"INTERNAL_ERROR"}
+
+
+def _may_have_landed(exc: Exception) -> bool:
+    """A create/schedule that failed this way may still have been applied remotely."""
+    return not isinstance(exc, GarminCliError) or exc.error_code in _MAY_HAVE_LANDED_CODES
+
+
+def _keep_template(new_templates: list[int], workout_id: int) -> None:
+    """Exclude *workout_id* from cleanup: a schedule we cannot identify may reference it."""
+    if workout_id in new_templates:
+        new_templates.remove(workout_id)
 
 
 def _compensate_new(new_schedules: list[int], new_templates: list[int], operations: list[dict[str, Any]]) -> bool:
@@ -164,7 +180,14 @@ def _apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
             if keep is not None:
                 operations.append({**keep, "state": "no_op"})
             elif "workout" in entry:
-                raw = create_workout(build_garmin_payload(entry["workout"]))
+                payload = build_garmin_payload(entry["workout"])
+                try:
+                    raw = create_workout(payload)
+                except Exception as exc:
+                    if _may_have_landed(exc):
+                        unidentified_write = True
+                        operations.append({"entry_id": entry["entry_id"], "action": "create_template", "state": "unknown"})
+                    raise
                 workout_id = _extract_id(raw, "workoutId")
                 if workout_id is None:
                     unidentified_write = True
@@ -209,12 +232,28 @@ def _apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
                     ]
                     if blocking:
                         raise GarminCliError("Destination date has a scheduled workout.", "INVALID_INPUT")
-                    raw_schedule = schedule_workout(workout_id, destination)
+                    try:
+                        raw_schedule = schedule_workout(workout_id, destination)
+                    except Exception as exc:
+                        if _may_have_landed(exc):
+                            unidentified_write = True
+                            _keep_template(new_templates, workout_id)
+                            operations.append(
+                                {
+                                    "entry_id": entry["entry_id"],
+                                    "action": "schedule",
+                                    "date": entry["date"],
+                                    "workout_id": workout_id,
+                                    "state": "unknown",
+                                }
+                            )
+                        raise
                     schedule_id = _extract_id(raw_schedule, "workoutScheduleId")
                     if schedule_id is not None:
                         new_schedules.append(schedule_id)
                     else:
                         unidentified_write = True
+                        _keep_template(new_templates, workout_id)
                     verified_rows = _calendar(destination, destination)
                     verified = next((row for row in verified_rows if row.get("workout_id") == workout_id), None)
                     if verified is None:
@@ -373,7 +412,19 @@ def register_training_plan_tools(mcp: MCPServer, config: CliConfig) -> None:
                     "errors": [],
                     "conflicts": [],
                 }
-            raw = schedule_workout(source["workout_id"], destination)
+            try:
+                raw = schedule_workout(source["workout_id"], destination)
+            except Exception as exc:
+                if not _may_have_landed(exc):
+                    raise
+                error_code = exc.error_code if isinstance(exc, GarminCliError) else "INTERNAL_ERROR"
+                return {
+                    "complete": False,
+                    "outcome": "unknown",
+                    "operations": [{"action": "schedule", "state": "unknown", "error_code": error_code}],
+                    "errors": [],
+                    "conflicts": [],
+                }
             new_schedule_id = _extract_id(raw, "workoutScheduleId")
             verified = next(
                 (row for row in _calendar(destination, destination) if row.get("workout_id") == source["workout_id"]), None

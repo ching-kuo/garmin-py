@@ -14,7 +14,14 @@ from garmin_cli import login_backoff
 from garmin_cli._env import _env_float
 from garmin_cli.backend import PendingMFA
 from garmin_cli.config import CliConfig
-from garmin_cli.exceptions import GarminCliError, extract_status_code
+from garmin_cli.exceptions import (
+    TRANSIENT_ERROR_CODES,
+    GarminCliError,
+    login_error,
+    probe_error,
+    raise_unless_rejected,
+    resume_error,
+)
 from garmin_cli.token_store import ensure_secure_directory, expand_garth_home
 
 logger = logging.getLogger(__name__)
@@ -124,29 +131,6 @@ def _has_pending_mfa() -> bool:
         return _pending_mfa is not None
 
 
-def _login_error(
-    exc: Exception, rejected: str = "Authentication failed. Check your credentials."
-) -> GarminCliError:
-    """Map a failed login/MFA step; only *rejected* failures blame the credentials."""
-    kind = login_backoff.failure_kind(exc)
-    if kind == "throttled":
-        return GarminCliError(
-            error="Garmin login is temporarily rate limited. Try again shortly.",
-            error_code="RATE_LIMITED",
-        )
-    if kind == "rejected":
-        return GarminCliError(error=rejected, error_code="AUTH_FAILED")
-    if kind == "server":
-        return GarminCliError(
-            error="Garmin returned a server error during login. Try again later.",
-            error_code="SERVER_ERROR",
-        )
-    return GarminCliError(
-        error="Could not reach Garmin to log in. Check connectivity and try again.",
-        error_code="AUTH_FAILED",
-    )
-
-
 def complete_mfa_login(config: CliConfig, mfa_code: str) -> None:
     """Finish a login that :func:`ensure_authenticated` left pending on MFA.
 
@@ -156,8 +140,9 @@ def complete_mfa_login(config: CliConfig, mfa_code: str) -> None:
 
     Raises:
         GarminCliError: INVALID_INPUT when no login is awaiting a code;
-            RATE_LIMITED when throttled (challenge kept); AUTH_FAILED when Garmin
-            rejects the code, is unreachable, or the session cannot be persisted.
+            RATE_LIMITED when throttled (challenge kept); NETWORK_ERROR when
+            Garmin is unreachable; AUTH_FAILED when Garmin rejects the code or
+            the session cannot be persisted.
     """
     with _login_lock:
         pending = _take_pending_mfa()
@@ -181,13 +166,14 @@ def complete_mfa_login(config: CliConfig, mfa_code: str) -> None:
         try:
             client = garth.resume_mfa_login(pending, mfa_code)
         except Exception as exc:
-            error = _login_error(
+            error = login_error(
                 exc,
                 "MFA verification failed. Retry the original request to "
                 "receive a fresh code, then submit it again.",
             )
-            if error.error_code == "RATE_LIMITED":
-                # Throttled, not rejected — the challenge may still be valid.
+            if error.error_code in TRANSIENT_ERROR_CODES:
+                # Throttled, failing or unreachable, not rejected: the
+                # challenge may still be valid.
                 _stash_pending_mfa(pending)
             # Back off so the next call does not instantly send another code.
             raise login_backoff.record_if_counted(config, exc, error, mfa=True) from exc
@@ -244,32 +230,37 @@ def probe_session_status(config: CliConfig) -> SessionProbeResult:
     authenticated = False
     error_code: str | None = None
     detail = "Saved Garmin session is unavailable."
+    unvalidated = "The saved Garmin session could not be validated."
     try:
         garth.resume(garmin_home, read_only=True)  # validates the home first
-        _probe_session()
-        authenticated = True
-        detail = "Saved Garmin session is valid."
     except FileNotFoundError:
         error_code = "AUTH_MISSING"
         detail = "No saved Garmin session was found."
-    except OSError:
-        error_code = "AUTH_FAILED"
-        detail = "The Garmin session directory cannot be accessed."
     except GarminCliError as exc:
         error_code = exc.error_code
         detail = (
             "The Garmin session path is not usable."
             if exc.error_code in ("AUTH_FAILED", "INVALID_INPUT")
-            else "The saved Garmin session could not be validated."
+            else unvalidated
         )
     except Exception as exc:
-        status = extract_status_code(exc)
-        error_code = "AUTH_FAILED"
+        error = resume_error(exc)  # upstream throttle/5xx/network, or filesystem
+        error_code = "AUTH_FAILED" if error is None else error.error_code
         detail = (
-            "The saved Garmin session was rejected."
-            if status in (401, 403)
-            else "The saved Garmin session could not be validated."
+            "The Garmin session directory cannot be accessed."
+            if error is not None and error.error_code == "AUTH_FAILED"
+            else unvalidated
         )
+    else:
+        try:
+            _probe_session()
+        except Exception as exc:
+            error = probe_error(exc)
+            error_code = "AUTH_FAILED" if error is None else error.error_code
+            detail = "The saved Garmin session was rejected." if error is None else unvalidated
+        else:
+            authenticated = True
+            detail = "Saved Garmin session is valid."
     return SessionProbeResult(
         authenticated=authenticated,
         garmin_home=garmin_home,
@@ -287,8 +278,11 @@ def ensure_authenticated(config: CliConfig) -> None:
 
     Raises:
         GarminCliError: AUTH_MISSING with no session and no credentials;
-            AUTH_FAILED / RATE_LIMITED / SERVER_ERROR when login fails (the
-            cached error with ``retry_after_seconds`` while logins are paused).
+            RATE_LIMITED / SERVER_ERROR / NETWORK_ERROR when validating the
+            saved session is throttled or fails upstream (no re-login);
+            AUTH_FAILED / RATE_LIMITED / SERVER_ERROR / NETWORK_ERROR when login
+            fails (the cached error with ``retry_after_seconds`` while logins
+            are paused).
     """
     garth_home = _home_key(config.garth_home)
     generation = login_backoff.generation(garth_home)
@@ -302,36 +296,30 @@ def ensure_authenticated(config: CliConfig) -> None:
 
     try:
         garth.resume(garth_home)
+    except GarminCliError:
+        raise
+    except Exception as exc:
+        _invalidate_probe_cache(garth_home)
+        error = resume_error(exc)
+        if error is not None:
+            raise error from exc
+        # Session expired/missing/corrupt — fall through to login. Broad by
+        # design: garth/garminconnect exception shapes vary across versions, so
+        # any resume failure should re-auth rather than crash. Logged for triage.
+        logger.debug("Garmin session resume failed, falling through to login: %s", exc)
+    else:
         try:
             _probe_session()
+        except Exception as exc:
+            _invalidate_probe_cache(garth_home)
+            raise_unless_rejected(exc)
+        else:
             # A working session makes any outstanding MFA challenge moot;
             # drop it so the half-authenticated client is released.
             _stash_pending_mfa(None)
             login_backoff.clear()
             _record_probe_ok(garth_home)
             return
-        except Exception as exc:
-            _invalidate_probe_cache(garth_home)
-            if extract_status_code(exc) not in (401, 403):
-                raise GarminCliError(
-                    error="Saved Garmin session could not be validated.",
-                    error_code="AUTH_FAILED",
-                ) from exc
-    except FileNotFoundError:
-        pass
-    except OSError as exc:
-        raise GarminCliError(
-            error=f"Cannot access session directory: {exc}",
-            error_code="AUTH_FAILED",
-        ) from exc
-    except GarminCliError:
-        raise
-    except Exception as exc:
-        # Session expired/missing/corrupt — fall through to login. Broad by
-        # design: garth/garminconnect exception shapes vary across versions, so
-        # any resume failure should re-auth rather than crash. Logged for triage.
-        _invalidate_probe_cache(garth_home)
-        logger.debug("Garmin session resume failed, falling through to login: %s", exc)
 
     if not config.email or not config.password:
         raise GarminCliError(
@@ -366,8 +354,10 @@ def ensure_authenticated(config: CliConfig) -> None:
                 garth_home=garth_home,
                 return_on_mfa=True,
             )
+        except GarminCliError:
+            raise
         except Exception as exc:
-            raise login_backoff.record_if_counted(config, exc, _login_error(exc)) from exc
+            raise login_backoff.record_if_counted(config, exc, login_error(exc)) from exc
         if isinstance(result, PendingMFA):
             _stash_pending_mfa(result)
             raise GarminCliError(error=_MFA_REQUIRED_MESSAGE, error_code="MFA_REQUIRED")
@@ -375,23 +365,41 @@ def ensure_authenticated(config: CliConfig) -> None:
         login_backoff.record_success(garth_home)
 
 
+def resume_and_probe(garth_home: str, garth_client: Any = None, *, read_only: bool = False) -> bool:
+    """Resume *garth_home* and probe it: True when valid, False when missing or rejected.
+
+    Raises GarminCliError for throttles, 5xx, network and filesystem failures
+    and unusable paths. Side effects (probe cache, MFA state) stay with callers;
+    *garth_client* lets callers pass their own (patchable) backend module.
+    """
+    client = garth if garth_client is None else garth_client
+    try:
+        if read_only:
+            client.resume(garth_home, read_only=True)
+        else:
+            client.resume(garth_home)
+    except GarminCliError:
+        raise
+    except Exception as exc:
+        error = resume_error(exc)
+        if error is not None:
+            raise error from exc
+        return False
+    try:
+        _probe_session(client)
+    except Exception as exc:
+        raise_unless_rejected(exc)
+        return False
+    return True
+
+
 def _resumed_session_works(garth_home: str) -> bool:
     """Resume *garth_home* from disk and probe it; True (and cached) on success.
 
     False only when nothing resumes or the saved session is rejected (401/403);
-    any other probe failure is reported like the primary resume path.
+    any other failure is reported like the primary resume path.
     """
-    try:
-        garth.resume(garth_home)
-    except Exception:
+    if not resume_and_probe(garth_home):
         return False
-    try:
-        _probe_session()
-    except Exception as exc:
-        if extract_status_code(exc) in (401, 403):
-            return False
-        raise GarminCliError(
-            error="Saved Garmin session could not be validated.", error_code="AUTH_FAILED"
-        ) from exc
     _record_probe_ok(garth_home)
     return True

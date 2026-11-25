@@ -11,20 +11,24 @@ from datetime import date, timedelta
 from typing import Any, Callable
 
 from garmin_cli._env import _env_float
-from garmin_cli.exceptions import GarminCliError, extract_status_code
+from garmin_cli.exceptions import (
+    TRANSIENT_KINDS,
+    GarminCliError,
+    extract_status_code,
+    failure_kind,
+    may_have_been_processed,
+    upstream_error,
+)
 
 _RETRY_DELAYS: list[float] = [2, 4, 8]
+# Retried unless retry_transient=False; rate limits are always retried.
+_RETRYABLE_FAILURES = TRANSIENT_KINDS - {"throttled"}
 _DEFAULT_DAILY_CALL_DELAY: float = 0.5
 _DEFAULT_FETCH_CONCURRENCY: int = 4
 
-# Shared immediate-fail policy across read, typed, and write helpers: auth
-# rejections and not-found never retry. Per-helper maps extend this (writes add
-# 400/409; the URL read overrides 404 with the URL-bearing message).
-_AUTH_NOT_FOUND_ERRORS: dict[int, tuple[str, str]] = {
-    401: ("Authentication failed.", "AUTH_FAILED"),
-    403: ("Authentication failed.", "AUTH_FAILED"),
-    404: ("Not found.", "NOT_FOUND"),
-}
+# Immediate-fail messages by status (401/403 and other 4xx are classified in
+# _retry_loop). Writes add 400/409; the URL read overrides 404 with the URL.
+_NOT_FOUND_ERRORS: dict[int, tuple[str, str]] = {404: ("Not found.", "NOT_FOUND")}
 
 
 def _resolve_daily_call_delay() -> float:
@@ -110,47 +114,58 @@ def _retry_loop(
     call: Callable[[], Any],
     *,
     immediate_errors: dict[int, tuple[str, str]] | None = None,
+    retry_transient: bool = True,
+    gone_after_retry_is_done: bool = False,
 ) -> Any:
-    """Execute *call* with retry on 429/5xx.
+    """Execute *call*, retrying rate limits and (by default) 5xx/network failures.
 
-    The python-garminconnect backend sends API calls on a shared
-    ``requests.Session`` whose adapter mounts no urllib3 ``Retry``, so this
-    loop is the only retry layer for reads and writes alike (verified against
-    garminconnect 0.3.20 ``Client._run_request``).
+    This loop is the only retry layer for reads and writes alike: the backend
+    builds its ``Garmin`` clients with upstream ``retry_attempts=0``, and the
+    shared ``requests.Session`` mounts no urllib3 ``Retry`` (verified against
+    garminconnect 0.3.20).
+
+    Upstream HTTP and transport failures leave as ``GarminCliError``:
+    RATE_LIMITED (429/427), AUTH_FAILED (401/403), SERVER_ERROR (5xx),
+    NETWORK_ERROR (connection errors and timeouts), INVALID_INPUT (any other
+    4xx). Other exceptions propagate unchanged.
 
     Args:
         call: Zero-arg callable that performs the API request.
         immediate_errors: Maps HTTP status codes to (error_message, error_code)
             tuples for errors that should raise immediately without retry.
+        retry_transient: False retries only rate limits, for requests that
+            must not be repeated after a 5xx or timeout (the server may have
+            applied them) or that should fail fast.
+        gone_after_retry_is_done: For deletes: a 404 on a retry after a 5xx or
+            read timeout means the earlier attempt already removed it, so
+            the call succeeds (returns None).
     """
     delays = _resolve_retry_delays()
+    maybe_processed = False
     for attempt in range(len(delays) + 1):
         try:
             return call()
+        except GarminCliError:
+            raise
         except Exception as exc:
             code = extract_status_code(exc)
+            if gone_after_retry_is_done and maybe_processed and code == 404:
+                return None
 
             if immediate_errors is not None and code in immediate_errors:
                 error_msg, error_code = immediate_errors[code]
                 raise GarminCliError(error=error_msg, error_code=error_code) from exc
 
-            if code == 429:
-                if attempt < len(delays):
-                    time.sleep(delays[attempt])
-                    continue
-                raise GarminCliError(
-                    error="Rate limited by Garmin API.", error_code="RATE_LIMITED"
-                ) from exc
-
-            if code is not None and code >= 500:
-                if attempt < len(delays):
-                    time.sleep(delays[attempt])
-                    continue
-                raise GarminCliError(
-                    error="Garmin API server error.", error_code="SERVER_ERROR"
-                ) from exc
-
-            raise
+            kind = failure_kind(exc)
+            maybe_processed = maybe_processed or may_have_been_processed(exc)
+            retryable = kind == "throttled" or (retry_transient and kind in _RETRYABLE_FAILURES)
+            if retryable and attempt < len(delays):
+                time.sleep(delays[attempt])
+                continue
+            error = upstream_error(kind, code)
+            if error is None:
+                raise
+            raise error from exc
 
 
 def _make_request(
@@ -166,10 +181,7 @@ def _make_request(
     """
     return _retry_loop(
         lambda: connectapi_fn(url, params=params),
-        immediate_errors={
-            **_AUTH_NOT_FOUND_ERRORS,
-            404: (f"Not found: {url}", "NOT_FOUND"),
-        },
+        immediate_errors={404: (f"Not found: {url}", "NOT_FOUND")},
     )
 
 
@@ -182,25 +194,48 @@ def _make_typed_request(typed_method: Callable[..., Any], *args: Any, **kwargs: 
     """
     return _retry_loop(
         lambda: typed_method(*args, **kwargs),
-        immediate_errors=_AUTH_NOT_FOUND_ERRORS,
+        immediate_errors=_NOT_FOUND_ERRORS,
     )
 
 
+_WRITE_ERRORS: dict[int, tuple[str, str]] = {
+    **_NOT_FOUND_ERRORS,
+    400: ("Invalid input.", "INVALID_INPUT"),
+    409: ("Invalid input.", "INVALID_INPUT"),
+}
+
+
 def _make_typed_write(typed_method: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-    """Execute a typed backend-adapter write method with retry on 429/5xx.
+    """Execute an idempotent typed write (PUT/DELETE) with retry on 429/5xx/network.
 
     Same as :func:`_make_typed_request` but with the write-verb immediate-fail
     map (400/409 -> INVALID_INPUT), so a
     Garmin payload rejection or conflict surfaces as a classified
     ``GarminCliError`` instead of escaping the retry loop raw.
     """
+    return _retry_loop(lambda: typed_method(*args, **kwargs), immediate_errors=_WRITE_ERRORS)
+
+
+def _make_typed_delete(typed_method: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
+    """Like :func:`_make_typed_write`, but a 404 on a retry after a 5xx/timeout is success."""
+    _retry_loop(
+        lambda: typed_method(*args, **kwargs),
+        immediate_errors=_WRITE_ERRORS,
+        gone_after_retry_is_done=True,
+    )
+
+
+def _make_typed_create(typed_method: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Execute a non-idempotent typed POST (create/schedule/upload).
+
+    Retried only on rate limits, which Garmin rejects unprocessed: a 5xx or
+    timeout may already have created the resource, so repeating it could
+    duplicate it.
+    """
     return _retry_loop(
         lambda: typed_method(*args, **kwargs),
-        immediate_errors={
-            **_AUTH_NOT_FOUND_ERRORS,
-            400: ("Invalid input.", "INVALID_INPUT"),
-            409: ("Invalid input.", "INVALID_INPUT"),
-        },
+        immediate_errors=_WRITE_ERRORS,
+        retry_transient=False,
     )
 
 

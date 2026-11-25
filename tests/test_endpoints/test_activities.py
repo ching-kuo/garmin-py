@@ -600,6 +600,20 @@ class TestUploadActivity:
         mock_garth.upload_activity.assert_called_once_with(str(f))
         assert result["detailedImportResult"]["successes"][0]["internalId"] == 99
 
+    def test_server_error_is_not_retried(self, mocker: Any, tmp_path: Any) -> None:
+        f = tmp_path / "ride.fit"
+        f.write_bytes(b"FIT")
+        mock_garth = MagicMock()
+        mock_garth.upload_activity.side_effect = _http_error(502)
+        mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)
+        mocker.patch("time.sleep")
+
+        with pytest.raises(GarminCliError) as exc_info:
+            upload_activity(str(f))
+
+        assert exc_info.value.error_code == "SERVER_ERROR"
+        assert mock_garth.upload_activity.call_count == 1
+
     def test_missing_file_raises_invalid_input(self, mocker: Any, tmp_path: Any) -> None:
         mock_garth = MagicMock()
         mocker.patch("garmin_cli.endpoints.activities.garth", mock_garth)

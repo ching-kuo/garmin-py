@@ -9,10 +9,12 @@ from unittest.mock import ANY
 from unittest.mock import MagicMock
 
 import pytest
+import requests
 from click.testing import CliRunner
 
 from garmin_cli.cli import cli
 from tests.helpers import make_http_error as _http_error
+from tests.helpers import make_requests_http_error
 
 
 @pytest.fixture(autouse=True)
@@ -484,6 +486,30 @@ class TestLoginStatusLoggedIn:
         assert result.exit_code == 0
         parsed = json.loads(result.output)
         assert parsed["data"][0]["authenticated"] is False
+
+    @pytest.mark.parametrize("step", ["resume", "connectapi"])
+    @pytest.mark.parametrize(
+        ("exc", "code"),
+        [
+            (make_requests_http_error(503), "SERVER_ERROR"),
+            (make_requests_http_error(429), "RATE_LIMITED"),
+            (requests.Timeout("read timed out"), "NETWORK_ERROR"),
+        ],
+    )
+    def test_status_reports_upstream_failure_instead_of_logged_out(
+        self, mocker: Any, tmp_path: Path, step: str, exc: Exception, code: str
+    ) -> None:
+        mock_garth = MagicMock()
+        getattr(mock_garth, step).side_effect = exc
+        mocker.patch("garmin_cli.commands.login.garth", mock_garth)
+        garth_dir = tmp_path / "garth"
+        garth_dir.mkdir(mode=0o700)
+        result = CliRunner(mix_stderr=False).invoke(
+            cli, ["--json", "--garmin-home", str(garth_dir), "login", "status"]
+        )
+
+        assert result.exit_code == 1
+        assert json.loads(result.output)["error_code"] == code
 
 
 # ---------------------------------------------------------------------------

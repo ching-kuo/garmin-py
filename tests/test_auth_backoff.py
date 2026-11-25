@@ -8,6 +8,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+import requests
 from garminconnect import (
     GarminConnectAuthenticationError,
     GarminConnectConnectionError,
@@ -202,6 +203,14 @@ def _wrapped_throttle() -> Exception:
         return outer
 
 
+def _upstream_timeout() -> Exception:
+    """Upstream's wrapping of a transport timeout (``raise ... from e``)."""
+    try:
+        raise GarminConnectConnectionError("Connection error: Read timed out") from requests.Timeout("t")
+    except GarminConnectConnectionError as exc:
+        return exc
+
+
 @pytest.mark.parametrize(
     ("exc", "code", "backs_off"),
     [
@@ -212,8 +221,10 @@ def _wrapped_throttle() -> Exception:
         (_http_error(401), "AUTH_FAILED", True),
         (_http_error(403), "AUTH_FAILED", True),
         (_http_error(503), "SERVER_ERROR", False),
-        (GarminConnectConnectionError("Read timed out"), "AUTH_FAILED", False),
-        (ConnectionError("Connection refused"), "AUTH_FAILED", False),
+        (_upstream_timeout(), "NETWORK_ERROR", False),
+        (GarminConnectConnectionError("curl_cffi not available"), "AUTH_FAILED", False),
+        (ConnectionError("Connection refused"), "NETWORK_ERROR", False),
+        (RuntimeError("unexpected SSO page"), "AUTH_FAILED", False),
     ],
 )
 def test_only_rejections_and_throttles_start_backoff(
@@ -281,10 +292,10 @@ def test_waiter_reports_non_auth_probe_failure_instead_of_logging_in(
     _peer_logs_in_during_first_resume(garth, config.garth_home, later_resumes_work=True)
     garth.connectapi.side_effect = _http_error(500)
 
-    with pytest.raises(GarminCliError, match="could not be validated") as exc_info:
+    with pytest.raises(GarminCliError) as exc_info:
         ensure_authenticated(config)
 
-    assert exc_info.value.error_code == "AUTH_FAILED"
+    assert exc_info.value.error_code == "SERVER_ERROR"
     garth.login.assert_not_called()
 
 
@@ -319,6 +330,26 @@ def test_waiter_re_resumes_peer_session_instead_of_logging_in(
     garth.login.assert_not_called()
     assert garth.resume.call_count == 2  # re-resumed what the peer persisted
     assert garth.connectapi.call_count == 1  # and probed it
+
+
+def test_waiter_reports_network_failure_on_peer_resume_instead_of_logging_in(
+    garth: MagicMock, tmp_path: Path
+) -> None:
+    config = _config(tmp_path, password="right")
+    calls = 0
+
+    def _resume(_home: str) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            login_backoff.record_success(config.garth_home)
+            raise Exception("stale session")
+        raise requests.Timeout("profile load timed out")
+
+    garth.resume.side_effect = _resume
+
+    assert _auth_error(config).error_code == "NETWORK_ERROR"
+    garth.login.assert_not_called()
 
 
 def test_waiter_logs_in_when_peer_session_does_not_resume(

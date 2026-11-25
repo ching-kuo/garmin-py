@@ -8,20 +8,16 @@ from typing import Any
 from garmin_cli import backend as garth
 from garmin_cli.exceptions import GarminCliError
 from garmin_cli.endpoints._base import (
-    _AUTH_NOT_FOUND_ERRORS,
+    _NOT_FOUND_ERRORS,
     _make_request,
+    _make_typed_create,
+    _make_typed_delete,
+    _make_typed_write,
     _retry_loop,
     _validate_numeric_id,
 )
 
 logger = logging.getLogger(__name__)
-
-# Supplemental lookups fail fast on server errors instead of sleeping through
-# the full retry schedule; only 429s are retried.
-_FAIL_FAST_ERRORS = {
-    **_AUTH_NOT_FOUND_ERRORS,
-    **{status: ("Garmin API server error.", "SERVER_ERROR") for status in (500, 502, 503, 504)},
-}
 
 
 def _request(url: str, *, params: dict[str, Any] | None = None) -> Any:
@@ -33,25 +29,7 @@ def _typed_read(
     *,
     not_found_message: str,
 ) -> Any:
-    return _retry_loop(
-        call,
-        immediate_errors={
-            404: (not_found_message, "NOT_FOUND"),
-        },
-    )
-
-
-def _typed_write(call: Any) -> Any:
-    return _retry_loop(
-        call,
-        immediate_errors={
-            400: ("Invalid input.", "INVALID_INPUT"),
-            401: ("Authentication failed.", "AUTH_FAILED"),
-            403: ("Authentication failed.", "AUTH_FAILED"),
-            404: ("Not found.", "NOT_FOUND"),
-            409: ("Invalid input.", "INVALID_INPUT"),
-        },
-    )
+    return _retry_loop(call, immediate_errors={404: (not_found_message, "NOT_FOUND")})
 
 
 def list_workouts(limit: int) -> list:
@@ -74,26 +52,26 @@ def get_workout(workout_id: Any) -> dict:
 
 
 def create_workout(payload: dict) -> dict:
-    """POST /workout-service/workout with Garmin-format payload."""
-    return _typed_write(lambda: garth.create_workout(payload))
+    """POST /workout-service/workout with Garmin-format payload (retried only on 429)."""
+    return _make_typed_create(garth.create_workout, payload)
 
 
 def update_workout(workout_id: Any, merged_payload: dict) -> None:
     """PUT /workout-service/workout/{id} with pre-merged Garmin-format payload."""
     validated = _validate_numeric_id(workout_id, "workout_id")
-    _typed_write(lambda: garth.update_workout(validated, merged_payload))
+    _make_typed_write(garth.update_workout, validated, merged_payload)
 
 
 def delete_workout(workout_id: Any) -> None:
     """DELETE /workout-service/workout/{id}."""
     validated = _validate_numeric_id(workout_id, "workout_id")
-    _typed_write(lambda: garth.delete_workout(validated))
+    _make_typed_delete(garth.delete_workout, validated)
 
 
 def schedule_workout(workout_id: Any, schedule_date: date) -> dict:
-    """POST /workout-service/schedule/{id} with date."""
+    """POST /workout-service/schedule/{id} with date (retried only on 429)."""
     validated = _validate_numeric_id(workout_id, "workout_id")
-    return _typed_write(lambda: garth.schedule_workout(validated, schedule_date))
+    return _make_typed_create(garth.schedule_workout, validated, schedule_date)
 
 
 def unschedule_workout(scheduled_workout_id: Any) -> None:
@@ -104,7 +82,7 @@ def unschedule_workout(scheduled_workout_id: Any) -> None:
     ``workoutScheduleId`` returned by scheduling (not the workout id).
     """
     validated = _validate_numeric_id(scheduled_workout_id, "scheduled_workout_id")
-    _typed_write(lambda: garth.unschedule_workout(validated))
+    _make_typed_delete(garth.unschedule_workout, validated)
 
 
 def _schedule_as_calendar_item(entry: dict[str, Any]) -> dict[str, Any]:
@@ -130,9 +108,9 @@ def _get_scheduled_by_period(start: date, end: date) -> list[Any]:
 
     Garmin Coach (adaptive) sessions can be missing from the calendar-service
     pages but are listed here (python-garminconnect 0.3.14/0.3.19 notes).
-    The lookup is supplemental: it is tried once on server errors, and if it
-    fails for any reason other than a rate limit or a missing session, the
-    calendar pages stand alone.
+    The lookup is supplemental: it is tried once on server and network errors,
+    and if it fails for any reason other than a rate limit or a missing
+    session, the calendar pages stand alone.
     """
     try:
         result = _retry_loop(
@@ -140,7 +118,8 @@ def _get_scheduled_by_period(start: date, end: date) -> list[Any]:
                 "/workout-service/schedule/workoutScheduleByPeriod",
                 params={"startDate": start.isoformat(), "endDate": end.isoformat()},
             ),
-            immediate_errors=_FAIL_FAST_ERRORS,
+            immediate_errors=_NOT_FOUND_ERRORS,
+            retry_transient=False,
         )
     except Exception as exc:  # includes transport failures (timeouts, resets)
         if isinstance(exc, GarminCliError) and exc.error_code in {"RATE_LIMITED", "AUTH_MISSING"}:

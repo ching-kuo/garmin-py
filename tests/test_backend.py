@@ -11,6 +11,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+import requests
 
 from garmin_cli import backend
 from garmin_cli.exceptions import GarminCliError
@@ -37,6 +38,9 @@ class _FakeClient:
 
     def _refresh_session(self) -> None:  # wrapped by backend._serialize_refresh
         pass
+
+    def _di_token_post(self, *args: Any) -> _FakeResponse:  # wrapped by backend._surface_refresh_failures
+        return _FakeResponse(200, {})
 
     def get_api_headers(self) -> dict[str, str]:  # wrapped by backend._serialize_refresh
         return {}
@@ -65,7 +69,9 @@ class _FakeGarmin:
         password: str | None = None,
         prompt_mfa: Any = None,
         return_on_mfa: bool = False,
+        retry_attempts: int = 3,
     ) -> None:
+        self.retry_attempts = retry_attempts
         self.email = email
         self.password = password
         self.prompt_mfa = prompt_mfa
@@ -661,3 +667,89 @@ class TestProfileToday:
         client.get_user_timezone.side_effect = RuntimeError("network down")
         monkeypatch.setattr(backend, "_backend", client)
         assert backend.profile_today() is None
+
+
+class TestSingleRetryLayer:
+    """``_retry_loop`` is the only retry layer: upstream retries are disabled."""
+
+    def test_login_and_resume_clients_disable_upstream_retries(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        garth_home = tmp_path / "garth"
+        garth_home.mkdir(mode=0o700)
+        (garth_home / "garmin_tokens.json").write_text('{"di_token":"abc"}')
+        monkeypatch.setattr(backend, "Garmin", _FakeGarmin)
+
+        backend.login("user@example.com", "secret", garth_home=str(garth_home))
+        backend.resume(str(garth_home))
+
+        assert [g.retry_attempts for g in _FakeGarmin.instances] == [0, 0]
+
+    def test_failing_503_read_makes_one_attempt_per_retry_slot(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import garminconnect
+        from garminconnect.client import Client
+
+        from garmin_cli.endpoints._base import _make_request
+
+        garth_home = tmp_path / "garth"
+        garth_home.mkdir(mode=0o700)
+        (garth_home / "garmin_tokens.json").write_text('{"di_token":"abc"}')
+        monkeypatch.setattr(garminconnect.Garmin, "login", lambda self, tokenstore=None: None)
+        monkeypatch.setattr(Client, "get_api_headers", lambda self: {})
+        monkeypatch.setenv("GARMIN_CLI_RETRY_DELAYS", "1,2,3")
+        monkeypatch.setattr("time.sleep", lambda _s: None)
+        backend.resume(str(garth_home))
+        session_request = MagicMock(return_value=MagicMock(status_code=503))
+        monkeypatch.setattr(backend._require_backend().client._api_session, "request", session_request)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            _make_request(backend.connectapi, "/usersummary-service/stats/steps/daily/a/b")
+
+        assert exc_info.value.error_code == "SERVER_ERROR"
+        assert session_request.call_count == 1 + 3
+
+
+class TestRefreshFailureSurfacing:
+    """Upstream swallows a failed token refresh and replays the 401; report the cause."""
+
+    @pytest.mark.parametrize(
+        ("refresh", "kind"),
+        [
+            (requests.ConnectTimeout("refresh timed out"), "unreachable"),
+            (MagicMock(ok=False, status_code=503, text="down"), "server"),
+            (MagicMock(ok=False, status_code=400, text="invalid_grant"), "rejected"),
+        ],
+    )
+    def test_401_after_failed_refresh_is_classified_by_the_refresh(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, refresh: Any, kind: str
+    ) -> None:
+        import garminconnect
+        from garminconnect.client import Client
+
+        from garmin_cli.exceptions import failure_kind
+
+        def _di_token_post(self: Any, *_args: Any) -> Any:
+            if isinstance(refresh, Exception):
+                raise refresh
+            return refresh
+
+        garth_home = tmp_path / "garth"
+        garth_home.mkdir(mode=0o700)
+        (garth_home / "garmin_tokens.json").write_text('{"di_token":"abc"}')
+        monkeypatch.setattr(garminconnect.Garmin, "login", lambda self, tokenstore=None: None)
+        monkeypatch.setattr(Client, "get_api_headers", lambda self: {})
+        monkeypatch.setattr(Client, "_token_expires_soon", lambda self: False)
+        monkeypatch.setattr(Client, "_di_token_post", _di_token_post)
+        backend.resume(str(garth_home))
+        inner = backend._require_backend().client
+        inner.di_token, inner.di_refresh_token, inner.di_client_id = "token", "refresh", "client"
+        monkeypatch.setattr(
+            inner._api_session, "request", MagicMock(return_value=MagicMock(status_code=401))
+        )
+
+        with pytest.raises(Exception) as exc_info:
+            backend.connectapi("/calendar-service/year/2026/month/0/day/1/start/1")
+
+        assert failure_kind(exc_info.value) == kind

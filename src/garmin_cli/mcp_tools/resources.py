@@ -25,7 +25,7 @@ from garmin_cli.endpoints.performance import (
 )
 from garmin_cli.endpoints.metrics import get_race_predictions
 from garmin_cli.error_contracts import ERROR_CODE_TABLE
-from garmin_cli.exceptions import GarminCliError
+from garmin_cli.exceptions import TRANSIENT_ERROR_CODES, GarminCliError
 from garmin_cli.mcp_tools._shared import _envelope, _error_text
 from garmin_cli.mcp_tools.activities import _AUTO_CELL_BUDGET, _activity_get_result
 from garmin_cli.mcp_tools.coaching import TARGET_SAMPLE_BUDGET, TARGET_STREAM_LIMIT
@@ -221,11 +221,12 @@ def _require_resource_auth(config: CliConfig) -> None:
     if state == "authenticated":
         return
     error_code = auth.get("error_code") or "AUTH_MISSING"
-    message = (
-        "No usable saved session found"
-        if error_code == "AUTH_MISSING"
-        else "Garmin session is not authenticated"
-    )
+    if error_code == "AUTH_MISSING":
+        message = "No usable saved session found"
+    elif error_code in TRANSIENT_ERROR_CODES:
+        message = "Could not check the Garmin session: Garmin throttled, failed, or was unreachable"
+    else:
+        message = "Garmin session is not authenticated"
     raise ResourceError(
         _error_text(GarminCliError(error=message, error_code=error_code))
     )
@@ -287,7 +288,6 @@ def register_resources(mcp: MCPServer, config: CliConfig) -> None:
             "limits": {
                 "date_range_days": 90,
                 "activity_list_limit": 100,
-                "steps_window_days": 28,
                 "activity_laps_rows": 100,
                 "activity_detail_metrics_auto_cell_budget": _AUTO_CELL_BUDGET,
                 "activity_detail_metrics_max_samples": 5000,

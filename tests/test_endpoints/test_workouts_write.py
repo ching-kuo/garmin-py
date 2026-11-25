@@ -1,6 +1,7 @@
 """Tests for write operations in garmin_cli.endpoints.workouts."""
 from __future__ import annotations
 
+import socket
 from datetime import date
 from typing import Any
 from unittest.mock import MagicMock
@@ -71,7 +72,8 @@ class TestCreateWorkout:
             create_workout(_SAMPLE_PAYLOAD)
         assert exc_info.value.error_code == "AUTH_FAILED"
 
-    def test_500_retries_and_raises(self, mocker: Any) -> None:
+    def test_500_is_not_retried(self, mocker: Any) -> None:
+        # A 5xx POST may still have created the workout; a retry could duplicate it.
         mock_garth = MagicMock()
         mock_garth.create_workout.side_effect = [_http_error(500)] * 4
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
@@ -80,6 +82,16 @@ class TestCreateWorkout:
         with pytest.raises(GarminCliError) as exc_info:
             create_workout(_SAMPLE_PAYLOAD)
         assert exc_info.value.error_code == "SERVER_ERROR"
+        assert mock_garth.create_workout.call_count == 1
+
+    def test_429_is_retried(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.create_workout.side_effect = [_http_error(429), {"workoutId": 42}]
+        mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
+        mocker.patch("time.sleep")
+
+        assert create_workout(_SAMPLE_PAYLOAD) == {"workoutId": 42}
+        assert mock_garth.create_workout.call_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +206,17 @@ class TestScheduleWorkout:
         assert isinstance(result, dict)
         assert result.get("workoutScheduleId") == 555
 
+    def test_503_is_not_retried(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.schedule_workout.side_effect = _http_error(503)
+        mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
+        mocker.patch("time.sleep")
+
+        with pytest.raises(GarminCliError) as exc_info:
+            schedule_workout(12345, date(2026, 4, 1))
+        assert exc_info.value.error_code == "SERVER_ERROR"
+        assert mock_garth.schedule_workout.call_count == 1
+
     def test_invalid_workout_id_raises_invalid_input(self, mocker: Any) -> None:
         mock_garth = MagicMock()
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
@@ -258,6 +281,37 @@ class TestUnscheduleWorkout:
         mock_garth = MagicMock()
         mock_garth.unschedule_workout.side_effect = _http_error(404)
         mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            unschedule_workout(99999)
+        assert exc_info.value.error_code == "NOT_FOUND"
+
+    def test_404_on_retry_after_server_error_means_already_removed(self, mocker: Any) -> None:
+        mock_garth = MagicMock()
+        mock_garth.unschedule_workout.side_effect = [_http_error(503), _http_error(404)]
+        mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
+        mocker.patch("time.sleep")
+
+        assert unschedule_workout(99999) is None
+        assert mock_garth.unschedule_workout.call_count == 2
+
+    def test_404_on_retry_after_dns_failure_is_still_not_found(self, mocker: Any) -> None:
+        # A DNS failure never reached Garmin, so the later 404 is a genuine miss.
+        mock_garth = MagicMock()
+        mock_garth.unschedule_workout.side_effect = [socket.gaierror("dns"), _http_error(404)]
+        mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
+        mocker.patch("time.sleep")
+
+        with pytest.raises(GarminCliError) as exc_info:
+            unschedule_workout(99999)
+        assert exc_info.value.error_code == "NOT_FOUND"
+
+    def test_404_on_retry_after_rate_limit_is_still_not_found(self, mocker: Any) -> None:
+        # A 429 was not processed, so the later 404 is a genuine miss.
+        mock_garth = MagicMock()
+        mock_garth.unschedule_workout.side_effect = [_http_error(429), _http_error(404)]
+        mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
+        mocker.patch("time.sleep")
 
         with pytest.raises(GarminCliError) as exc_info:
             unschedule_workout(99999)

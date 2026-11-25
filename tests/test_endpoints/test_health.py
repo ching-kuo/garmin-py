@@ -1,7 +1,7 @@
 """Tests for garmin_cli.endpoints.health — all health endpoint functions."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -10,9 +10,11 @@ import pytest
 from garmin_cli.endpoints.health import (
     get_body_battery_range,
     get_hrv,
+    get_intensity_minutes_range,
     get_resting_hr_range,
     get_sleep,
     get_spo2_range,
+    get_steps_range,
     get_stress_range,
     get_training_readiness_range,
     get_training_status,
@@ -188,3 +190,55 @@ class TestDailyHealthRangeHelpers:
         assert len(get_spo2_range(date(2026, 3, 11), date(2026, 3, 12))) == 2
         assert len(get_resting_hr_range(date(2026, 3, 11), date(2026, 3, 12))) == 2
         assert len(get_training_readiness_range(date(2026, 3, 11), date(2026, 3, 12))) == 2
+
+
+# ---------------------------------------------------------------------------
+# usersummary stats ranges — chunked to Garmin's live span limits
+# ---------------------------------------------------------------------------
+
+def _stats_spans(mock_garth: MagicMock) -> list[tuple[str, str]]:
+    return [tuple(c.args[0].rsplit("/", 2)[1:]) for c in mock_garth.connectapi.call_args_list]
+
+
+@pytest.mark.parametrize(
+    ("getter", "days", "spans"),
+    [
+        (get_steps_range, 28, [("2026-01-01", "2026-01-28")]),
+        (get_steps_range, 29, [("2026-01-01", "2026-01-28"), ("2026-01-29", "2026-01-29")]),
+        (get_steps_range, 56, [("2026-01-01", "2026-01-28"), ("2026-01-29", "2026-02-25")]),
+        (
+            get_steps_range,
+            90,
+            [
+                ("2026-01-01", "2026-01-28"),
+                ("2026-01-29", "2026-02-25"),
+                ("2026-02-26", "2026-03-25"),
+                ("2026-03-26", "2026-03-31"),
+            ],
+        ),
+        (get_intensity_minutes_range, 31, [("2026-01-01", "2026-01-31")]),
+        (get_intensity_minutes_range, 32, [("2026-01-01", "2026-01-31"), ("2026-02-01", "2026-02-01")]),
+    ],
+)
+def test_stats_range_is_chunked_within_garmin_span_limit(
+    mocker: Any, getter: Any, days: int, spans: list[tuple[str, str]]
+) -> None:
+    mock_garth = MagicMock()
+    mock_garth.connectapi.side_effect = lambda url, params=None: [{"calendarDate": url[-21:-11]}]
+    mocker.patch("garmin_cli.endpoints.health.garth", mock_garth)
+    start = date(2026, 1, 1)
+
+    rows = getter(start, start + timedelta(days=days - 1))
+
+    assert _stats_spans(mock_garth) == spans
+    assert [row["calendarDate"] for row in rows] == [first for first, _ in spans]
+
+
+def test_stats_range_chunking_does_not_overflow_at_date_max(mocker: Any) -> None:
+    mock_garth = MagicMock()
+    mock_garth.connectapi.return_value = []
+    mocker.patch("garmin_cli.endpoints.health.garth", mock_garth)
+
+    get_steps_range(date(9999, 12, 1), date.max)
+
+    assert _stats_spans(mock_garth) == [("9999-12-01", "9999-12-28"), ("9999-12-29", "9999-12-31")]

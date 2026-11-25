@@ -109,6 +109,9 @@ def test_sleep_template_cold_start_uses_probe_resumed_backend(
     sleep = [{"dailySleepDTO": {"calendarDate": "2026-01-01", "sleepTimeSeconds": 28800}}]
 
     class _FakeGarmin:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
         def login(self, tokenstore: str | None = None) -> tuple[None, None]:
             return None, None
 
@@ -118,6 +121,7 @@ def test_sleep_template_cold_start_uses_probe_resumed_backend(
     monkeypatch.setattr(backend, "Garmin", _FakeGarmin)
     monkeypatch.setattr(backend, "_apply_timeout", lambda _client: None)
     monkeypatch.setattr(backend, "_serialize_refresh", lambda _client: None)
+    monkeypatch.setattr(backend, "_surface_refresh_failures", lambda _client: None)
     monkeypatch.setattr(backend, "_backend", None)
     monkeypatch.setattr(backend, "_garth_home", None)
     monkeypatch.setenv("GARMIN_CLI_AUTH_PROBE_TTL", "0")
@@ -161,6 +165,21 @@ def test_template_auth_error_keeps_json_error_contract(mocker: Any) -> None:
 
     payload = json.loads(str(exc_info.value))
     assert payload["error_code"] == "AUTH_MISSING"
+
+
+def test_template_probe_outage_is_not_reported_as_unauthenticated(mocker: Any) -> None:
+    mocker.patch(
+        "garmin_cli.mcp_tools.resources._auth_state",
+        return_value=("unauthenticated", {"error_code": "NETWORK_ERROR"}),
+    )
+    server = create_mcp_server(_config())
+
+    with pytest.raises(Exception) as exc_info:
+        asyncio.run(server.read_resource("garmin://activity/123"))
+
+    payload = json.loads(str(exc_info.value))
+    assert payload["error_code"] == "NETWORK_ERROR"
+    assert "not authenticated" not in payload["message"]
 
 
 def test_manifest_inventory_matches_registered_tools(

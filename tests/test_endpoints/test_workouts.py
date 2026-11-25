@@ -82,6 +82,24 @@ class TestGetWorkout:
         mock_garth.get_workout.assert_called_once_with(987654)
 
 
+@pytest.mark.parametrize("status", [401, 403])
+@pytest.mark.parametrize(
+    ("method", "call"),
+    [("list_workouts", lambda: list_workouts(limit=20)), ("get_workout", lambda: get_workout(1))],
+)
+def test_workout_reads_map_auth_rejections_to_auth_failed(
+    mocker: Any, status: int, method: str, call: Any
+) -> None:
+    mock_garth = MagicMock()
+    getattr(mock_garth, method).side_effect = _http_error(status)
+    mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
+
+    with pytest.raises(GarminCliError) as exc_info:
+        call()
+    assert exc_info.value.error_code == "AUTH_FAILED"
+    assert getattr(mock_garth, method).call_count == 1
+
+
 # ---------------------------------------------------------------------------
 # get_calendar_range
 # ---------------------------------------------------------------------------

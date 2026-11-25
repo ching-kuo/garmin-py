@@ -45,3 +45,7 @@ class SessionStatus(TypedDict):
 
     authenticated: bool
     garmin_home: str
+    # Set when the session could not be checked (RATE_LIMITED, SERVER_ERROR,
+    # NETWORK_ERROR): authenticated=false then says nothing about the session.
+    error_code: NotRequired[str | None]
+    detail: NotRequired[str | None]

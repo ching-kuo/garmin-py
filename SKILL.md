@@ -52,10 +52,11 @@ Always use `--json` for machine-readable output. The tool returns a JSON envelop
 | `AUTH_FAILED` | Credentials rejected | No -- fix credentials |
 | `MFA_REQUIRED` | Garmin sent a one-time MFA code | Ask the user for the code, then `submit_mfa_code` (MCP), or `garmin-cli login` at a terminal (CLI); `--mfa-code` only works for authenticator-app codes |
 | `NOT_FOUND` | Endpoint returned 404 | No |
-| `RATE_LIMITED` | 429 after 3 retries | Yes -- wait and retry |
-| `SERVER_ERROR` | 5xx after 3 retries | Yes -- wait and retry |
-| `INVALID_INPUT` | Bad arguments or conflicting options | No -- fix arguments |
-| `INTERNAL_ERROR` | Unexpected error, including uncategorized connection/timeout failures | Maybe |
+| `RATE_LIMITED` | 429 (or SSO 427) after 3 retries | Yes -- wait and retry |
+| `SERVER_ERROR` | 5xx after 3 retries; creates (workout create/schedule, activity upload) are never retried | Reads: wait and retry. Writes: the write may have landed -- verify remote state (list/calendar) before repeating it |
+| `NETWORK_ERROR` | Connection or timeout failure after 3 retries; creates (workout create/schedule, activity upload) are never retried | Reads: check connectivity, retry once. Writes: the write may have landed -- verify remote state before repeating it |
+| `INVALID_INPUT` | Bad arguments or conflicting options, or another 4xx from Garmin (message names the status) | No -- fix arguments |
+| `INTERNAL_ERROR` | Unexpected error | Maybe |
 
 ## Commands
 
@@ -500,9 +501,9 @@ garmin-cli --json login status
 garmin-cli --json login logout
 ```
 
-Under `--json` or with a non-terminal stdin, `login` never prompts: missing credentials fail with `AUTH_MISSING`, and an MFA challenge without a code fails with `MFA_REQUIRED` (exit 1). Every login starts a new challenge, so `--mfa-code` only works for a code valid for it (authenticator app); for emailed or SMS codes, have the user run `garmin-cli login` in a terminal. `--password-stdin` with an empty line fails with `AUTH_MISSING`. `login logout` returns `{"logged_out": true|false, "legacy_token_removed": true|false}` (exit 0 when nothing existed); it refuses symlinks and, for the default home, also deletes a legacy `~/.garth/garmin_tokens.json`. Stop a running MCP server before logging out: it keeps its loaded session and may save refreshed tokens again. Login failures from network errors or Garmin 5xx (`SERVER_ERROR`) are not credential problems; retry later instead of asking for a new password.
+Under `--json` or with a non-terminal stdin, `login` never prompts: missing credentials fail with `AUTH_MISSING`, and an MFA challenge without a code fails with `MFA_REQUIRED` (exit 1). Every login starts a new challenge, so `--mfa-code` only works for a code valid for it (authenticator app); for emailed or SMS codes, have the user run `garmin-cli login` in a terminal. `--password-stdin` with an empty line fails with `AUTH_MISSING`. `login logout` returns `{"logged_out": true|false, "legacy_token_removed": true|false}` (exit 0 when nothing existed); it refuses symlinks and, for the default home, also deletes a legacy `~/.garth/garmin_tokens.json`. Stop a running MCP server before logging out: it keeps its loaded session and may save refreshed tokens again. Login failures from network errors (`NETWORK_ERROR`) or Garmin 5xx (`SERVER_ERROR`) are not credential problems; retry later instead of asking for a new password.
 
-`login status` returns `{"ok": true, ..., "data": [{"authenticated": true, "garmin_home": "..."}]}` when a session is present and `"authenticated": false` when not. Exit code is always `0` (it is an informational command).
+`login status` returns `{"ok": true, ..., "data": [{"authenticated": true, "garmin_home": "..."}]}` when a session is present and `"authenticated": false` when it is missing or Garmin rejects it (exit `0` in both cases). When the session cannot be checked it exits `1` with an error envelope instead: `RATE_LIMITED`, `SERVER_ERROR`, or `NETWORK_ERROR` when Garmin throttles, fails, or is unreachable (the session may still be fine; retry later), and `AUTH_FAILED` when the Garmin home path is unusable.
 
 After login, verify the session is usable:
 
@@ -532,7 +533,7 @@ else:
 
 ### Rate limiting
 
-Garmin Connect enforces rate limits. The CLI retries 3 times with backoff (2s, 4s, 8s) for 429/5xx. If you still get `RATE_LIMITED`, wait 30-60 seconds before retrying. Space sequential calls by at least 1 second.
+Garmin Connect enforces rate limits. The CLI retries 3 times with backoff (2s, 4s, 8s) for 429/5xx and connection/timeout failures (creates retry only on 429). If you still get `RATE_LIMITED`, wait 30-60 seconds before retrying. Space sequential calls by at least 1 second.
 
 ### CSV output
 
@@ -609,8 +610,8 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `health_hrv` | `start_date`, `end_date` | `{count, rows}` |
 | `health_weight` | `start_date`, `end_date` | `{count, rows}` |
 | `health_daily_summary` | `start_date`, `end_date` | `{count, rows}` — steps, floors, intensity minutes, calories, resting HR (one request for the whole range) |
-| `health_steps` | `start_date`, `end_date` | `{count, rows}` — steps, distance, step goal (native range API) |
-| `health_intensity_minutes` | `start_date`, `end_date` | `{count, rows}` — moderate/vigorous minutes, weekly goal (native range API) |
+| `health_steps` | `start_date`, `end_date` | `{count, rows}` — steps, distance, step goal (native range API; one request per 28 days) |
+| `health_intensity_minutes` | `start_date`, `end_date` | `{count, rows}` — moderate/vigorous minutes, weekly goal (native range API; one request per 31 days) |
 | `health_body_battery` | `start_date`, `end_date` | `{count, rows}` — `date`, `start_level`, `end_level`, `max_level` (intraday peak); single ranged API call |
 | `health_stress` | `start_date`, `end_date` | `{count, rows}` |
 | `health_spo2` | `start_date`, `end_date` | `{count, rows}` |
@@ -655,7 +656,7 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `performance_power_curve` | `start_date`, `end_date`, `sport?` (`cycling`\|`rowing`) | `{count, rows}` — `duration_s`, `power_w`, and the `activity_id`/`activity_date` that set it |
 | `performance_fastest_splits` | `start_date`, `end_date`, `sport?` (`running`\|`cycling`), `bests_per_distance?` (1-10) | `{count, rows}` — `distance_m`, `time_s`, `activity_id`, `activity_date` |
 | `device_list` | *(none)* | `{count, rows}` — registered devices with type and last sync |
-| `login_status` | *(none)* | `{authenticated, garmin_home}` |
+| `login_status` | *(none)* | `{authenticated, garmin_home, error_code?, detail?}` — `error_code` (`RATE_LIMITED` / `SERVER_ERROR` / `NETWORK_ERROR`) is set when Garmin could not be asked, so `authenticated: false` does not mean logged out |
 | `server_doctor` | `fast?` | `{count, rows}` — non-raising Python, config, token-store, session, and MCP write-surface diagnostics. `fast=true` skips the network probe. **Read-only.** |
 | `submit_mfa_code` | `mfa_code` | `{authenticated, garmin_home}` — completes a login that failed with `MFA_REQUIRED`; ask the user for the one-time code Garmin sent them. Codes are single-use: on failure, retry the original tool call to trigger a fresh code |
 | `report_snapshot` | `kind` (`morning`\|`evening`\|`weekly`), `date?` | `{kind, date_range, sections, unavailable?}` — one composite call that fans out the day's (or week's) reads server-side. `sections` maps section name → rows (same shapes as the per-domain tools). Sections with no data are empty and listed in `unavailable` with a `reason` (`not_found`\|`no_data`). `date` (YYYY-MM-DD) defaults to today in the athlete's Garmin profile timezone (not the server host's); `weekly` covers the anchor day and the six prior days. |

@@ -1,7 +1,7 @@
 """Health endpoint helpers backed by Garmin Connect APIs."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from garmin_cli import backend as garth
@@ -53,13 +53,31 @@ def get_daily_summary_range(start: date, end: date) -> list[Any]:
     return data if isinstance(data, list) else []
 
 
+# Inclusive dates per request (verified live 2026-11): steps, stress and
+# heartRate stats 400 above 28 dates; intensity minutes ("im") above 31.
+_STATS_MAX_DATES: dict[str, int] = {"im": 31}
+_DEFAULT_STATS_MAX_DATES = 28
+
+
 def _get_stats_range(stat: str, start: date, end: date) -> list[Any]:
-    result = _request(
-        f"/usersummary-service/stats/{stat}/daily/{start.isoformat()}/{end.isoformat()}"
-    )
-    if isinstance(result, dict):
-        return [result]
-    return result if result is not None else []
+    """Fetch a usersummary stats range in date-ordered windows within Garmin's span limit."""
+    window = timedelta(days=_STATS_MAX_DATES.get(stat, _DEFAULT_STATS_MAX_DATES) - 1)
+    rows: list[Any] = []
+    chunk_start = start
+    while chunk_start <= end:
+        # Compare before adding so dates near date.max never overflow.
+        chunk_end = chunk_start + window if end - chunk_start > window else end
+        result = _request(
+            f"/usersummary-service/stats/{stat}/daily/{chunk_start.isoformat()}/{chunk_end.isoformat()}"
+        )
+        if isinstance(result, dict):
+            rows.append(result)
+        elif result is not None:
+            rows.extend(result)
+        if chunk_end == end:
+            break
+        chunk_start = chunk_end + timedelta(days=1)
+    return rows
 
 
 def get_steps_range(start: date, end: date) -> list[Any]:

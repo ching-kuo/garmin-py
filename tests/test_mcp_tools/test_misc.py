@@ -270,6 +270,24 @@ class TestLoginStatus:
         result = _call(server, "login_status", {})
         assert result["authenticated"] is False
 
+    def test_login_status_reports_why_the_session_could_not_be_checked(
+        self, mocker: Any
+    ) -> None:
+        mocker.patch(
+            "garmin_cli.mcp_tools.misc.probe_session_status",
+            return_value=SessionProbeResult(
+                authenticated=False,
+                garmin_home="/tmp/garth",
+                latency_ms=1.0,
+                error_code="SERVER_ERROR",
+                detail="The saved Garmin session could not be validated.",
+            ),
+        )
+        result = _call(create_mcp_server(_config()), "login_status", {})
+        assert result["authenticated"] is False
+        assert result["error_code"] == "SERVER_ERROR"
+        assert result["detail"] == "The saved Garmin session could not be validated."
+
     def test_login_status_symlink_is_non_raising(self, mocker: Any) -> None:
 
         mocker.patch(

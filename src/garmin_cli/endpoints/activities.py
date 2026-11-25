@@ -13,6 +13,8 @@ from garmin_cli.endpoints._base import (
     _bounded_thread_pool,
     _cancel_futures_on_error,
     _make_request,
+    _make_typed_create,
+    _make_typed_delete,
     _make_typed_request,
     _make_typed_write,
     _validate_numeric_id,
@@ -257,16 +259,13 @@ def upload_activity(file_path: str) -> Any:
             error=f"Unsupported file extension '.{ext}'. Allowed: {allowed}.",
             error_code="INVALID_INPUT",
         )
-    return _make_typed_write(garth.upload_activity, str(p))
+    return _make_typed_create(garth.upload_activity, str(p))
 
 
 def delete_activity(activity_id: Any) -> None:
     """Delete an activity by ID."""
     validated = _validate_numeric_id(activity_id, "activity_id")
-    _make_typed_write(
-        garth.delete_activity,
-        validated,
-    )
+    _make_typed_delete(garth.delete_activity, validated)
 
 
 def get_activity_types() -> list[dict]:

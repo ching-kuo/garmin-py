@@ -11,9 +11,9 @@ import click
 from click.core import ParameterSource
 
 from garmin_cli import backend as garth
-from garmin_cli.auth import _login_error, _probe_session, _secure_directory
+from garmin_cli.auth import _secure_directory, resume_and_probe
 from garmin_cli.backend import PendingMFA
-from garmin_cli.exceptions import GarminCliError, extract_status_code
+from garmin_cli.exceptions import GarminCliError, login_error
 from garmin_cli.output import echo_json, make_envelope
 from garmin_cli.token_store import (
     DEFAULT_GARMIN_HOME,
@@ -150,10 +150,10 @@ def login(
         raise
     except Exception as exc:
         if mfa_asked:
-            raise _login_error(
+            raise login_error(
                 exc, "The MFA code was rejected. Run `garmin-cli login` again for a new code."
             ) from exc
-        raise _login_error(exc) from exc
+        raise login_error(exc) from exc
 
     if output_format == "json":
         echo_json(make_envelope("login", [{"authenticated": True, "garmin_home": garmin_home}]))
@@ -171,32 +171,11 @@ def login_status(ctx: click.Context) -> None:
     garmin_home = os.path.expanduser(config.garth_home)
     output_format = config.output_format
 
-    authenticated = False
-    try:
-        # Read-only: validates the home and refuses symlinks, never chmods or migrates.
-        garth.resume(garmin_home, read_only=True)
-        try:
-            # Pass the module-level garth so tests can patch it via mocker
-            # without needing to patch auth.garth as a separate target.
-            _probe_session(garth)
-            authenticated = True
-        except Exception as exc:
-            if extract_status_code(exc) not in (401, 403):
-                raise GarminCliError(
-                    error="Saved Garmin session could not be validated.",
-                    error_code="AUTH_FAILED",
-                ) from exc
-    except FileNotFoundError:
-        pass
-    except OSError as exc:
-        raise GarminCliError(
-            error=f"Cannot access session directory: {exc}",
-            error_code="AUTH_FAILED",
-        ) from exc
-    except GarminCliError:
-        raise
-    except Exception:
-        pass
+    # Read-only: validates the home and refuses symlinks, never chmods or
+    # migrates. Missing or rejected sessions are "not logged in"; throttles,
+    # 5xx, network and filesystem errors raise (exit 1). Pass the module-level
+    # garth so tests can patch it here without also patching auth.garth.
+    authenticated = resume_and_probe(garmin_home, garth, read_only=True)
 
     record = {"authenticated": authenticated, "garmin_home": garmin_home}
 

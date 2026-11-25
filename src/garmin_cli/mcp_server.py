@@ -58,9 +58,9 @@ Garmin logins are paused for that long after a failed login or MFA code.
 
 Hard limits: date ranges are capped at 90 days and ordinary list `limit`
 values are capped at 100. Some endpoints have tighter documented limits, such
-as the 28-day steps window, 100 activity-lap rows, and bounded metric-stream
-sampling. Keep requests inside those limits and prefer paging or smaller
-windows over broad speculative fan-out.
+as 100 activity-lap rows and bounded metric-stream sampling. Keep requests
+inside those limits and prefer paging or smaller windows over broad
+speculative fan-out.
 
 Metric streams: activity_detail_metrics rows are timestamp-aligned, so request
 every channel you need in a single call — never split channels across calls

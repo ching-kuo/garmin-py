@@ -67,7 +67,7 @@ printf '%s\n' "$GARMIN_PW" | garmin-cli --json login --email your@email.com --pa
 
 Under `--json`, or when stdin is not a terminal, `login` never prompts: missing credentials fail with `AUTH_MISSING`, and an MFA challenge without a supplied code fails with `MFA_REQUIRED` (exit 1).
 
-In the MCP server, a login that Garmin rejects (bad credentials, 401/403) or throttles (429/427) pauses new login attempts for 60 seconds, doubling per consecutive failure up to 15 minutes; every such error, including the first, carries `retry_after_seconds`. The pause resets after a successful login or session resume, or when `GARMIN_EMAIL` / `GARMIN_PASSWORD` change. A rejected MFA code pauses logins too, so the next call does not immediately send a fresh code; after a 429 on `submit_mfa_code` the challenge is kept, but resubmitting waits out the pause. Network errors, timeouts and Garmin 5xx responses during login never pause logins: a 5xx reports `SERVER_ERROR`, and an unreachable Garmin reports `AUTH_FAILED` with a "could not reach Garmin" message instead of blaming the credentials.
+In the MCP server, a login that Garmin rejects (bad credentials, 401/403) or throttles (429/427) pauses new login attempts for 60 seconds, doubling per consecutive failure up to 15 minutes; every such error, including the first, carries `retry_after_seconds`. The pause resets after a successful login or session resume, or when `GARMIN_EMAIL` / `GARMIN_PASSWORD` change. A rejected MFA code pauses logins too, so the next call does not immediately send a fresh code; after a 429 on `submit_mfa_code` the challenge is kept, but resubmitting waits out the pause (after a 5xx or network failure it is kept with no pause). Network errors, timeouts and Garmin 5xx responses during login never pause logins: a 5xx reports `SERVER_ERROR`, and an unreachable Garmin reports `NETWORK_ERROR` instead of blaming the credentials. The same applies when validating a saved session: a throttle, 5xx, or network failure reports `RATE_LIMITED` / `SERVER_ERROR` / `NETWORK_ERROR` rather than `AUTH_FAILED`, and does not trigger a new login.
 
 Check login status at any time:
 
@@ -79,7 +79,7 @@ garmin-cli --json login status
 # {"ok": true, "command": "login status", "count": 1, "data": [{"authenticated": true, "garmin_home": "..."}]}
 ```
 
-`login status` never repairs permissions or migrates legacy tokens. Status checks (`login status`, `doctor`, MCP `login_status`) may still refresh the session tokens on disk, as any authenticated request can.
+`login status` exits 0 with `"authenticated": false` when no session is saved or Garmin rejects it, and exits 1 with `RATE_LIMITED`, `SERVER_ERROR`, or `NETWORK_ERROR` when Garmin throttles, fails, or is unreachable (or `AUTH_FAILED` for an unusable Garmin home path). MCP `login_status` reports those three codes in optional `error_code` / `detail` fields. `login status` never repairs permissions or migrates legacy tokens. Status checks (`login status`, `doctor`, MCP `login_status`) may still refresh the session tokens on disk, as any authenticated request can.
 
 Log out by deleting the saved token file (`garmin_tokens.json` in the Garmin home). Symlinked token files and Garmin homes reached through a symlink are refused. For the default home it also deletes a legacy `~/.garth/garmin_tokens.json`, which would otherwise be migrated back on the next command:
 
@@ -377,10 +377,10 @@ garmin-cli --json activity list --limit 5
 | `AUTH_FAILED` | Credentials rejected by Garmin |
 | `MFA_REQUIRED` | Garmin sent a one-time MFA code; submit it to finish the login (MCP: `submit_mfa_code` tool, CLI: `garmin-cli login` at a terminal; `--mfa-code` / `GARMIN_MFA_CODE` only for authenticator-app codes) |
 | `NOT_FOUND` | API endpoint unavailable (404) |
-| `RATE_LIMITED` | 429 after 3 retries |
-| `SERVER_ERROR` | 5xx after 3 retries |
-| `NETWORK_ERROR` | Connection or timeout failure |
-| `INVALID_INPUT` | Bad arguments or conflicting options |
+| `RATE_LIMITED` | 429 (or SSO 427) after 3 retries |
+| `SERVER_ERROR` | 5xx after 3 retries (creates such as workout create/schedule and activity upload are never retried on 5xx, since the first attempt may have succeeded) |
+| `NETWORK_ERROR` | Connection or timeout failure after 3 retries ("Could not reach Garmin."); creates such as workout create/schedule and activity upload are never retried. A failed write may still have landed: verify remote state before repeating any write |
+| `INVALID_INPUT` | Bad arguments or conflicting options, or another 4xx from Garmin (the message names the HTTP status) |
 | `INTERNAL_ERROR` | Unexpected error |
 
 ## MCP Server

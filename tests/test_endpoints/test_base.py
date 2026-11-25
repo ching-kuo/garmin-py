@@ -1,23 +1,135 @@
 """Tests for garmin_cli.endpoints._base helpers and extract_status_code from garmin_cli.exceptions."""
 from __future__ import annotations
 
+import socket
+import ssl
 import threading
 from datetime import date
 from typing import Any
 from unittest.mock import MagicMock
 
+import curl_cffi.requests.exceptions as curl_errors
 import pytest
+import requests
+from garminconnect import (
+    GarminConnectAuthenticationError,
+    GarminConnectConnectionError,
+    GarminConnectTooManyRequestsError,
+)
 
 from garmin_cli.endpoints._base import (
     _collect_daily_range,
     _make_request,
+    _make_typed_create,
     _make_typed_request,
+    _make_typed_write,
     _resolve_daily_call_delay,
     _resolve_fetch_concurrency,
     _resolve_retry_delays,
 )
-from garmin_cli.exceptions import GarminCliError, extract_status_code
+from garmin_cli.exceptions import (
+    GarminCliError,
+    extract_status_code,
+    failure_kind,
+    login_error,
+    may_have_been_processed,
+)
 from tests.helpers import make_http_error as _http_error
+from tests.helpers import make_requests_http_error
+
+
+def _chained(outer: Exception, cause: BaseException) -> Exception:
+    """``raise outer from cause``, as upstream wraps transport errors."""
+    try:
+        raise outer from cause
+    except Exception as exc:
+        return exc
+
+
+class TestFailureKind:
+
+    @pytest.mark.parametrize(
+        ("exc", "kind"),
+        [
+            # Upstream's profile load wraps 503s and timeouts as AuthenticationError.
+            (_chained(GarminConnectAuthenticationError("Failed to retrieve social profile"), _http_error(503)), "server"),
+            (_chained(GarminConnectAuthenticationError("Failed to retrieve social profile"), requests.Timeout("t")), "unreachable"),
+            (GarminConnectAuthenticationError("DI token refresh failed"), "rejected"),
+            (make_requests_http_error(401), "rejected"),
+            (make_requests_http_error(408), "server"),
+            (make_requests_http_error(425), "server"),
+            (make_requests_http_error(400), "client"),
+            (requests.exceptions.ChunkedEncodingError("broken"), "unreachable"),
+            (socket.gaierror("name resolution"), "unreachable"),
+            (ssl.SSLError("handshake"), "unreachable"),
+            (curl_errors.Timeout("curl timeout"), "unreachable"),
+            (curl_errors.ConnectionError("curl reset"), "unreachable"),
+            (curl_errors.ProxyError("proxy refused"), "unreachable"),
+            (curl_errors.IncompleteRead("short body"), "unreachable"),
+            # Status-less upstream errors without a transport cause are local, not network.
+            (GarminConnectConnectionError("Connection error: Expecting value: line 1"), "other"),
+            (GarminConnectConnectionError("curl_cffi not available"), "other"),
+            (GarminConnectConnectionError("Display name is not set"), "other"),
+            # Outside login, a bot-challenge body never overrides the status.
+            (_http_error(503, "API Error 503 - Cloudflare bot challenge"), "server"),
+        ],
+    )
+    def test_classifies_upstream_shapes(self, exc: Exception, kind: str) -> None:
+        assert failure_kind(exc) == kind
+
+    @pytest.mark.parametrize(
+        ("message", "code"),
+        [
+            (
+                "All login strategies exhausted: Mobile sign-in page: HTTP 403 "
+                "(Cloudflare bot challenge) — falling through to next strategy",
+                "RATE_LIMITED",
+            ),
+            ("All login strategies exhausted: Portal login: unexpected page", "NETWORK_ERROR"),
+            ("All login strategies exhausted: Mobile login failed: HTTP 502, body", "SERVER_ERROR"),
+            ("All login strategies exhausted: Widget login: HTTP 401", "AUTH_FAILED"),
+        ],
+    )
+    def test_login_error_for_unchained_sso_exhaustion(self, message: str, code: str) -> None:
+        # garminconnect 0.3.20: sso.py raises this unchained; Garmin.login
+        # re-wraps it as "Login failed: ..." from the original.
+        inner = GarminConnectConnectionError(message)
+        assert login_error(_chained(GarminConnectConnectionError(f"Login failed: {inner}"), inner)).error_code == code
+        assert login_error(inner).error_code == code
+
+    @pytest.mark.parametrize(
+        ("exc", "processed"),
+        [
+            (make_requests_http_error(503), True),
+            (requests.ReadTimeout("read"), True),
+            (requests.ConnectTimeout("connect"), False),
+            (requests.ConnectionError("refused"), False),
+            (socket.gaierror("dns"), False),
+            (curl_errors.ConnectTimeout("connect"), False),
+        ],
+    )
+    def test_may_have_been_processed(self, exc: Exception, processed: bool) -> None:
+        assert may_have_been_processed(exc) is processed
+
+    def test_timeout_while_handling_a_rate_limit_is_not_throttled(self) -> None:
+        # Training-plan compensation: an unschedule times out inside the
+        # handler for an earlier RATE_LIMITED failure.
+        try:
+            try:
+                raise GarminCliError("Rate limited by Garmin API.", "RATE_LIMITED") from _http_error(429)
+            except GarminCliError:
+                raise requests.Timeout("read timed out")
+        except requests.Timeout as exc:
+            assert failure_kind(exc) == "unreachable"
+
+    def test_suppressed_context_is_ignored(self) -> None:
+        try:
+            try:
+                raise requests.Timeout("t")
+            except requests.Timeout:
+                raise ValueError("bad payload") from None
+        except ValueError as exc:
+            assert failure_kind(exc) == "other"
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +160,49 @@ class TestStatusCode:
         exc = Exception("no status")
         exc.response = MagicMock(spec=[])  # type: ignore[attr-defined]
         assert extract_status_code(exc) is None
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "HTTPSConnectionPool(host='connectapi.garmin.com', port=443): Read timed out.",
+            "Connection error: /workout-service/workout/502 reset by peer",
+            "loaded 200 activities",
+            "ride (429).fit",
+            "cadence (401) out of range",
+            "connect failed (443)",
+        ],
+    )
+    def test_bare_three_digit_numbers_are_not_statuses(self, message: str) -> None:
+        assert extract_status_code(Exception(message)) is None
+
+    def test_reads_explicit_status_text_on_a_chained_link(self) -> None:
+        try:
+            raise Exception("Connection error: upstream failed") from Exception("API Error 503")
+        except Exception as outer:
+            assert extract_status_code(outer) == 503
+
+    @pytest.mark.parametrize(
+        ("message", "expected"),
+        [
+            ("API Error 503 - Service Unavailable", 503),
+            ("API Error (429)", 429),
+            ("HTTP Error 503: Service Unavailable", 503),
+            ("Server error (500) while saving", 500),
+            ("Login failed: HTTP 500, body omitted", 500),
+            ("unexpected status code 502", 502),
+            ("API call client error (422): bad", 422),
+            ("503 Server Error: Service Unavailable for url: https://x", 503),
+        ],
+    )
+    def test_explicit_status_patterns_match(self, message: str, expected: int) -> None:
+        assert extract_status_code(Exception(message)) == expected
+
+    def test_prefers_response_in_cause_chain_over_message(self) -> None:
+        inner = _http_error(429)
+        try:
+            raise Exception("port=443 failed") from inner
+        except Exception as outer:
+            assert extract_status_code(outer) == 429
 
 
 
@@ -95,6 +250,103 @@ class TestMakeRequestAuthErrors:
         with pytest.raises(GarminCliError) as exc_info:
             _make_typed_request(mock_fn, 123)
         assert exc_info.value.error_code == "AUTH_FAILED"
+
+
+class TestRetryLoopClassification:
+    """Every upstream HTTP/transport failure leaves the loop as a GarminCliError."""
+
+    @pytest.fixture(autouse=True)
+    def _fast(self, mocker: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        mocker.patch("time.sleep")
+        monkeypatch.setenv("GARMIN_CLI_RETRY_DELAYS", "1,2,3")
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            GarminConnectTooManyRequestsError("Mobile SSO login returned 427"),
+            GarminConnectTooManyRequestsError("Rate limit exceeded"),
+        ],
+    )
+    def test_too_many_requests_error_is_rate_limited(self, exc: Exception) -> None:
+        mock_fn = MagicMock(side_effect=exc)
+        with pytest.raises(GarminCliError) as exc_info:
+            _make_request(mock_fn, "/some/url")
+        assert exc_info.value.error_code == "RATE_LIMITED"
+        assert mock_fn.call_count == 4
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            requests.ConnectionError("HTTPSConnectionPool(host='x', port=443): refused"),
+            requests.Timeout("read timed out"),
+            TimeoutError("timed out"),
+            _chained(GarminConnectConnectionError("Connection error: reset"), requests.ConnectionError("reset")),
+        ],
+    )
+    def test_transport_failures_become_network_error_after_retries(self, exc: Exception) -> None:
+        mock_fn = MagicMock(side_effect=exc)
+        with pytest.raises(GarminCliError) as exc_info:
+            _make_request(mock_fn, "/some/url")
+        assert exc_info.value.error_code == "NETWORK_ERROR"
+        assert exc_info.value.error == "Could not reach Garmin."
+        assert mock_fn.call_count == 4
+
+    @pytest.mark.parametrize("status", [400, 405, 409, 422])
+    def test_other_4xx_on_read_is_invalid_input_with_status(self, status: int) -> None:
+        mock_fn = MagicMock(side_effect=_http_error(status))
+        with pytest.raises(GarminCliError) as exc_info:
+            _make_request(mock_fn, "/some/url")
+        assert exc_info.value.error_code == "INVALID_INPUT"
+        assert str(status) in exc_info.value.error
+        assert mock_fn.call_count == 1
+
+    def test_status_less_auth_error_is_auth_failed(self) -> None:
+        mock_fn = MagicMock(side_effect=GarminConnectAuthenticationError("DI token refresh failed"))
+        with pytest.raises(GarminCliError) as exc_info:
+            _make_typed_request(mock_fn)
+        assert exc_info.value.error_code == "AUTH_FAILED"
+        assert mock_fn.call_count == 1
+
+    def test_id_like_502_in_message_is_not_a_server_error(self) -> None:
+        mock_fn = MagicMock(side_effect=ValueError("bad payload for /workout/502"))
+        with pytest.raises(ValueError):
+            _make_typed_request(mock_fn)
+        assert mock_fn.call_count == 1
+
+
+class TestNonIdempotentWrites:
+    """Creates retry only on rate limits: a 5xx or timeout may have been applied."""
+
+    @pytest.fixture(autouse=True)
+    def _fast(self, mocker: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        mocker.patch("time.sleep")
+        monkeypatch.setenv("GARMIN_CLI_RETRY_DELAYS", "1,2,3")
+
+    @pytest.mark.parametrize(
+        ("exc", "code"),
+        [
+            (_http_error(500), "SERVER_ERROR"),
+            (requests.Timeout("read"), "NETWORK_ERROR"),
+            # A bot-challenge body on a data call is still a 5xx: never replay the create.
+            (_http_error(503, "API Error 503 - Cloudflare bot challenge"), "SERVER_ERROR"),
+        ],
+    )
+    def test_create_is_not_retried_on_5xx_or_network(self, exc: Exception, code: str) -> None:
+        mock_fn = MagicMock(side_effect=exc)
+        with pytest.raises(GarminCliError) as exc_info:
+            _make_typed_create(mock_fn, {"x": 1})
+        assert exc_info.value.error_code == code
+        assert mock_fn.call_count == 1
+
+    def test_create_retries_on_429(self) -> None:
+        mock_fn = MagicMock(side_effect=[_http_error(429), {"ok": True}])
+        assert _make_typed_create(mock_fn) == {"ok": True}
+        assert mock_fn.call_count == 2
+
+    def test_idempotent_write_still_retries_on_5xx(self) -> None:
+        mock_fn = MagicMock(side_effect=[_http_error(503), None])
+        assert _make_typed_write(mock_fn, 1) is None
+        assert mock_fn.call_count == 2
 
 
 class TestResolveDailyCallDelay:

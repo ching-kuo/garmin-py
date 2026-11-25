@@ -32,11 +32,17 @@ ERROR_CODE_TABLE: dict[str, dict[str, str]] = {
     },
     "NETWORK_ERROR": {
         "category": "network",
-        "recovery_hint": "Check connectivity and retry once.",
+        "recovery_hint": (
+            "Check connectivity; a read may be retried once. A failed write may still "
+            "have been applied: verify the remote state before repeating any write."
+        ),
     },
     "SERVER_ERROR": {
         "category": "upstream",
-        "recovery_hint": "Retry later. If the problem persists, check Garmin service status.",
+        "recovery_hint": (
+            "Retry later. If the problem persists, check Garmin service status. A failed "
+            "write may still have been applied: verify the remote state before repeating a write."
+        ),
     },
     "INTERNAL_ERROR": {
         "category": "internal",

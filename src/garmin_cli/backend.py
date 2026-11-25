@@ -11,9 +11,11 @@ from pathlib import Path
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
+import requests
 from garminconnect import Garmin
 
 from garmin_cli._env import _env_float
+from garmin_cli.exceptions import TRANSIENT_KINDS, extract_status_code, failure_kind
 from garmin_cli.token_store import (
     detect_legacy_tokens,
     ensure_secure_directory,
@@ -26,6 +28,9 @@ from garmin_cli.token_store import (
 logger = logging.getLogger(__name__)
 
 _DEFAULT_HTTP_TIMEOUT: float = 30.0
+# Upstream retries 5xx/network itself (default 3) under endpoints._base._retry_loop,
+# which multiplied attempts (16 per failing read); keep _retry_loop the only layer.
+_UPSTREAM_RETRY_ATTEMPTS: int = 0
 
 # RLock so that the same thread can re-acquire (e.g. login -> _set_backend).
 _backend_lock: threading.RLock = threading.RLock()
@@ -114,6 +119,46 @@ def _serialize_refresh(garmin: Garmin) -> None:
     inner_client._refresh_session = types.MethodType(_locked_refresh, inner_client)  # type: ignore[method-assign]
 
 
+def _surface_refresh_failures(garmin: Garmin) -> None:
+    """Report a transient token-refresh failure instead of the 401 it leads to.
+
+    Upstream swallows refresh errors and replays the request with the stale
+    token; that 401 would read as a rejected session and start a credential
+    login while Garmin is only throttling, failing or unreachable.
+    """
+    inner_client = garmin.client
+    original_post = inner_client._di_token_post
+    original_run_request = inner_client._run_request
+    failures = threading.local()
+
+    def _remember(exc: Exception) -> None:
+        if failure_kind(exc) in TRANSIENT_KINDS:
+            failures.last = exc
+
+    def _recorded_post(self: Any, *args: Any, **kwargs: Any) -> Any:
+        try:
+            response = original_post(*args, **kwargs)
+        except Exception as exc:
+            _remember(exc)
+            raise
+        if not response.ok:
+            _remember(requests.HTTPError("DI token refresh failed", response=response))
+        return response
+
+    def _surfacing_run_request(self: Any, method: str, path: str, **kwargs: Any) -> Any:
+        failures.last = None
+        try:
+            return original_run_request(method, path, **kwargs)
+        except Exception as exc:
+            refresh_failure = failures.last
+            if refresh_failure is not None and extract_status_code(exc) == 401:
+                raise refresh_failure from None
+            raise
+
+    inner_client._di_token_post = types.MethodType(_recorded_post, inner_client)  # type: ignore[method-assign]
+    inner_client._run_request = types.MethodType(_surfacing_run_request, inner_client)  # type: ignore[method-assign]
+
+
 _backend: Garmin | None = None
 _garth_home: str | None = None
 
@@ -191,9 +236,16 @@ def login(
     which :func:`save` persists and then publishes as the process backend.
     """
     normalized_home = _normalize_home(garth_home)
-    client = Garmin(email, password, prompt_mfa=prompt_mfa, return_on_mfa=return_on_mfa)
+    client = Garmin(
+        email,
+        password,
+        prompt_mfa=prompt_mfa,
+        return_on_mfa=return_on_mfa,
+        retry_attempts=_UPSTREAM_RETRY_ATTEMPTS,
+    )
     _apply_timeout(client)
     _serialize_refresh(client)
+    _surface_refresh_failures(client)
     previous_env = os.environ.pop("GARMINTOKENS", None)
     try:
         result = client.login()
@@ -248,9 +300,10 @@ def resume(garth_home: str, *, read_only: bool = False) -> None:
     if not has_tokenstore(garth_home):
         raise FileNotFoundError("No garmin_tokens.json found in the Garmin home directory")
 
-    client = Garmin()
+    client = Garmin(retry_attempts=_UPSTREAM_RETRY_ATTEMPTS)
     _apply_timeout(client)
     _serialize_refresh(client)
+    _surface_refresh_failures(client)
     client.login(tokenstore=garth_home)
     _set_backend(client, garth_home)
     logger.debug("Garmin session resumed from %s", garth_home)
