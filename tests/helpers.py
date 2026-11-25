@@ -29,6 +29,21 @@ def make_http_error(status_code: int, message: str | None = None) -> Exception:
     return err
 
 
+# Registered devices shaped like the live /deviceregistration/devices rows
+# (fenix 8: run/cycle/swim; Edge: cycling only; HRM: no workouts).
+FENIX = {"deviceId": 11, "displayName": "fenix 8", "workoutCapable": True,
+         "runningWorkoutCapable": True, "cyclingWorkoutCapable": True}
+EDGE = {"deviceId": 22, "displayName": "Edge 850", "workoutCapable": True,
+        "runningWorkoutCapable": False, "cyclingWorkoutCapable": True}
+EDGE_1040 = {**EDGE, "deviceId": 23, "displayName": "Edge 1040"}
+HRM = {"deviceId": 33, "displayName": "HRM 600", "workoutCapable": False}
+
+
+def workout(sport: str = "running", workout_id: int = 123) -> dict[str, object]:
+    """A saved workout as ``get_workout`` returns it."""
+    return {"workoutId": workout_id, "workoutName": "Tempo", "sportType": {"sportTypeKey": sport}}
+
+
 def make_requests_http_error(status_code: int) -> Exception:
     """A real ``requests.HTTPError`` (an OSError subclass) carrying a real response."""
     import requests

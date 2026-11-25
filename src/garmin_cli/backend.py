@@ -15,7 +15,7 @@ import requests
 from garminconnect import Garmin
 
 from garmin_cli._env import _env_float
-from garmin_cli.exceptions import TRANSIENT_KINDS, extract_status_code, failure_kind
+from garmin_cli.exceptions import TRANSIENT_KINDS, GarminCliError, extract_status_code, failure_kind
 from garmin_cli.token_store import (
     ensure_secure_directory,
     has_tokenstore,
@@ -361,6 +361,33 @@ def schedule_workout(workout_id: int | str, schedule_date: date | str) -> dict[s
     client = _require_backend()
     date_str = schedule_date if isinstance(schedule_date, str) else schedule_date.isoformat()
     return client.schedule_workout(workout_id, date_str)
+
+
+def send_workout_message(workout_id: int, workout_name: str | None, device_id: int) -> None:
+    """POST the device message upstream ``push_workout_to_device`` builds, without its unretried GET.
+
+    Any 2xx means Garmin queued it; the body is not parsed (it may be empty).
+    Upstream raises for 4xx/5xx; anything else outside 2xx (a 3xx) is a
+    failure too. Upstream replays the POST once after a 401 and a token
+    refresh, which is safe: Garmin did not process the unauthenticated attempt.
+    """
+    client = _require_backend()
+    payload = [{
+        "deviceId": device_id,
+        "messageUrl": f"workout-service/workout/FIT/{workout_id}",
+        "messageType": "workouts",
+        "groupName": None,
+        "messageName": workout_name,
+        "priority": 1,
+        "fileType": "FIT",
+        "metaDataId": workout_id,
+    }]
+    response = client.client.post("connectapi", client.garmin_connect_devicemessage_url, json=payload)
+    status = getattr(response, "status_code", None)
+    if not isinstance(status, int) or not 200 <= status < 300:
+        raise GarminCliError(
+            error=f"Garmin did not accept the workout message (HTTP {status}).", error_code="SERVER_ERROR"
+        )
 
 
 def get_activity_types() -> list[dict[str, Any]]:

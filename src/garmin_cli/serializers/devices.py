@@ -13,6 +13,7 @@ _DEVICE_TABLE = FieldTable(
         FieldEntry("display_name", (("displayName",),)),
         FieldEntry("device_type", (("deviceTypeName",),)),
         FieldEntry("last_sync_time", (("lastSyncTime",),)),
+        FieldEntry("workout_capable", (("workoutCapable",),)),
     ),
 )
 COLUMNS_DEVICE = _DEVICE_TABLE.columns

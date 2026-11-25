@@ -111,6 +111,15 @@ def prompt_line(prompt: str, *, hidden: bool = False) -> str:
     return line.rstrip("\r\n")
 
 
+def ensure_can_confirm(ctx: click.Context, confirmed: bool) -> None:
+    """Fail early when a confirmation is needed but cannot be asked (``--json`` or no terminal)."""
+    if not confirmed and (ctx.obj["config"].output_format == "json" or not stdin_is_tty()):
+        raise GarminCliError(
+            error="Confirmation required: pass --confirm (or --yes) with --json or without a terminal.",
+            error_code="INVALID_INPUT",
+        )
+
+
 def require_confirmation(ctx: click.Context, confirmed: bool, prompt: str) -> None:
     """Ask *prompt* on stderr unless *confirmed*; never prompt for scripts.
 
@@ -120,11 +129,7 @@ def require_confirmation(ctx: click.Context, confirmed: bool, prompt: str) -> No
     """
     if confirmed:
         return
-    if ctx.obj["config"].output_format == "json" or not stdin_is_tty():
-        raise GarminCliError(
-            error="Confirmation required: pass --confirm (or --yes) with --json or without a terminal.",
-            error_code="INVALID_INPUT",
-        )
+    ensure_can_confirm(ctx, confirmed)
     try:
         answer = prompt_line(f"{prompt} [y/N]")
     except click.Abort:

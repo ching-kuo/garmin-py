@@ -12,6 +12,7 @@ from garmin_cli.endpoints.workouts import (
     create_workout,
     delete_workout,
     schedule_workout,
+    send_workout_to_device,
     unschedule_workout,
     update_workout,
 )
@@ -336,3 +337,74 @@ class TestUnscheduleWorkout:
         with pytest.raises(GarminCliError) as exc_info:
             unschedule_workout(99999)
         assert exc_info.value.error_code == "NOT_FOUND"
+
+
+# ---------------------------------------------------------------------------
+# send_workout_to_device
+# ---------------------------------------------------------------------------
+
+class TestSendWorkoutToDevice:
+
+    @staticmethod
+    def _garth(mocker: Any, side_effect: Any = None) -> MagicMock:
+        mock_garth = MagicMock()
+        mock_garth.send_workout_message.side_effect = side_effect
+        mocker.patch("garmin_cli.endpoints.workouts.garth", mock_garth)
+        mocker.patch("time.sleep")
+        return mock_garth
+
+    def test_delegates_with_validated_ids(self, mocker: Any) -> None:
+        mock_garth = self._garth(mocker)
+
+        send_workout_to_device("12345", "Tempo", 678)
+        mock_garth.send_workout_message.assert_called_once_with(12345, "Tempo", 678)
+
+    @pytest.mark.parametrize(("workout_id", "device_id"), [("x", 1), (1, 0), (1, True), (1, None)])
+    def test_invalid_ids_raise_invalid_input(self, mocker: Any, workout_id: Any, device_id: Any) -> None:
+        mock_garth = self._garth(mocker)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            send_workout_to_device(workout_id, "Tempo", device_id)
+        assert exc_info.value.error_code == "INVALID_INPUT"
+        mock_garth.send_workout_message.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("failure", "error_code"),
+        [
+            (_http_error(503), "SERVER_ERROR"),
+            (TimeoutError("read timed out"), "NETWORK_ERROR"),
+            (ConnectionResetError("dropped after send"), "NETWORK_ERROR"),
+        ],
+    )
+    def test_5xx_or_network_failure_is_not_retried_and_may_be_queued(
+        self, mocker: Any, failure: Exception, error_code: str
+    ) -> None:
+        # Each accepted POST queues another message; a retry could send it twice.
+        mock_garth = self._garth(mocker, failure)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            send_workout_to_device(1, "Tempo", 2)
+        assert exc_info.value.error_code == error_code
+        assert exc_info.value.may_have_landed is True
+        assert "may already be queued" in exc_info.value.error
+        assert "may already be queued" in str(exc_info.value)
+        assert mock_garth.send_workout_message.call_count == 1
+
+    @pytest.mark.parametrize("throttle", [429, 427])
+    def test_throttle_is_retried_because_garmin_refused_it(self, mocker: Any, throttle: int) -> None:
+        # 427 counts as a throttle repo-wide (exceptions.failure_kind); neither was processed.
+        mock_garth = self._garth(mocker, [_http_error(throttle), None])
+
+        send_workout_to_device(1, "Tempo", 2)
+        assert mock_garth.send_workout_message.call_count == 2
+
+    @pytest.mark.parametrize(("status", "error_code"), [(401, "AUTH_FAILED"), (404, "NOT_FOUND")])
+    def test_rejections_are_classified_without_queue_warning(
+        self, mocker: Any, status: int, error_code: str
+    ) -> None:
+        self._garth(mocker, _http_error(status))
+
+        with pytest.raises(GarminCliError) as exc_info:
+            send_workout_to_device(99999, "Tempo", 2)
+        assert exc_info.value.error_code == error_code
+        assert "queued" not in exc_info.value.error

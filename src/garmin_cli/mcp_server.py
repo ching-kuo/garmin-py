@@ -93,7 +93,7 @@ Prefer preview, reconcile, dry-run, and no-op checks before invoking a write;
 do not treat an agent-supplied boolean as human approval."""
 
 READ_ONLY_GUIDANCE = """Read-only server: write tools are not registered, so do not offer to
-create, change, schedule, upload, download, or delete anything. training_plan_preview
+create, change, schedule, send to a device, upload, download, or delete anything. training_plan_preview
 still shows what a plan would change; the user applies it elsewhere."""
 
 
@@ -112,6 +112,7 @@ WRITE_TOOLS = (
     "workout_delete",
     "workout_schedule",
     "workout_unschedule",
+    "workout_send_to_device",
     "activity_upload",
     "activity_delete",
     "activity_rename",

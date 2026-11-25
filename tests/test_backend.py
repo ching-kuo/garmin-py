@@ -322,6 +322,45 @@ class TestTypedWriteWrappers:
 
         client.unschedule_workout.assert_called_once_with(555)
 
+    def test_send_workout_message_posts_upstreams_payload_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from garminconnect import Garmin
+
+        garmin = Garmin()
+        garmin.client = MagicMock()
+        # A 2xx with an empty or non-JSON body is still a queued message.
+        garmin.client.post.return_value.status_code = 200
+        garmin.client.post.return_value.json.side_effect = ValueError("no JSON")
+        garmin.get_workout_by_id = MagicMock()  # type: ignore[method-assign]
+        monkeypatch.setattr(backend, "_backend", garmin)
+
+        assert backend.send_workout_message(7, "Tempo", 9) is None
+
+        garmin.get_workout_by_id.assert_not_called()
+        garmin.client.post.assert_called_once_with(
+            "connectapi",
+            "/device-service/devicemessage/messages",
+            json=[{
+                "deviceId": 9,
+                "messageUrl": "workout-service/workout/FIT/7",
+                "messageType": "workouts",
+                "groupName": None,
+                "messageName": "Tempo",
+                "priority": 1,
+                "fileType": "FIT",
+                "metaDataId": 7,
+            }],
+        )
+
+    def test_send_workout_message_treats_a_non_2xx_response_as_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = MagicMock()
+        client.client.post.return_value.status_code = 302  # returned, not raised, by upstream
+        monkeypatch.setattr(backend, "_backend", client)
+
+        with pytest.raises(GarminCliError) as exc_info:
+            backend.send_workout_message(7, "Tempo", 9)
+        assert exc_info.value.error_code == "SERVER_ERROR"
+        assert "302" in exc_info.value.error
+
 
 class TestResolveHttpTimeout:
     @pytest.mark.parametrize(

@@ -202,6 +202,7 @@ class TestNewSerializers:
                 "displayName": "Forerunner",
                 "deviceTypeName": "WATCH",
                 "lastSyncTime": "2026-01-01T10:00:00",
+                "workoutCapable": True,
             }
         )
         assert result == [
@@ -210,6 +211,7 @@ class TestNewSerializers:
                 "display_name": "Forerunner",
                 "device_type": "WATCH",
                 "last_sync_time": "2026-01-01T10:00:00",
+                "workout_capable": True,
             }
         ]
 

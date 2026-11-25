@@ -109,7 +109,7 @@ def register_misc_tools(mcp: MCPServer, config: CliConfig, *, read_only: bool = 
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def device_list() -> Envelope:
-        """List registered Garmin devices. Returns device_id, display_name, device_type, last_sync_time."""
+        """List registered Garmin devices. Returns device_id, display_name, device_type, last_sync_time, workout_capable."""
         return _run_tool(config, get_devices, serialize_device)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))

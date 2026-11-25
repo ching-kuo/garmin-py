@@ -282,7 +282,10 @@ garmin-cli workout update   WORKOUT_ID FILE [--dry-run] # partial update (only f
 garmin-cli workout delete   WORKOUT_ID [--confirm] # --confirm (--yes/-y) skips interactive prompt
 garmin-cli workout schedule WORKOUT_ID DATE [--allow-multiple] # DATE = YYYY-MM-DD
 garmin-cli workout unschedule SCHEDULE_ID [--confirm] # removes a calendar entry; SCHEDULE_ID is the workout_schedule_id returned by schedule
+garmin-cli workout send WORKOUT_ID [--device DEVICE_ID] [--dry-run] [--confirm] # delivered on the device's next sync
 ```
+
+`workout send` reads the workout first (a missing one is `NOT_FOUND`, also under `--dry-run`), then picks the device: one with `workout_capable` set (see `device list`) whose flag for the workout's sport is not false, so a run never goes to an Edge. Without `--device` it uses the only such device; with several it fails with `INVALID_INPUT` and lists their ids and names. A device that cannot take the workout is `INVALID_INPUT`, an unregistered one `NOT_FOUND`. At a terminal it then asks for confirmation naming the workout and device; under `--json` or without a terminal it needs `--confirm` and fails before logging in otherwise. `--dry-run` sends nothing (status `dry_run`). Output fields: `workout_id, workout_name, device_id, display_name, status`. Each send queues another copy, so it is not retried after a 5xx or timeout, and that error says the workout may already be queued: check the device before sending again.
 
 `--ahead N` shows the next N days of planned workouts (future-facing; the default is the next 7 days). `--days N` shows past N days.
 
@@ -316,7 +319,7 @@ garmin-cli performance fastest-splits  [--sport running|cycling] [--bests N] [--
 ### Devices
 
 ```bash
-garmin-cli device list  # registered devices: device_id, display_name, device_type, last_sync_time
+garmin-cli device list  # registered devices: device_id, display_name, device_type, last_sync_time, workout_capable
 ```
 
 ## Normalized JSON Schemas
@@ -432,7 +435,7 @@ Large MCP reads are bounded. `activity_laps(activity_id, offset=0)` returns at m
 
 ### Read-only mode
 
-`garmin-cli mcp-server --read-only` (or `GARMIN_MCP_READ_ONLY=1`, or the "Read-only mode" setting of the Claude Desktop extension) registers no write tools: `workout_create`, `workout_update`, `workout_delete`, `workout_schedule`, `workout_unschedule`, `activity_upload`, `activity_delete`, `activity_rename`, `activity_set_type`, `activity_download`, `training_plan_apply`, and `training_plan_reschedule` are left out of `tools/list`. Read tools, `training_plan_preview`, and `submit_mfa_code` stay; the server instructions and the `plan_next_week` prompt stop at the preview. `server_doctor` reports the server's mode under `write_surface`; `garmin-cli doctor` can only see `GARMIN_MCP_READ_ONLY` (not a `--read-only` flag on a running server) and fails the check for a value that is not a boolean such as `1`/`0` or `true`/`false`, which `mcp-server` also refuses at start-up. In the Claude Desktop extension, an unfilled setting placeholder is treated as off.
+`garmin-cli mcp-server --read-only` (or `GARMIN_MCP_READ_ONLY=1`, or the "Read-only mode" setting of the Claude Desktop extension) registers no write tools: `workout_create`, `workout_update`, `workout_delete`, `workout_schedule`, `workout_unschedule`, `workout_send_to_device`, `activity_upload`, `activity_delete`, `activity_rename`, `activity_set_type`, `activity_download`, `training_plan_apply`, and `training_plan_reschedule` are left out of `tools/list`. Read tools, `training_plan_preview`, and `submit_mfa_code` stay; the server instructions and the `plan_next_week` prompt stop at the preview. `server_doctor` reports the server's mode under `write_surface`; `garmin-cli doctor` can only see `GARMIN_MCP_READ_ONLY` (not a `--read-only` flag on a running server) and fails the check for a value that is not a boolean such as `1`/`0` or `true`/`false`, which `mcp-server` also refuses at start-up. In the Claude Desktop extension, an unfilled setting placeholder is treated as off.
 
 ### Write audit log
 

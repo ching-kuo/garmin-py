@@ -35,6 +35,8 @@ _ID_TOOLS = [
     ("workout_update", "workout_id", {"workout": {"name": "x"}}),
     ("workout_delete", "workout_id", {}),
     ("workout_unschedule", "schedule_id", {}),
+    ("workout_send_to_device", "workout_id", {}),
+    ("workout_send_to_device", "device_id", {"workout_id": 1}),
     ("training_plan_reschedule", "schedule_id", {"new_date": "2026-03-12", "expected_date": "2026-03-11"}),
 ]
 
@@ -148,6 +150,7 @@ class TestToolRegistration:
         "workout_update",
         "workout_delete",
         "workout_unschedule",
+        "workout_send_to_device",
         "performance_thresholds",
         "performance_race_predictions",
         "performance_personal_records",

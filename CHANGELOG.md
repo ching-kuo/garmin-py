@@ -73,6 +73,8 @@
 - `performance zones` / MCP `performance_zones` list the athlete's heart-rate zones per sport profile and cycling and running power zones, with each zone's low and high bound.
 - `training_plan_reconcile(detail="targets")` resolves power zone-number targets to watts from the power zone table of the workout's sport (shown as `resolved_band`) instead of reporting `missing_power_zone_boundaries`, and compares custom bpm and watt ranges against lap or stream data; stream-based scores add `scope: "whole_activity"`, and provenance adds `power_zone_requests`.
 - `workout get` keeps a custom heart-rate or power range with a unit (for example percent of FTP) as `unit` and leaves it out of `write_projection`, so it is never rewritten as watts or bpm; a step with a secondary target is also left out (`unsupported_secondary_target`) instead of being rewritten without it.
+- `workout send WORKOUT_ID [--device DEVICE_ID] [--dry-run]` and MCP `workout_send_to_device` send a saved workout to a watch or bike computer (delivered on its next sync). The workout is read first (missing: `NOT_FOUND`, dry run included), and only devices that take workouts of its sport qualify (a run never goes to an Edge); without a device id the only qualifying device is used, and several are refused with a list of their ids and names. The CLI asks for confirmation naming the workout and device; the MCP tool is a destructive-hint, non-idempotent, audited write left out in read-only mode. A send is never retried after a 5xx or timeout, and that error says the workout may already be queued.
+- `device list` and MCP `device_list` add a `workout_capable` column.
 
 ### Changed
 

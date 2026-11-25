@@ -76,6 +76,30 @@ def schedule_workout(workout_id: Any, schedule_date: date) -> dict:
     return _make_typed_create(garth.schedule_workout, validated, schedule_date)
 
 
+def send_workout_to_device(workout_id: Any, workout_name: str | None, device_id: Any) -> None:
+    """POST /device-service/devicemessage/messages (retried only on 429/427, refused unprocessed).
+
+    Each accepted call queues another message for the device, so a 5xx or
+    network failure is not retried, and its error says the workout may be
+    queued (a connection can drop after Garmin accepted the POST).
+    """
+    validated_workout = _validate_numeric_id(workout_id, "workout_id")
+    validated_device = _validate_numeric_id(device_id, "device_id")
+    try:
+        _make_typed_create(garth.send_workout_message, validated_workout, workout_name, validated_device)
+    except GarminCliError as exc:
+        if not (exc.may_have_landed or exc.error_code == "NETWORK_ERROR"):
+            raise
+        raise GarminCliError(
+            error=f"{exc.error} The workout may already be queued for the device; check it before sending again.",
+            error_code=exc.error_code,
+            retry_after_seconds=exc.retry_after_seconds,
+            may_have_landed=True,
+            local_config=exc.local_config,
+            mfa_rejected=exc.mfa_rejected,
+        ) from exc
+
+
 def unschedule_workout(scheduled_workout_id: Any) -> None:
     """DELETE /workout-service/schedule/{scheduleId}.
 

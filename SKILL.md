@@ -266,6 +266,10 @@ garmin-cli --json workout delete 12345678901 --confirm
 
 # Schedule a workout to a calendar date
 garmin-cli --json workout schedule 12345678901 2026-04-01
+
+# Send a workout to a watch (arrives on its next sync); --device defaults to the only
+# device that takes workouts of this sport (several: the error lists them); --dry-run resolves only
+garmin-cli --json workout send 12345678901 --device 3412345678 --confirm
 ```
 
 `workout get` includes a `steps` array with structured step data (step_order, step_type, duration_type, duration_value, target_type, target_value_low, target_value_high) and a `steps_summary` string.
@@ -275,6 +279,8 @@ garmin-cli --json workout schedule 12345678901 2026-04-01
 `workout delete` output fields: `id, status`
 
 `workout schedule` output fields: `workout_schedule_id, date, status` (`status` is `scheduled`, or `no_op` when that workout is already on the date; a date holding a different workout fails with `INVALID_INPUT` unless `--allow-multiple`; logged activities on the date are ignored; `workout_schedule_id` is null when Garmin returns no id and the date cannot be re-read)
+
+`workout send` output fields: `workout_id, workout_name, device_id, display_name, status` (`sent`, or `dry_run`). The workout is read first (missing: `NOT_FOUND`, dry-run included); a device qualifies when `workout_capable` and its flag for the workout's sport is not false (a run never goes to an Edge). An unregistered device is `NOT_FOUND`, an ambiguous or unqualified one `INVALID_INPUT`. A send is never retried after a 5xx or timeout, since each accepted send queues another copy; that error says the workout may already be queued, so check the device before resending.
 
 ---
 
@@ -492,7 +498,7 @@ garmin-cli --json performance personal-records
 ### Devices
 
 ```bash
-# List registered devices -- fields: device_id, display_name, device_type, last_sync_time
+# List registered devices -- fields: device_id, display_name, device_type, last_sync_time, workout_capable
 garmin-cli --json device list
 ```
 
@@ -616,7 +622,7 @@ Available prompts are `weekly_training_review`, `recovery_check`, `compare_recen
 
 ### Available tools
 
-Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, `workout_update`, `workout_delete`, `workout_unschedule`) and activities (`activity_download`, `activity_upload`, `activity_delete`, `activity_rename`, `activity_set_type`) are exposed. AI-coaching tools add bounded snapshots, plan reconciliation, read-only preview, and stateless application. Mutating write tools carry the SDK `destructive_hint` annotation; workout create and update accept `dry_run=True` for a no-write preview. The activity file tools are confined to `GARMIN_MCP_FILE_ROOT` (default `~/Downloads/garmin-py`, created 0700 on first download; a custom value must be an absolute path); the CLI `activity download` / `activity upload` commands are not.
+Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, `workout_update`, `workout_delete`, `workout_unschedule`, `workout_send_to_device`) and activities (`activity_download`, `activity_upload`, `activity_delete`, `activity_rename`, `activity_set_type`) are exposed. AI-coaching tools add bounded snapshots, plan reconciliation, read-only preview, and stateless application. Mutating write tools carry the SDK `destructive_hint` annotation; workout create and update accept `dry_run=True` for a no-write preview. The activity file tools are confined to `GARMIN_MCP_FILE_ROOT` (default `~/Downloads/garmin-py`, created 0700 on first download; a custom value must be an absolute path); the CLI `activity download` / `activity upload` commands are not.
 
 | Tool | Parameters | Returns |
 |------|-----------|---------|
@@ -647,6 +653,7 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `workout_update` | `workout_id`, `workout`, `dry_run?` | `{count, rows}` — `ok: true, action: "updated", workout_id` on success; dry-run returns the merged wire payload (one Garmin read, no write). Merge semantics preserve `workoutId`/`ownerId`/`createdDate`/`atpPlanId`. **Destructive.** |
 | `workout_delete` | `workout_id` | `{count, rows}` — `ok: true, action: "deleted", workout_id`. **Destructive.** |
 | `workout_unschedule` | `schedule_id` | `{count, rows}` — `ok: true, action: "unscheduled", schedule_id`. Removes a calendar entry (the workout template is preserved); `schedule_id` is the `workout_schedule_id` returned by `workout_schedule`, not the workout id. **Destructive.** |
+| `workout_send_to_device` | `workout_id`, `device_id?`, `dry_run?` | `{count, rows}` — `ok: true, action: "sent", workout_id, workout_name, device_id, display_name`; dry-run reads the workout (missing: `NOT_FOUND`) and returns `dry_run: true` with the resolved device, sending nothing. Without `device_id` the only device that takes workouts of the workout's sport is used; several fail with an error listing their ids and names. A 5xx or timeout error says the workout may already be queued. Delivered on the device's next sync; each send queues another copy (`idempotent_hint: false`). **Destructive.** |
 | `coach_snapshot` | `date?`, `baseline_days?`, `recent_daily_days?`, `include_extended_daily_baselines?`, `sports?` | Bounded recovery baselines, activity-derived weekly load, current Garmin training status, upcoming plan (today plus six days), wellness rows (readiness, SpO2, steps, weight), execution, data quality, and request provenance. `date` defaults to today in the athlete's Garmin profile timezone. Default cost is at most 24 Garmin data calls, which is also the hard cap (session check, timezone lookup and retries are not counted); `recent_daily_days` accepts 1-9. A terminal 429 preserves fetched sections with `complete=false`, `aborted=true`. **Read-only.** |
 | `training_plan_reconcile` | `start_date`, `end_date`, `detail?`, `max_activities?` | Planned-versus-actual entries with exact/inferred/ambiguous match state and request provenance. Range max 28 days; activity cap max 100. `detail="targets"` compares HR, pace, power, and cadence for matched running/cycling activities (power zone numbers resolve to watts from the workout sport's zone table, shown as `resolved_band`; stream-based scores carry `scope: "whole_activity"`) using zones/laps first and at most 10 streams per call (1000 samples each) only when needed; per-target coverage and quality distinguish missing sensors as `insufficient_data`. **Read-only.** |
 | `training_plan_preview` | `plan` | Strict validation (one entry per date, canonical YYYY-MM-DD) plus a live, normalized `create_template`/`schedule`/`keep`/`move`/`replace`/`unschedule` diff; conflicts report `source_schedule_changed` or `destination_occupied` (an occupant the plan itself vacates through another entry's verified source or a removal is not a conflict, so swaps, chained shifts, and removal plus replacement on one date are allowed). Already-applied moves and removals preview as `keep`/`no_op`. Performs no write. **Read-only.** |

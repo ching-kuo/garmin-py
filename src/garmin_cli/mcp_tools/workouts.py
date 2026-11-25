@@ -1,4 +1,4 @@
-"""Workout MCP tools (list, get, calendar, create, schedule, update, delete).
+"""Workout MCP tools (list, get, calendar, create, schedule, update, delete, unschedule, send).
 
 The generic write-audit machinery (``WriteLogEvent`` / ``_WriteAudit`` /
 ``_write_audit``) lives in :mod:`garmin_cli.mcp_tools._audit`; this module
@@ -19,6 +19,7 @@ from garmin_cli.endpoints.workouts import (
     get_calendar_range,
     get_workout,
     list_workouts,
+    send_workout_to_device,
     unschedule_workout,
     update_workout,
 )
@@ -40,7 +41,7 @@ from garmin_cli.serializers import (
     serialize_workout_detail,
     serialize_workout_summary,
 )
-from garmin_cli.services.workouts import schedule_workout_once
+from garmin_cli.services.workouts import prepare_workout_send, schedule_workout_once
 from garmin_cli.workout_builder import build_garmin_payload, merge_workout_payload
 from garmin_cli.workout_schema import validate_workout_input
 
@@ -230,6 +231,36 @@ def register_workout_tools(mcp: MCPServer, config: CliConfig) -> None:
                 "action": "deleted",
                 "workout_id": workout_id,
             }])
+
+    @mcp.tool(annotations=ToolAnnotations(destructive_hint=True, idempotent_hint=False))
+    def workout_send_to_device(
+        workout_id: StrictId, device_id: StrictId | None = None, dry_run: bool = False
+    ) -> Envelope:
+        """Send a saved workout to a watch or bike computer; it arrives on the device's next sync.
+
+        device_id (from device_list) defaults to the only device that takes
+        workouts of this workout's sport; when several qualify the error lists
+        them. dry_run=true reads the workout and resolves the device without
+        sending. Each send queues another copy. Returns ok, action "sent" (or
+        dry_run true), workout_id, workout_name, device_id, display_name.
+        """
+        _validate_positive_id(workout_id, "workout_id")
+        if device_id is not None:
+            _validate_positive_id(device_id, "device_id")
+        base = WriteLogEvent(
+            tool="workout_send_to_device", outcome="success", dry_run=dry_run,
+            workout_id=workout_id, device_id=device_id,
+        )
+        with _write_audit(base, _emit_write_log) as audit:
+            ensure_authenticated(config)
+            target = prepare_workout_send(workout_id, device_id)
+            audit.set_base(device_id=target["device_id"])
+            if dry_run:
+                audit.dry_run()
+                return _envelope([{"ok": True, "dry_run": True, **target}])
+            send_workout_to_device(workout_id, target["workout_name"], target["device_id"])
+            audit.success()
+            return _envelope([{"ok": True, "action": "sent", **target}])
 
     @mcp.tool(annotations=ToolAnnotations(destructive_hint=True))
     def workout_unschedule(schedule_id: StrictId) -> Envelope:

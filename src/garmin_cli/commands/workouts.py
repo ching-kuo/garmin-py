@@ -12,6 +12,7 @@ from garmin_cli.commands._options import (
     OutputGroup,
     confirm_option,
     date_range_options,
+    ensure_can_confirm,
     limit_option,
     reject_csv,
     require_confirmation,
@@ -26,6 +27,7 @@ from garmin_cli.endpoints.workouts import (
     get_calendar_range,
     get_workout,
     list_workouts,
+    send_workout_to_device,
     unschedule_workout,
     update_workout,
 )
@@ -42,13 +44,14 @@ from garmin_cli.serializers import (
     serialize_workout_mutate,
     serialize_workout_summary,
 )
-from garmin_cli.services.workouts import schedule_workout_once
+from garmin_cli.services.workouts import prepare_workout_send, schedule_workout_once
 from garmin_cli.workout_builder import build_garmin_payload, merge_workout_payload
 from garmin_cli.workout_schema import validate_workout_input
 
 COLUMNS_WORKOUT_DELETE = ("id", "status")
 COLUMNS_WORKOUT_SCHEDULE = ("workout_schedule_id", "date", "status")
 COLUMNS_WORKOUT_UNSCHEDULE = ("id", "status")
+COLUMNS_WORKOUT_SEND = ("workout_id", "workout_name", "device_id", "display_name", "status")
 
 _dry_run_option = click.option(
     "--dry-run", is_flag=True, default=False,
@@ -244,6 +247,37 @@ def schedule_cmd(ctx: click.Context, workout_id: str, schedule_date: datetime, a
         data,
         COLUMNS_WORKOUT_SCHEDULE,
     )
+
+
+@workout.command("send")
+@click.argument("workout_id")
+@click.option(
+    "--device", "device_id", default=None, metavar="DEVICE_ID",
+    help="Target device id (see `device list`); defaults to the only device that takes workouts of this sport.",
+)
+@click.option(
+    "--dry-run", is_flag=True, default=False,
+    help="Resolve the target device and report it without sending anything.",
+)
+@confirm_option
+@click.pass_context
+def send_cmd(ctx: click.Context, workout_id: str, device_id: str | None, dry_run: bool, confirm: bool) -> None:
+    """Send a saved workout to a watch or bike computer (delivered on its next sync)."""
+    validated_id = _validate_numeric_id(workout_id, "workout_id")
+    validated_device = None if device_id is None else _validate_numeric_id(device_id, "device_id")
+    if not dry_run:
+        ensure_can_confirm(ctx, confirm)  # scripts fail before login; a terminal is asked below
+    ensure_authenticated(ctx.obj["config"])
+    target = prepare_workout_send(validated_id, validated_device)
+    if not dry_run:
+        require_confirmation(
+            ctx, confirm,
+            f"Send workout {target['workout_name']} ({validated_id}) to "
+            f"{target['display_name'] or 'unnamed device'} ({target['device_id']})?",
+        )
+        send_workout_to_device(validated_id, target["workout_name"], target["device_id"])
+    data: list[dict[str, Any]] = [{**target, "status": "dry_run" if dry_run else "sent"}]
+    render_output(ctx.obj["config"].output_format, "workout send", data, COLUMNS_WORKOUT_SEND)
 
 
 @workout.command("unschedule")

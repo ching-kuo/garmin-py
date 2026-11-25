@@ -1,6 +1,6 @@
 """Write-tool audit log: one JSON line per write-tool call on ``garmin_cli.audit``.
 
-Shared by every write tool (workout create/schedule/update/delete/unschedule,
+Shared by every write tool (workout create/schedule/update/delete/unschedule/send,
 activity download/upload/delete/rename/set-type, training-plan apply and
 reschedule, submit_mfa_code). Each domain module binds ``_emit_audit`` as its
 module-level ``_emit_write_log`` (so tests patch it per domain) and passes it
@@ -92,6 +92,7 @@ class WriteLogEvent:
     workout_id: int | None = None
     activity_id: int | None = None
     schedule_id: int | None = None
+    device_id: int | None = None
     errors_count: int | None = None
     name_len: int | None = None
     description_len: int | None = None
@@ -155,6 +156,10 @@ class _WriteAudit:
         flag = CALL_AUDITED.get()
         if flag is not None:
             flag[0] = True
+
+    def set_base(self, **fields: Any) -> None:
+        """Add metadata learned mid-call (e.g. a resolved id) to every later event."""
+        self._base = replace(self._base, **fields)
 
     def fail_validation(self, errors_count: int) -> None:
         self._emit(outcome="failed-validation", errors_count=errors_count)
