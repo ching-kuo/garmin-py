@@ -322,14 +322,14 @@ class TestWeightCommand:
         (
             "resting-hr",
             "get_resting_hr_range",
-            [{"calendarDate": "2026-03-11", "restingHeartRateValue": 52}],
+            [{"calendarDate": "2026-03-11", "restingHeartRate": 52}],
             {"date": "2026-03-11", "resting_hr": 52},
         ),
         (
             "readiness",
             "get_training_readiness_range",
-            [{"calendarDate": "2026-03-11", "score": 68, "level": "MODERATE"}],
-            {"date": "2026-03-11", "score": 68, "level": "MODERATE"},
+            [{"calendarDate": "2026-03-11", "score": 68, "level": "MODERATE", "latest_score": 61, "latest_level": "MODERATE"}],
+            {"date": "2026-03-11", "score": 68, "level": "MODERATE", "latest_score": 61, "latest_level": "MODERATE"},
         ),
     ],
 )

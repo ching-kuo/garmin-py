@@ -7,9 +7,11 @@ from typing import Any
 from garmin_cli import backend as garth
 from garmin_cli.endpoints._base import (
     _collect_daily_range,
+    _dates,
     _make_request,
     _make_typed_request,
 )
+from garmin_cli.exceptions import GarminCliError
 
 
 def _request(url: str, *, params: dict[str, Any] | None = None) -> Any:
@@ -109,6 +111,8 @@ def get_stress(day: date) -> Any:
 
 
 def get_stress_range(start: date, end: date) -> list[Any]:
+    # Stays per day: the stats-service stress range has only the average
+    # (overallStressLevel) and durations, not the max_stress column.
     return _collect_daily_range(get_stress, start, end)
 
 
@@ -120,22 +124,78 @@ def get_spo2_range(start: date, end: date) -> list[Any]:
     return _collect_daily_range(get_spo2, start, end)
 
 
-def get_resting_hr(day: date) -> Any:
-    return _make_typed_request(garth.get_heart_rates, day.isoformat())
+def get_resting_hr_range(start: date, end: date) -> list[dict[str, Any]]:
+    """Resting HR for ``[start, end]``, one row per date ascending.
+
+    One range request (366 dates work live, above every caller's span cap),
+    plus one per-day dailyHeartRate request when the series has no value for
+    ``end``: it was not confirmed live that the series carries today's value
+    during the day. Upstream drops days without a value and returns floats;
+    days are refilled and whole values made ints so rows match the former
+    per-day dailyHeartRate rows.
+    """
+    if start > end:
+        return []
+    rows = _make_typed_request(garth.get_rhr_daily, start.isoformat(), end.isoformat())
+    by_date = {row.get("calendarDate"): row.get("value") for row in rows or [] if isinstance(row, dict)}
+    if by_date.get(end.isoformat()) is None:
+        try:
+            day_row = _make_typed_request(garth.get_heart_rates, end.isoformat())
+        except GarminCliError as exc:
+            if exc.error_code != "NOT_FOUND":
+                raise
+            day_row = None
+        if isinstance(day_row, dict):
+            by_date[end.isoformat()] = day_row.get("restingHeartRate")
+    result: list[dict[str, Any]] = []
+    for day in _dates(start, end):
+        value = by_date.get(day.isoformat())
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        result.append({"calendarDate": day.isoformat(), "restingHeartRate": value})
+    return result
 
 
-def get_resting_hr_range(start: date, end: date) -> list[Any]:
-    return _collect_daily_range(get_resting_hr, start, end)
+def get_training_readiness_range(start: date, end: date) -> list[dict[str, Any]]:
+    """One training-readiness entry per day in one request, date ascending.
 
-
-def get_training_readiness(day: date) -> Any:
-    return _request(
-        f"/training-info-service/training-info/daily-readiness/{day.isoformat()}"
+    The range takes 366 dates live and returns every recalculation of a day
+    (newest first, tagged by ``inputContext``). The day's row is its latest
+    morning ``AFTER_WAKEUP_RESET`` entry, Garmin's daily score, or without one
+    its latest entry; ``latest_score`` / ``latest_level`` carry the day's
+    latest entry. "Latest" is by UTC ``timestamp`` when every entry of the day
+    has one (local time repeats an hour at DST fall-back), else Garmin's order.
+    """
+    if start > end:
+        return []
+    result = _request(
+        f"/metrics-service/metrics/trainingreadiness/{start.isoformat()}/{end.isoformat()}"
     )
-
-
-def get_training_readiness_range(start: date, end: date) -> list[Any]:
-    return _collect_daily_range(get_training_readiness, start, end)
+    entries = [result] if isinstance(result, dict) else result if isinstance(result, list) else []
+    by_day: dict[str, list[dict[str, Any]]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        calendar_date, local = entry.get("calendarDate"), entry.get("timestampLocal")
+        if not isinstance(calendar_date, str | None) or not isinstance(local, str | None):
+            continue
+        day = calendar_date or (local[:10] if local else None)
+        if day and start.isoformat() <= day <= end.isoformat():
+            by_day.setdefault(day, []).append(entry)
+    rows: list[dict[str, Any]] = []
+    for day in sorted(by_day):
+        oldest_first = by_day[day][::-1]
+        if all(isinstance(entry.get("timestamp"), str) for entry in oldest_first):
+            oldest_first.sort(key=lambda entry: entry["timestamp"])  # stable: Garmin's order breaks ties
+        latest = oldest_first[-1]
+        mornings = [entry for entry in oldest_first if entry.get("inputContext") == "AFTER_WAKEUP_RESET"]
+        rows.append({
+            **(mornings[-1] if mornings else latest),
+            "calendarDate": day,
+            "latest_score": latest.get("score"),
+            "latest_level": latest.get("level"),
+        })
+    return rows
 
 
 def get_training_status(day: date) -> Any:

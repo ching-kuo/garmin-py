@@ -106,9 +106,9 @@ garmin-cli health sleep --days 1
 | `GARMIN_CLI_HTTP_TIMEOUT` | `30` | HTTP request timeout in seconds (float); invalid or non-positive values fall back to `30` |
 | `GARMIN_CLI_RETRY_DELAYS` | `2,4,8` | Comma-separated retry delay sequence in seconds (e.g. `1,2,4`); invalid values fall back to `2,4,8` |
 | `GARMIN_CLI_AUTH_PROBE_TTL` | `600` | Seconds to cache a successful auth probe in the MCP server (float); `0` disables caching and probes on every call |
-| `GARMIN_CLI_DAILY_CALL_DELAY` | `0.5` | Delay in seconds (float) between request submissions for endpoints that fan out one request per day (e.g. `endurance-score`); invalid or negative values fall back to `0.5` |
+| `GARMIN_CLI_DAILY_CALL_DELAY` | `0.5` | Delay in seconds (float) between request submissions for endpoints that fan out one request per day (e.g. `endurance-score`) and for the workout-template reads of `training_plan_preview` / `training_plan_apply`; invalid or negative values fall back to `0.5` |
 | `GARMIN_MCP_READ_ONLY` | unset | `1`/`true` starts `mcp-server` without write tools (same as `--read-only`) |
-| `GARMIN_CLI_FETCH_CONCURRENCY` | `4` | Worker cap for concurrent fan-out fetches (per-day ranges, report snapshot sections, multisport children); invalid or non-positive values fall back to `4` |
+| `GARMIN_CLI_FETCH_CONCURRENCY` | `4` | Worker cap for concurrent fan-out fetches (per-day ranges, report snapshot sections, multisport children, `training_plan_preview` / `training_plan_apply` workout-template reads); invalid or non-positive values fall back to `4` |
 
 ### Custom session directory
 
@@ -204,11 +204,11 @@ garmin-cli --json coach snapshot [--date DATE] [--baseline-days N] [--recent-dai
                                   [--include-extended-daily-baselines] [--sport TYPE]...
 ```
 
-The default snapshot uses the 28 prior days for ranged signals and activities, nine prior days plus the current date for daily resting-HR and stress calls (leaving slack over the seven-sample baseline minimum for days without data), and at most 32 upstream requests (the calendar costs up to three: the seven-day plan window can span two weekly pages, plus the by-period schedule lookup that catches Garmin Coach sessions). `--recent-daily-days` accepts 1-9, the most that fits the cap. The cap counts Garmin data requests only: the session check or login, the profile-timezone lookup, and retries are extra. `provenance.completed_requests` reports the data requests that completed sections actually made (one fewer calendar page when the window fits in one week). Baseline medians exclude the current date and require seven valid samples; the resting-HR and stress signals report the shorter daily window they were actually fetched over. Missing and stale values remain explicit in `data_quality`; the server returns neutral facts and does not assign a proprietary readiness score or decide whether a workout is safe.
+The default snapshot uses the 28 prior days for ranged signals and activities, nine prior days plus the current date for resting HR (one range request, plus one per-day request for the current date when the range has no value for it) and stress (one request per day), leaving slack over the seven-sample baseline minimum for days without data, and at most 24 upstream requests (resting HR is charged as two; the calendar costs up to three: the seven-day plan window can span two weekly pages, plus the by-period schedule lookup that catches Garmin Coach sessions). `--recent-daily-days` accepts 1-9, the most that fits the cap. The cap counts Garmin data requests only: the session check or login, the profile-timezone lookup, and retries are extra. `provenance.completed_requests` reports the data requests that completed sections actually made (one fewer calendar page when the window fits in one week). Baseline medians exclude the current date and require seven valid samples; the resting-HR and stress signals report the shorter daily window they were actually fetched over. Missing and stale values remain explicit in `data_quality`; the server returns neutral facts and does not assign a proprietary readiness score or decide whether a workout is safe.
 
 `--json` wraps the snapshot in the standard envelope (`data[0]` is the snapshot). Table output shows the recovery signals only, with a note pointing to `--json` for the other sections; `--format csv` is rejected with `INVALID_INPUT`.
 
-Extended daily baselines are rejected if their estimated cost exceeds the 32-request cap. A terminal rate limit stops further Garmin calls while preserving completed sections with `complete: false` and `aborted: true`.
+Extended daily baselines are rejected if their estimated cost exceeds the 24-request cap. A terminal rate limit stops further Garmin calls while preserving completed sections with `complete: false` and `aborted: true`.
 
 ### Activities
 

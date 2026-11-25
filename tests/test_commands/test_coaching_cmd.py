@@ -33,7 +33,7 @@ def test_coach_snapshot_json_emits_shared_service_result(mocker: Any) -> None:
     assert envelope["data"] == [snapshot]
     auth.assert_called_once()
     assert collect.call_args.args[0].isoformat() == "2026-07-15"
-    assert collect.call_args.args[-1] == 32
+    assert collect.call_args.args[-1] == 24
 
 
 def test_coach_snapshot_table_points_to_json_for_other_sections(mocker: Any) -> None:

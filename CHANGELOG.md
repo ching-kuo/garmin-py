@@ -21,7 +21,7 @@
 - Workout `description` is capped at 1024 characters.
 - `training_plan_reschedule` returns a `destination_occupied` conflict without writing when the new date already holds a different workout; it used to schedule on top of it.
 - Workout target `open` is sent to Garmin as `no.target` (id 1); it was sent as id 6, which is `pace.zone`. `cadence.zone` targets are sent with Garmin's key `cadence`.
-- `coach_snapshot` / `coach snapshot` accept `recent_daily_days` 1-9 (was 1-14, but anything above 9 always exceeded the request cap), and the request cap is 32 (was 31) because the seven-day plan window can span two calendar weeks.
+- `coach_snapshot` / `coach snapshot` make at most 24 Garmin data requests, which is also the hard cap (2.13.0: 31), because resting HR is now one range request plus at most one per-day request for the current date; the calendar is still charged for two weekly pages plus the schedule lookup. `recent_daily_days` must be 1-9 (was 1-14) even with `include_extended_daily_baselines`, which ignores it: for example `baseline_days=7, recent_daily_days=10` with extended baselines was accepted in 2.13.0 and is now rejected.
 - Activity, workout, and schedule ids must be positive integers: `0`, negative ids, booleans, and floats are `INVALID_INPUT` (CLI) or a tool validation error (MCP). CLI ids and `garmin://activity/{id}` must be plain ASCII digits, at most 20 (no sign, spaces, or `_`); MCP id parameters are strict integers, so `true`, `1.0`, and `"1"` fail schema validation instead of being coerced to `1`.
 - Calendar items of type activity, weight, or nap never report a `workout_schedule_id`, even when they carry a `workoutId`; other items with a `workoutId` (including Garmin Coach types) do. Training plans no longer treat such items as occupying or satisfying a date.
 - `activity delete`, `workout delete`, and `workout unschedule` never prompt under `--json` or without a terminal: pass `--confirm` (new aliases `--yes` / `-y`) or they fail with `INVALID_INPUT`. The id is validated first, the prompt goes to stderr before any login, and any answer but y/yes (or end of input) prints `Aborted.` (exit 1, `INVALID_INPUT`) instead of an empty `INTERNAL_ERROR`.
@@ -48,8 +48,11 @@
 - `mcp-server --mount-path` is removed (it was already rejected); it is now an unknown option.
 - Library callers of `build_garmin_payload` / `merge_workout_payload` can no longer use the `heart.rate`, `calories`, or `power` end conditions (the CLI and MCP tools never accepted them).
 - Library imports: `garmin_cli.metrics` exports only `FieldEntry` and `FieldTable` (import `REGISTRY`, `MetricEntry`, `resolve`, and the `*_TYPE_KEYS` sets from `garmin_cli.metrics.registry`; `for_sport` and `validate_table_coverage` are gone, `project_row` / `resolve_field` live in `garmin_cli.metrics.field_table`); `FieldTable` takes only `entries` and derives `columns`; `garmin_cli.serializers` no longer re-exports `REGISTRY`, `CYCLING_TYPE_KEYS`, `LAP_SWIM_TYPE_KEYS`, `RUNNING_TYPE_KEYS`, `UNION_COLUMNS`, `SportProfile`, `profile_for` (use `garmin_cli.metrics.registry` / `garmin_cli.metrics.sport_profile`), `COLUMNS_ACTIVITY_LAPS_*` (use `garmin_cli.serializers.activities`), or the private `_`-helpers (use `garmin_cli.serializers._common`); `error_contracts.UNKNOWN_ERROR_CONTRACT` is private; `token_store.expand_garth_home` is renamed `expand_garmin_home` and the legacy migration helpers are removed.
+- Library imports: `garmin_cli.endpoints.health.get_resting_hr(day)` and `get_training_readiness(day)` are removed; use `get_resting_hr_range(day, day)` and `get_training_readiness_range(day, day)`.
 
 ### Added
+
+- Training readiness rows (`health readiness`, MCP `health_readiness`, the morning report, and `coach_snapshot` wellness rows) add `latest_score` and `latest_level`, the day's newest recalculation, so afternoon changes after a workout are visible next to the morning `score` / `level`.
 
 - `workout schedule --allow-multiple` and MCP `workout_schedule(allow_multiple=true)` schedule a workout on a date that already holds a different one (Garmin allows several per day).
 - `--json` and `--format` also work after the subcommand (`garmin-cli health sleep --days 7 --json`); the subcommand's value wins over a global one.
@@ -76,6 +79,8 @@
 - The MCP server's cached session check is dropped when `garmin_tokens.json` changes, so a `garmin-cli login` or `login logout` in another process takes effect on the next call instead of after the probe TTL.
 - Strict calendar reads (training-plan rechecks) fail, and report `unknown`, when a calendar page or the schedule lookup returns no item list, instead of reading it as empty.
 - `coach_snapshot` `provenance.completed_requests` counts the calendar pages actually read (one or two) instead of always charging the maximum.
+- Resting heart rate (`health resting-hr`, MCP `health_resting_hr`, the weekly report, and `coach_snapshot`) is read with one range request instead of one request per day, plus one per-day request for the last date when the range has no value for it; rows are unchanged, including days without a value.
+- `training_plan_preview` / `training_plan_apply` read the scheduled workout templates concurrently (`GARMIN_CLI_FETCH_CONCURRENCY`, spaced by `GARMIN_CLI_DAILY_CALL_DELAY`) instead of one at a time, and stop starting new reads after a failure.
 
 ### Security
 
@@ -94,6 +99,7 @@
 
 ### Fixed
 
+- Training readiness (`health readiness`, MCP `health_readiness`, the morning report, and `coach_snapshot`) works again: the per-day `daily-readiness` endpoint it used returns 404, so it now reads Garmin's readiness range endpoint in one request and returns one row per day, the latest morning (`AFTER_WAKEUP_RESET`) score or, without one, the day's latest score.
 - The installed `garmin-cli` command now prints JSON error envelopes for `--json` / `--format json` failures; it previously fell back to plain-text errors because the console entry point never passed its arguments to the error handler.
 - `doctor` fails the write-surface check for a `GARMIN_MCP_BEARER_TOKEN` that is present but blank, too short, or outside the RFC 6750 token alphabet, and its write-surface text describes the loopback enforcement.
 - `garmin-cli --json mcp-server` without the `mcp` extra now prints a JSON error envelope instead of plain text, and startup refusals (such as an invalid bearer token) report `INVALID_INPUT` instead of `INTERNAL_ERROR`.

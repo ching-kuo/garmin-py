@@ -22,11 +22,13 @@ class TestCoachSnapshotRequestBudget:
     def test_default_budget_is_within_cap(self) -> None:
         # 9-day daily window: two missing-day slack over the 7-sample minimum.
         # Calendar costs three requests: the seven-date window can span two
-        # weekly pages, plus workoutScheduleByPeriod.
-        assert coach_snapshot_request_budget(28, 9, False) == 32
+        # weekly pages, plus workoutScheduleByPeriod. Resting HR is one range
+        # request plus a possible current-day fill; only stress is per day
+        # (9 prior days plus the current date).
+        assert coach_snapshot_request_budget(28, 9, False) == 24
 
     def test_extended_daily_baselines_charge_the_full_window(self) -> None:
-        assert coach_snapshot_request_budget(28, 7, True) == 70
+        assert coach_snapshot_request_budget(28, 7, True) == 43
 
     def test_recent_daily_days_range_matches_the_request_cap(self) -> None:
         assert validate_snapshot_inputs(28, 9, False, None) == MAX_SNAPSHOT_REQUESTS

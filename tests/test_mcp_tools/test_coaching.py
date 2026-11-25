@@ -56,8 +56,8 @@ class TestCoachSnapshot:
         mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
         for name in (
             "get_sleep", "get_hrv", "get_body_battery_range", "get_steps_range", "get_weight",
-            "list_activities", "get_resting_hr_range", "get_resting_hr", "get_stress_range",
-            "get_stress", "get_training_readiness", "get_spo2", "get_training_status",
+            "list_activities", "get_resting_hr_range", "get_stress_range",
+            "get_stress", "get_training_readiness_range", "get_spo2", "get_training_status",
         ):
             mocker.patch(f"garmin_cli.services.coaching_snapshot.{name}", return_value=[])
         # The seven-date window fit in one calendar week: one page plus the lookup.
@@ -65,8 +65,99 @@ class TestCoachSnapshot:
 
         result = _call(create_mcp_server(_config()), "coach_snapshot", {"date": "2026-07-13"})
 
-        assert result["provenance"]["estimated_requests"] == 32
-        assert result["provenance"]["completed_requests"] == 31
+        # 6 ranged reads + resting-HR range and current-day fill (charged as
+        # 2) + 9+1 stress days + readiness, SpO2, status + 2 calendar requests.
+        assert result["provenance"]["estimated_requests"] == 24
+        assert result["provenance"]["completed_requests"] == 23
+
+    def test_resting_hr_is_one_range_request_split_into_current(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+        for name in (
+            "get_sleep", "get_hrv", "get_body_battery_range", "get_steps_range", "get_weight",
+            "list_activities", "get_stress_range", "get_stress", "get_spo2", "get_training_status",
+        ):
+            mocker.patch(f"garmin_cli.services.coaching_snapshot.{name}", return_value=[])
+        mocker.patch("garmin_cli.services.coaching_snapshot.get_calendar_range_counted", return_value=([], 2))
+        days = [Date(2026, 7, 6 + offset) for offset in range(10)]
+        rhr = mocker.patch(
+            "garmin_cli.services.coaching_snapshot.get_resting_hr_range",
+            return_value=[{"calendarDate": day.isoformat(), "restingHeartRate": 50} for day in days[:-1]]
+            + [{"calendarDate": "2026-07-15", "restingHeartRate": 44}],
+        )
+        readiness = mocker.patch(
+            "garmin_cli.services.coaching_snapshot.get_training_readiness_range", return_value=[]
+        )
+
+        result = _call(create_mcp_server(_config()), "coach_snapshot", {"date": "2026-07-15"})
+
+        rhr.assert_called_once_with(Date(2026, 7, 6), Date(2026, 7, 15))
+        readiness.assert_called_once_with(Date(2026, 7, 15), Date(2026, 7, 15))
+        signal = next(s for s in result["recovery"]["signals"] if s["signal"] == "resting_heart_rate")
+        assert signal["current_value"] == 44
+        assert signal["current_value_date"] == "2026-07-15"
+        assert signal["sample_count"] == 9
+        assert signal["baseline_median"] == 50
+
+    @pytest.mark.parametrize("code", ["NOT_FOUND", "SERVER_ERROR"])
+    def test_failed_resting_hr_range_also_reports_the_current_value(self, mocker: Any, code: str) -> None:
+        mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+        for name in (
+            "get_sleep", "get_hrv", "get_body_battery_range", "get_steps_range", "get_weight",
+            "list_activities", "get_stress_range", "get_stress", "get_training_readiness_range",
+            "get_spo2", "get_training_status",
+        ):
+            mocker.patch(f"garmin_cli.services.coaching_snapshot.{name}", return_value=[{"calendarDate": "2026-07-15"}])
+        mocker.patch("garmin_cli.services.coaching_snapshot.get_calendar_range_counted", return_value=([], 2))
+        mocker.patch(
+            "garmin_cli.services.coaching_snapshot.get_resting_hr_range",
+            side_effect=GarminCliError("gone", code),
+        )
+
+        result = _call(create_mcp_server(_config()), "coach_snapshot", {"date": "2026-07-15"})
+
+        failures = result["unavailable"] if code == "NOT_FOUND" else result["errors"]
+        assert {"resting_hr", "current_resting_hr"} <= {entry["section"] for entry in failures}
+
+    def test_resting_hr_without_a_current_row_reports_current_no_data(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+        for name in (
+            "get_sleep", "get_hrv", "get_body_battery_range", "get_steps_range", "get_weight",
+            "list_activities", "get_stress_range", "get_stress", "get_training_readiness_range",
+            "get_spo2", "get_training_status",
+        ):
+            mocker.patch(f"garmin_cli.services.coaching_snapshot.{name}", return_value=[{"calendarDate": "2026-07-15"}])
+        mocker.patch("garmin_cli.services.coaching_snapshot.get_calendar_range_counted", return_value=([], 2))
+        mocker.patch(
+            "garmin_cli.services.coaching_snapshot.get_resting_hr_range",
+            return_value=[{"calendarDate": "2026-07-14", "restingHeartRate": 50}],
+        )
+
+        result = _call(create_mcp_server(_config()), "coach_snapshot", {"date": "2026-07-15"})
+
+        assert {"section": "current_resting_hr", "reason": "no_data"} in result["unavailable"]
+        assert not any(entry["section"] == "resting_hr" for entry in result["unavailable"])
+
+    def test_missing_current_resting_hr_is_not_backfilled_from_prior_days(self, mocker: Any) -> None:
+        mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
+        for name in (
+            "get_sleep", "get_hrv", "get_body_battery_range", "get_steps_range", "get_weight",
+            "list_activities", "get_stress_range", "get_stress", "get_training_readiness_range",
+            "get_spo2", "get_training_status",
+        ):
+            mocker.patch(f"garmin_cli.services.coaching_snapshot.{name}", return_value=[])
+        mocker.patch("garmin_cli.services.coaching_snapshot.get_calendar_range_counted", return_value=([], 2))
+        mocker.patch(
+            "garmin_cli.services.coaching_snapshot.get_resting_hr_range",
+            return_value=[
+                {"calendarDate": "2026-07-14", "restingHeartRate": 50},
+                {"calendarDate": "2026-07-15", "restingHeartRate": None},
+            ],
+        )
+
+        result = _call(create_mcp_server(_config()), "coach_snapshot", {"date": "2026-07-15"})
+
+        signal = next(s for s in result["recovery"]["signals"] if s["signal"] == "resting_heart_rate")
+        assert signal["state"] == "missing_current"
 
     def test_timed_out_section_is_recorded_and_snapshot_completes(
         self, mocker: Any, monkeypatch: pytest.MonkeyPatch
@@ -74,8 +165,8 @@ class TestCoachSnapshot:
         mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
         for name in (
             "get_sleep", "get_body_battery_range", "get_steps_range", "get_weight",
-            "list_activities", "get_resting_hr_range", "get_resting_hr", "get_stress_range",
-            "get_stress", "get_training_readiness", "get_spo2", "get_training_status",
+            "list_activities", "get_resting_hr_range", "get_stress_range",
+            "get_stress", "get_training_readiness_range", "get_spo2", "get_training_status",
         ):
             mocker.patch(f"garmin_cli.services.coaching_snapshot.{name}", return_value=[])
         mocker.patch("garmin_cli.services.coaching_snapshot.get_calendar_range_counted", return_value=([], 3))

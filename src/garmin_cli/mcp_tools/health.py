@@ -96,13 +96,13 @@ def register_health_tools(mcp: MCPServer, config: CliConfig) -> None:
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def health_resting_hr(start_date: str | None = None, end_date: EndDate = None, days: Days = None) -> Envelope:
-        """Get resting heart rate for a date range (YYYY-MM-DD). Returns date, resting_hr. Note: large ranges may be slow (one API call per day)."""
+        """Get resting heart rate for a date range (YYYY-MM-DD). Returns date, resting_hr (one request for the whole range)."""
         window = _date_window(start_date, end_date, days)
         return _run_tool(config, lambda: get_resting_hr_range(*window()), serialize_resting_hr)
 
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
     def health_readiness(start_date: str | None = None, end_date: EndDate = None, days: Days = None) -> Envelope:
-        """Get training readiness for a date range (YYYY-MM-DD). Returns date, score, level. Note: large ranges may be slow (one API call per day)."""
+        """Get training readiness for a date range (YYYY-MM-DD). Returns date, score, level (the morning score, else the day's latest), latest_score, latest_level (the day's newest recalculation): one row per day, one request for the whole range."""
         window = _date_window(start_date, end_date, days)
         return _run_tool(config, lambda: get_training_readiness_range(*window()), serialize_training_readiness)
 

@@ -10,14 +10,13 @@ from garmin_cli.endpoints.activities import list_activities
 from garmin_cli.endpoints.health import (
     get_body_battery_range,
     get_hrv,
-    get_resting_hr,
     get_resting_hr_range,
     get_sleep,
     get_spo2,
     get_steps_range,
     get_stress,
     get_stress_range,
-    get_training_readiness,
+    get_training_readiness_range,
     get_training_status,
     get_weight,
 )
@@ -42,12 +41,12 @@ from garmin_cli.services.coaching import (
     coach_snapshot_request_budget,
 )
 
-# 32 keeps the default window (28-day baselines, 9 recent days) inside the
-# cap with the calendar charged for two weekly pages plus the adaptive-plan
-# lookup.
-MAX_SNAPSHOT_REQUESTS = 32
-# Largest recent_daily_days whose non-extended budget fits the cap.
-MAX_RECENT_DAILY_DAYS = (MAX_SNAPSHOT_REQUESTS - coach_snapshot_request_budget(0, 0, False)) // 2
+# 24 is exactly the default window (28-day baselines, 9 recent days) with the
+# calendar charged for two weekly pages plus the adaptive-plan lookup.
+MAX_SNAPSHOT_REQUESTS = 24
+# Largest recent_daily_days whose non-extended budget fits the cap (each day
+# costs one stress request).
+MAX_RECENT_DAILY_DAYS = MAX_SNAPSHOT_REQUESTS - coach_snapshot_request_budget(0, 0, False)
 
 
 def _snapshot_error(section: str, exc: GarminCliError) -> dict[str, Any]:
@@ -160,21 +159,30 @@ def collect_snapshot(
         lambda: list_activities(100, 0, None, None, baseline_start, as_of),
         serialize_activity_summary,
     )
-    # The daily-range fan-out throttles submissions (GARMIN_CLI_DAILY_CALL_DELAY)
-    # and cancels pending days on the first failure, so a terminal 429 inside a
-    # section still honors the stop/cancel/drain contract at section level.
-    for section, range_getter, getter, serializer in (
-        ("resting_hr", get_resting_hr_range, get_resting_hr, serialize_resting_hr),
-        ("stress", get_stress_range, get_stress, serialize_stress),
+    # One resting-HR range request covers the prior days and the current date;
+    # the current row is split off so a missing value today is not backfilled
+    # from an earlier day, and a failed read is reported for both sections. It
+    # is charged as two requests: the range may need a per-day fill for today.
+    if fetch("resting_hr", partial(get_resting_hr_range, recent_start, as_of), serialize_resting_hr, cost=2):
+        rows = sections["resting_hr"]
+        sections["current_resting_hr"] = [row for row in rows if row.get("date") == as_of.isoformat()]
+        sections["resting_hr"] = [row for row in rows if row.get("date") != as_of.isoformat()]
+    for bucket in (unavailable, errors):
+        bucket.extend([{**entry, "section": "current_resting_hr"} for entry in bucket if entry["section"] == "resting_hr"])
+    if sections.get("current_resting_hr") == [] and not any(
+        entry["section"] == "current_resting_hr" for entry in [*unavailable, *errors]
     ):
-        fetch(
-            section,
-            partial(range_getter, recent_start, as_of - timedelta(days=1)),
-            serializer,
-            cost=daily_days,
-        )
-        fetch(f"current_{section}", partial(getter, as_of), serializer)
-    fetch("training_readiness", lambda: get_training_readiness(as_of), serialize_training_readiness)
+        unavailable.append({"section": "current_resting_hr", "reason": "no_data"})
+    # Stress stays per day. The daily-range fan-out throttles submissions
+    # (GARMIN_CLI_DAILY_CALL_DELAY) and cancels pending days on the first
+    # failure, so a terminal 429 inside it still stops the snapshot.
+    fetch("stress", partial(get_stress_range, recent_start, as_of - timedelta(days=1)), serialize_stress, cost=daily_days)
+    fetch("current_stress", partial(get_stress, as_of), serialize_stress)
+    fetch(
+        "training_readiness",
+        partial(get_training_readiness_range, as_of, as_of),
+        serialize_training_readiness,
+    )
     fetch("spo2", lambda: get_spo2(as_of), serialize_spo2)
     fetch("training_status", lambda: get_training_status(as_of), serialize_training_status)
     # Seven dates (today plus six) touch at most two calendar weeks, so this

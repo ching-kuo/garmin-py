@@ -5,7 +5,7 @@ import math
 import os
 import time
 from collections.abc import Iterator
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from datetime import date, timedelta
 from typing import Any, Callable
@@ -33,7 +33,7 @@ _NOT_FOUND_ERRORS: dict[int, tuple[str, str]] = {404: ("Not found.", "NOT_FOUND"
 
 
 def _resolve_daily_call_delay() -> float:
-    """Return the inter-call delay (seconds) used by ``_collect_daily_range``.
+    """Return the inter-submission delay (seconds) used by ``_fan_out``.
 
     Reads ``GARMIN_CLI_DAILY_CALL_DELAY`` from the environment as a
     non-negative float.  Any parse error or negative value causes the whole
@@ -60,9 +60,9 @@ def _resolve_fetch_concurrency() -> int:
 def _bounded_thread_pool(task_count: int) -> ThreadPoolExecutor:
     """ThreadPoolExecutor sized to ``min(task_count, _resolve_fetch_concurrency())``.
 
-    Shared by the fan-out call sites (daily-range collection, multisport
-    children, report sections) so the worker-cap arithmetic lives in one
-    place.
+    Shared by the fan-out call sites (multisport children, report sections,
+    reconciliation details) so the worker-cap arithmetic lives in one place;
+    ``_fan_out`` sizes its own pool because it also needs the worker count.
     """
     return ThreadPoolExecutor(max_workers=min(task_count, _resolve_fetch_concurrency()))
 
@@ -253,32 +253,58 @@ def _collect_daily_range(
     start: date,
     end: date,
 ) -> list[Any]:
-    """Fetch one payload per day in ``[start, end]``, ordered by date ascending.
+    """Fetch one payload per day in ``[start, end]``, ordered by date ascending."""
+    return _fan_out(getter, _dates(start, end))
 
-    Days are fetched on a bounded thread pool.  The per-call delay is applied
-    between task *submissions*, so the request-rate ceiling matches the old
-    serial implementation while requests overlap the waiting.  The first
-    failing day (in date order) propagates its exception unchanged; once a
-    failure is observed no further days are submitted, and in-flight work is
-    drained before raising.
-    """
+
+def _dates(start: date, end: date) -> list[date]:
+    """Every date in ``[start, end]`` ascending; empty when start > end, safe at ``date.max``."""
     days: list[date] = []
-    current = start
-    while current <= end:
-        days.append(current)
-        current += timedelta(days=1)
-    if not days:
+    day = start
+    while day <= end:
+        days.append(day)
+        if day == end:
+            break
+        day += timedelta(days=1)
+    return days
+
+
+def _fan_out[T](fetch: Callable[[T], Any], items: list[T]) -> list[Any]:
+    """Call ``fetch`` for each item on a bounded thread pool; results in item order.
+
+    At most a pool's worth of calls is in flight, and submissions are at least
+    the per-call delay apart (time spent waiting for a worker counts toward
+    it), so the request-rate ceiling matches a serial loop while requests
+    overlap the waiting.  Once a failure is observed no further items are
+    submitted; the first failing item (in item order) propagates its
+    exception unchanged after earlier items finish.
+    """
+    if not items:
         return []
-    if len(days) == 1:
-        return [getter(days[0])]
+    if len(items) == 1:
+        return [fetch(items[0])]
 
     delay = _resolve_daily_call_delay()
+    workers = min(len(items), _resolve_fetch_concurrency())
     futures: list[Future[Any]] = []
-    with _bounded_thread_pool(len(days)) as pool, _cancel_futures_on_error(futures):
-        for index, day in enumerate(days):
-            futures.append(pool.submit(getter, day))
-            if index < len(days) - 1:
-                if any(f.done() and f.exception() is not None for f in futures):
+
+    def failed() -> bool:
+        return any(f.done() and f.exception() is not None for f in futures)
+
+    with ThreadPoolExecutor(max_workers=workers) as pool, _cancel_futures_on_error(futures):
+        next_submit = time.monotonic()
+        for item in items:
+            if futures:
+                running = [f for f in futures if not f.done()]
+                if len(running) >= workers:
+                    wait(running, return_when=FIRST_COMPLETED)
+                if failed():
                     break
-                time.sleep(delay)
+                remaining = next_submit - time.monotonic()
+                if remaining > 0:
+                    time.sleep(remaining)
+                if failed():
+                    break
+            futures.append(pool.submit(fetch, item))
+            next_submit = time.monotonic() + delay
         return [future.result() for future in futures]

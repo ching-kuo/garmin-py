@@ -1,0 +1,18 @@
+[
+  {
+    "calendarDate": "2026-07-01",
+    "inputContext": "UPDATE_REALTIME_VARIABLES",
+    "level": "MODERATE",
+    "score": 64,
+    "timestamp": "2026-07-01T10:00:00.0",
+    "timestampLocal": "2026-07-01T12:00:00.0"
+  },
+  {
+    "calendarDate": "2026-07-01",
+    "inputContext": "AFTER_WAKEUP_RESET",
+    "level": "HIGH",
+    "score": 78,
+    "timestamp": "2026-07-01T04:00:00.0",
+    "timestampLocal": "2026-07-01T06:00:00.0"
+  }
+]

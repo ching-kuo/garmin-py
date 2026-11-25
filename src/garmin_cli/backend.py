@@ -447,6 +447,16 @@ def get_heart_rates(cdate: str) -> dict[str, Any]:
     return client.get_heart_rates(cdate)
 
 
+def get_rhr_daily(start: str, end: str) -> list[dict[str, Any]]:
+    """Use the typed upstream resting-HR range helper (displayName-scoped).
+
+    Upstream flattens the wellness-stats payload to ``[{calendarDate, value}]``
+    and drops days without a value; 90 and 366 dates were verified live.
+    """
+    client = _require_backend()
+    return client.get_rhr_daily(start, end)
+
+
 def get_race_predictions() -> dict[str, Any]:
     """Use the typed upstream race-predictions helper (displayName-scoped, latest).
 

@@ -713,7 +713,7 @@ class TestPerformanceSerializers:
         (
             serialize_training_readiness,
             "sample_training_readiness_raw",
-            {"date": "2026-03-11", "score": 68, "level": "MODERATE"},
+            {"date": "2026-03-11", "score": 68, "level": "MODERATE", "latest_score": 70, "latest_level": "HIGH"},
             COLUMNS_READINESS,
         ),
         (
@@ -915,14 +915,6 @@ class TestSerializePersonalRecords:
         assert serialize_personal_records({}) == []
         assert serialize_personal_records({"error": "not found"}) == []
         assert serialize_personal_records(["not-a-dict", 42]) == []
-
-
-def test_serialize_resting_hr_falls_back_to_legacy_key() -> None:
-    # restingHeartRateValue was the bare-path dailyHeartRate key; kept as a
-    # fallback in case an older cached payload shape is ever seen.
-    assert serialize_resting_hr(
-        {"calendarDate": "2026-03-11", "restingHeartRateValue": 52}
-    ) == [{"date": "2026-03-11", "resting_hr": 52}]
 
 
 # ---------------------------------------------------------------------------

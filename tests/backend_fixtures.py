@@ -22,6 +22,7 @@ RECORDABLE_BACKEND_FUNCTIONS: tuple[str, ...] = (
     "get_heart_rates",
     "get_personal_records",
     "get_race_predictions",
+    "get_rhr_daily",
     "get_workout",
     "list_workouts",
 )

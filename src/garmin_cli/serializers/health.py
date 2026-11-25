@@ -81,10 +81,8 @@ COLUMNS_SPO2 = _SPO2_TABLE.columns
 _RESTING_HR_TABLE = FieldTable(
     entries=(
         FieldEntry("date", (("calendarDate",),)),
-        # restingHeartRate is the displayName-scoped dailyHeartRate response
-        # (current); restingHeartRateValue is the legacy bare-path key kept
-        # as a fallback.
-        FieldEntry("resting_hr", (("restingHeartRate",), ("restingHeartRateValue",))),
+        # get_resting_hr_range rebuilds the per-day dailyHeartRate key.
+        FieldEntry("resting_hr", (("restingHeartRate",),)),
     ),
 )
 COLUMNS_RESTING_HR = _RESTING_HR_TABLE.columns
@@ -94,6 +92,9 @@ _READINESS_TABLE = FieldTable(
         FieldEntry("date", (("calendarDate",),)),
         FieldEntry("score", (("score",),)),
         FieldEntry("level", (("level",),)),
+        # get_training_readiness_range adds the day's newest recalculation.
+        FieldEntry("latest_score", (("latest_score",),)),
+        FieldEntry("latest_level", (("latest_level",),)),
     ),
 )
 COLUMNS_READINESS = _READINESS_TABLE.columns

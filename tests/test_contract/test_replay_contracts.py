@@ -158,4 +158,5 @@ def test_mcp_workout_calendar_and_health_families_replay_offline(
     assert stress["rows"][0]["avg_stress"] == 28
     assert spo2["rows"][0]["avg_spo2"] == 96
     assert readiness["rows"][0]["score"] == 78
+    assert readiness["rows"][0]["latest_score"] == 64
     assert status["count"] == 1

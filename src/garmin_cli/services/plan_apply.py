@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from garmin_cli.endpoints._base import _fan_out
 from garmin_cli.endpoints.workouts import (
     create_workout,
     delete_workout,
@@ -48,24 +49,30 @@ def calendar_with_projections(start: date, end: date) -> tuple[Rows, dict[int, d
     """The calendar rows for the window plus each scheduled workout's write projection.
 
     Only rows with a known schedule id can satisfy an entry, so only their
-    templates are read; a template Garmin no longer has gets no projection.
+    templates are read, concurrently in workout-id order (see ``_fan_out``); a
+    template Garmin no longer has gets no projection, and any other failure
+    (the first in that order) propagates.
     """
     calendar = calendar_rows(start, end)
     projections: dict[int, dict[str, Any] | None] = {}
-    scheduled = {
+    scheduled = sorted({
         row["workout_id"]
         for row in calendar
         if is_schedule_row(row) and is_positive_id(row.get("workout_schedule_id")) and is_positive_id(row["workout_id"])
-    }
-    for workout_id in scheduled:
-        try:
-            detail = serialize_workout_detail(get_workout(workout_id))[0]
-        except GarminCliError as exc:
-            if exc.error_code != "NOT_FOUND":
-                raise
-            continue
-        projections[workout_id] = detail.get("write_projection")
+    })
+    for workout_id, raw in zip(scheduled, _fan_out(_template_or_none, scheduled), strict=True):
+        if raw is not None:
+            projections[workout_id] = serialize_workout_detail(raw)[0].get("write_projection")
     return calendar, projections
+
+
+def _template_or_none(workout_id: int) -> Any:
+    try:
+        return get_workout(workout_id)
+    except GarminCliError as exc:
+        if exc.error_code != "NOT_FOUND":
+            raise
+        return None
 
 
 def plan_dates(plan: dict[str, Any]) -> tuple[date, date]:

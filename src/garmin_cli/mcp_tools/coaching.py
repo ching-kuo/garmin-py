@@ -75,7 +75,7 @@ def register_coaching_tools(mcp: MCPServer, config: CliConfig) -> None:
         Baselines use prior calendar days only. The default 9-day daily window
         leaves slack over the 7-sample baseline minimum for days without data
         and is also the maximum ``recent_daily_days``.
-        Default requests are bounded to 32 Garmin calls; a terminal rate limit
+        Default requests are bounded to 24 Garmin calls; a terminal rate limit
         preserves completed sections and returns ``complete=false`` and
         ``aborted=true``.
         """

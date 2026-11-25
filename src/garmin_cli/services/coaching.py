@@ -29,13 +29,14 @@ def coach_snapshot_request_budget(
     """Return the number of Garmin requests in a non-paginated snapshot.
 
     Five range endpoints, one activity list, readiness, SpO2, and training
-    status are single requests; the calendar is up to three (two weekly pages
-    plus ``workoutScheduleByPeriod`` for adaptive-plan sessions). Resting HR and
-    stress are daily endpoints and therefore account for two requests per
-    prior-day window plus current.
+    status are single requests; resting HR is two (the range over prior days
+    plus current, and a per-day fill when the range lacks the current value);
+    the calendar is up to three (two weekly pages plus
+    ``workoutScheduleByPeriod`` for adaptive-plan sessions). Stress is a daily
+    endpoint and therefore costs one request per prior day plus current.
     """
     daily_days = baseline_days if include_extended_daily_baselines else recent_daily_days
-    return 9 + CALENDAR_REQUESTS + 2 * (daily_days + 1)
+    return 11 + CALENDAR_REQUESTS + daily_days + 1
 
 
 def _row_date(row: dict[str, Any]) -> date | None:
@@ -191,7 +192,7 @@ def build_coach_snapshot(
 ) -> dict[str, Any]:
     """Construct a deterministic, source-attributed coaching snapshot."""
     baseline_start = as_of - timedelta(days=baseline_days)
-    # Resting HR and stress are per-day endpoints fetched only over the shorter
+    # Resting HR and stress are fetched only over the shorter
     # daily window, so their reported baseline must not claim the full range.
     daily_start = as_of - timedelta(days=daily_baseline_days)
     signal_specs = (

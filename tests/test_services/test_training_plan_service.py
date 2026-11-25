@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import threading
+from datetime import date
+from typing import Any
+
 import pytest
 
+from garmin_cli.exceptions import GarminCliError
 from garmin_cli.serializers import serialize_workout_detail
+from garmin_cli.services.plan_apply import calendar_with_projections
 from garmin_cli.services.training_plan import blocking_occupants, preview_training_plan, validate_training_plan
 from garmin_cli.workout_builder import build_garmin_payload
 
@@ -316,3 +322,100 @@ def test_validation_errors_are_structured() -> None:
     result = preview_training_plan({"name": ""}, [], {})
     assert result["complete"] is False
     assert all(error["error_code"] == "INVALID_INPUT" and error["message"] for error in result["errors"])
+
+
+def test_projection_templates_are_fetched_concurrently_and_missing_ones_skipped(
+    mocker: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GARMIN_CLI_FETCH_CONCURRENCY", "2")
+    monkeypatch.setenv("GARMIN_CLI_DAILY_CALL_DELAY", "0")
+    mocker.patch(
+        "garmin_cli.services.schedule_writes.get_calendar_range",
+        return_value=[
+            {"date": "2026-07-03", "workoutId": 30, "workoutScheduleId": 3},
+            {"date": "2026-07-02", "workoutId": 20, "workoutScheduleId": 2},
+            {"date": "2026-07-04", "workoutId": 40, "workoutScheduleId": 4},
+        ],
+    )
+    # Both live templates must be in flight at once to pass the barrier.
+    barrier = threading.Barrier(2, timeout=5)
+
+    def get_workout(workout_id: int) -> dict[str, Any]:
+        if workout_id == 40:
+            raise GarminCliError(error="Not found.", error_code="NOT_FOUND")
+        barrier.wait()
+        return {
+            "workoutId": workout_id,
+            "workoutName": f"Run {workout_id}",
+            "sportType": {"sportTypeKey": "running"},
+            "workoutSegments": [],
+        }
+
+    get = mocker.patch("garmin_cli.services.plan_apply.get_workout", side_effect=get_workout)
+
+    _, projections = calendar_with_projections(date(2026, 7, 1), date(2026, 7, 7))
+
+    assert list(projections) == [20, 30]
+    assert get.call_count == 3
+
+
+def test_projection_fetch_propagates_non_not_found_errors(mocker: Any) -> None:
+    mocker.patch(
+        "garmin_cli.services.schedule_writes.get_calendar_range",
+        return_value=[{"date": "2026-07-02", "workoutId": 20, "workoutScheduleId": 2}],
+    )
+    mocker.patch(
+        "garmin_cli.services.plan_apply.get_workout",
+        side_effect=GarminCliError(error="Server error.", error_code="SERVER_ERROR"),
+    )
+
+    with pytest.raises(GarminCliError, match="Server error"):
+        calendar_with_projections(date(2026, 7, 1), date(2026, 7, 7))
+
+
+def _scheduled_rows(workout_ids: list[int]) -> list[dict[str, Any]]:
+    return [
+        {"date": f"2026-07-0{index + 1}", "workoutId": workout_id, "workoutScheduleId": 100 + workout_id}
+        for index, workout_id in enumerate(workout_ids)
+    ]
+
+
+def test_projection_fetch_stops_submitting_after_a_failure(mocker: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GARMIN_CLI_FETCH_CONCURRENCY", "2")
+    monkeypatch.setenv("GARMIN_CLI_DAILY_CALL_DELAY", "0")
+    mocker.patch(
+        "garmin_cli.services.schedule_writes.get_calendar_range", return_value=_scheduled_rows([1, 2, 3, 4, 5])
+    )
+    started: list[int] = []
+
+    def get_workout(workout_id: int) -> dict[str, Any]:
+        started.append(workout_id)
+        if workout_id == 1:
+            threading.Event().wait(0.3)
+            return {"workoutId": 1, "workoutName": "Run", "sportType": {"sportTypeKey": "running"}, "workoutSegments": []}
+        raise GarminCliError(error="slow down", error_code="RATE_LIMITED")
+
+    mocker.patch("garmin_cli.services.plan_apply.get_workout", side_effect=get_workout)
+
+    with pytest.raises(GarminCliError, match="slow down"):
+        calendar_with_projections(date(2026, 7, 1), date(2026, 7, 7))
+    assert sorted(started) == [1, 2]
+
+
+def test_projection_fetch_spaces_submissions_by_the_daily_call_delay(
+    mocker: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("GARMIN_CLI_DAILY_CALL_DELAY", raising=False)
+    mock_sleep = mocker.patch("garmin_cli.endpoints._base.time.sleep")
+    mocker.patch(
+        "garmin_cli.services.schedule_writes.get_calendar_range", return_value=_scheduled_rows([1, 2, 3])
+    )
+    mocker.patch(
+        "garmin_cli.services.plan_apply.get_workout",
+        side_effect=GarminCliError(error="Not found.", error_code="NOT_FOUND"),
+    )
+
+    _, projections = calendar_with_projections(date(2026, 7, 1), date(2026, 7, 7))
+
+    assert projections == {}
+    assert [call.args[0] for call in mock_sleep.call_args_list] == pytest.approx([0.5, 0.5], abs=0.05)

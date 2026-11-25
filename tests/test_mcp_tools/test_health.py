@@ -114,40 +114,34 @@ class TestHealthEndpoints:
         with pytest.raises(GarminCliError, match="Not found"):
             health_endpoints.get_steps_range(date(2026, 1, 1), date(2026, 1, 7))
 
-    def test_get_resting_hr_uses_displayname_scoped_typed_method(self, mocker: Any) -> None:
+    def test_get_resting_hr_range_uses_displayname_scoped_typed_method(self, mocker: Any) -> None:
         # The bare /wellness-service/wellness/dailyHeartRate/{day} path 403s;
-        # the typed get_heart_rates method scopes the same endpoint under the
-        # account displayName.
+        # the typed get_rhr_daily method is displayName-scoped.
         mock_garth = MagicMock()
-        mock_garth.get_heart_rates.return_value = {
-            "calendarDate": "2026-01-01",
-            "restingHeartRate": 45,
-        }
+        mock_garth.get_rhr_daily.return_value = [{"calendarDate": "2026-01-01", "value": 45.0}]
         mocker.patch("garmin_cli.endpoints.health.garth", mock_garth)
 
-        result = health_endpoints.get_resting_hr(date(2026, 1, 1))
-        assert result["restingHeartRate"] == 45
-        mock_garth.get_heart_rates.assert_called_once_with("2026-01-01")
+        result = health_endpoints.get_resting_hr_range(date(2026, 1, 1), date(2026, 1, 1))
+        assert result == [{"calendarDate": "2026-01-01", "restingHeartRate": 45}]
+        mock_garth.get_rhr_daily.assert_called_once_with("2026-01-01", "2026-01-01")
         mock_garth.connectapi.assert_not_called()
 
-    def test_get_resting_hr_not_found(self, mocker: Any) -> None:
+    def test_get_resting_hr_range_not_found(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.get_heart_rates.side_effect = _http_error(404)
+        mock_garth.get_rhr_daily.side_effect = _http_error(404)
         mocker.patch("garmin_cli.endpoints.health.garth", mock_garth)
 
         with pytest.raises(GarminCliError) as exc_info:
-            health_endpoints.get_resting_hr(date(2026, 1, 1))
+            health_endpoints.get_resting_hr_range(date(2026, 1, 1), date(2026, 1, 1))
         assert exc_info.value.error_code == "NOT_FOUND"
 
-    def test_get_resting_hr_forbidden_maps_to_auth_failed(self, mocker: Any) -> None:
-        # Mirrors the live drift symptom that motivated the typed-method fix:
-        # the retired bare path returned 403 ForbiddenException.
+    def test_get_resting_hr_range_forbidden_maps_to_auth_failed(self, mocker: Any) -> None:
         mock_garth = MagicMock()
-        mock_garth.get_heart_rates.side_effect = _http_error(403)
+        mock_garth.get_rhr_daily.side_effect = _http_error(403)
         mocker.patch("garmin_cli.endpoints.health.garth", mock_garth)
 
         with pytest.raises(GarminCliError) as exc_info:
-            health_endpoints.get_resting_hr(date(2026, 1, 1))
+            health_endpoints.get_resting_hr_range(date(2026, 1, 1), date(2026, 1, 1))
         assert exc_info.value.error_code == "AUTH_FAILED"
 
 
@@ -251,7 +245,7 @@ class TestHealthTools:
     def test_health_resting_hr(self, mocker: Any) -> None:
 
         mocker.patch("garmin_cli.mcp_tools._shared.ensure_authenticated")
-        mocker.patch("garmin_cli.mcp_tools.health.get_resting_hr_range", return_value=[{"calendarDate": "2026-01-01", "restingHeartRateValue": 55}])
+        mocker.patch("garmin_cli.mcp_tools.health.get_resting_hr_range", return_value=[{"calendarDate": "2026-01-01", "restingHeartRate": 55}])
         server = create_mcp_server(_config())
         result = _call(server, "health_resting_hr", {"start_date": "2026-01-01", "end_date": "2026-01-01"})
         assert result["count"] == 1

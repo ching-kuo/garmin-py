@@ -4,6 +4,8 @@ from __future__ import annotations
 import socket
 import ssl
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from typing import Any
 from unittest.mock import MagicMock
@@ -19,6 +21,7 @@ from garminconnect import (
 
 from garmin_cli.endpoints._base import (
     _collect_daily_range,
+    _fan_out,
     _make_request,
     _make_typed_create,
     _make_typed_request,
@@ -533,4 +536,36 @@ class TestCollectDailyRange:
 
         assert result == [{}, {}, {}]
         assert getter.call_count == 3
-        assert mock_sleep.call_args_list == [((0.5,),), ((0.5,),)]
+        # Only the remaining gap since the previous submission is slept.
+        assert [call.args[0] for call in mock_sleep.call_args_list] == pytest.approx([0.5, 0.5], abs=0.05)
+
+
+class TestFanOut:
+    def test_failure_during_the_delay_stops_the_next_submit(
+        self, mocker: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GARMIN_CLI_DAILY_CALL_DELAY", "0.3")
+        monkeypatch.setenv("GARMIN_CLI_FETCH_CONCURRENCY", "4")
+        submit = mocker.spy(ThreadPoolExecutor, "submit")
+
+        def fetch(item: int) -> int:
+            threading.Event().wait(0.05)
+            raise GarminCliError(error="slow down", error_code="RATE_LIMITED")
+
+        with pytest.raises(GarminCliError, match="slow down"):
+            _fan_out(fetch, [1, 2, 3])
+        assert submit.call_count == 1
+
+    def test_waiting_for_a_worker_counts_toward_the_delay(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GARMIN_CLI_DAILY_CALL_DELAY", "0.2")
+        monkeypatch.setenv("GARMIN_CLI_FETCH_CONCURRENCY", "1")
+        starts: list[float] = []
+
+        def fetch(item: int) -> int:
+            starts.append(time.monotonic())
+            threading.Event().wait(0.3)
+            return item
+
+        assert _fan_out(fetch, [1, 2, 3]) == [1, 2, 3]
+        # Each call takes 0.3 s > the 0.2 s delay, so no delay is added on top.
+        assert all(later - earlier < 0.42 for earlier, later in zip(starts, starts[1:], strict=False))
