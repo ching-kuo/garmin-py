@@ -397,6 +397,10 @@ Four content-only prompts guide common workflows: `weekly_training_review`, `rec
 
 Large MCP reads are bounded. `activity_laps(activity_id, offset=0)` returns at most 100 rows and supplies `total`, `truncated`, and `next_offset` paging metadata. `activity_detail_metrics(activity_id, metrics="", max_samples=0)` deterministically samples the whole stream by stride, reporting `samples_total`, `samples_returned`, and `stride`. Rows carry all requested metrics, so channels stay timestamp-aligned in a single call. The default `max_samples=0` auto-sizes the sample count to the channel count (a ~2400-value budget, clamped to 100–1000 samples) so multi-channel pulls fit MCP client response limits; pass an explicit 100–5000 to override.
 
+### File access
+
+The MCP `activity_download` and `activity_upload` tools only touch files inside one directory: `GARMIN_MCP_FILE_ROOT` (default `~/Downloads/garmin-py`, created with 0700 permissions on the first download; a custom value must be an absolute path, `~` allowed). Relative paths are taken under that root; paths that escape it, contain `..`, or pass through any symlink (file or directory, even one pointing inside the root) are rejected, and every unavailable upload path returns the same `File not available under GARMIN_MCP_FILE_ROOT` error. `activity_download` is annotated destructive because `overwrite=true` replaces a file. The CLI `activity download` / `activity upload` commands are not confined. The root and every directory under it must not be writable by untrusted users: the checks inspect intermediate directories before the download starts and before an upload reopens the file by name, so someone who can swap one for a symlink in between could redirect a download's write or an upload's read.
+
 ### Installation
 
 The package is published on PyPI as `garmin-py` (the CLI command remains `garmin-cli`). The recommended install method is `uv tool install`, which places the binary in `~/.local/bin` — a stable, venv-independent location that desktop applications can access without macOS sandbox issues:
@@ -491,16 +495,16 @@ garmin-cli mcp-server --transport sse --port 8000
 
 Optional HTTP flags: `--sse-path`, `--message-path` (SSE only), `--streamable-http-path`, `--stateless-http`, `--json-response` (streamable-http only).
 
-#### Bearer-token gate on non-loopback binds
+#### Bearer-token gate
 
-Binding to any non-loopback address (`--host 0.0.0.0` or an external interface) requires a bearer token. The server refuses to start otherwise.
+Binding to any non-loopback address (`--host 0.0.0.0` or an external interface) requires a bearer token of at least 32 characters from the RFC 6750 token alphabet (`A-Z a-z 0-9 - . _ ~ + /`, optional trailing `=`; `secrets.token_urlsafe` output qualifies). The server refuses to start otherwise.
 
 ```bash
-export GARMIN_MCP_BEARER_TOKEN="<a-long-random-token>"
+export GARMIN_MCP_BEARER_TOKEN="$(python -c 'import secrets;print(secrets.token_urlsafe(32))')"
 garmin-cli mcp-server --transport streamable-http --host 0.0.0.0 --port 8000
 ```
 
-When the token is set and the bind is non-loopback, the MCP SDK gates every tool call (read **and** write) through `Authorization: Bearer <token>` at the transport layer. Loopback binds (`127.0.0.1`, `::1`, `localhost`) and the `stdio` transport are not gated -- they are trusted to the same degree as the shell user running the process.
+Whenever the variable is present, the MCP SDK gates every tool call (read **and** write) through `Authorization: Bearer <token>` at the transport layer on every HTTP bind, loopback included; a present-but-blank value refuses to start. Only `stdio` and loopback HTTP binds with the variable absent run unauthenticated. Loopback is not a trust boundary on a multi-user host or behind a local reverse proxy or tunnel: any local user or forwarded request can reach `127.0.0.1`, so set the token in those setups.
 
 TLS is expected to be terminated by a reverse proxy in front of the server; the built-in HTTP listener is plain HTTP.
 

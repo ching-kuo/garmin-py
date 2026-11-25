@@ -19,3 +19,11 @@ def _call(mcp_server: Any, tool_name: str, args: dict[str, Any] | None = None) -
     result = asyncio.run(mcp_server.call_tool(tool_name, args or {}))
     # mcp 2.x returns a CallToolResult with a .content list
     return json.loads(result.content[0].text)
+
+
+def _tool_annotations(server: Any, tool_name: str) -> Any:
+    """Return the registered tool's annotations as clients see them."""
+    for tool in asyncio.run(server.list_tools()):
+        if tool.name == tool_name:
+            return tool.annotations
+    raise AssertionError(f"tool {tool_name!r} not registered")

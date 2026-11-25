@@ -35,6 +35,9 @@ class TestCliConfig:
         with pytest.raises((AttributeError, TypeError)):
             config.email = "other@b.com"  # type: ignore[misc]
 
+    def test_repr_omits_password(self) -> None:
+        assert "secret123" not in repr(CliConfig(password="secret123"))
+
 
 
 

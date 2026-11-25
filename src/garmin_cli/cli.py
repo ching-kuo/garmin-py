@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import importlib
+import sys
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, NoReturn
 
 import click
 
@@ -13,7 +14,7 @@ from garmin_cli.exceptions import GarminCliError
 from garmin_cli.mcp_cli import mcp_server_cmd
 from garmin_cli.output import echo_json, make_error_envelope
 
-_GLOBAL_OPTIONS_WITH_VALUES = ("--format", "--garmin-home", "--garth-home")
+_GLOBAL_OPTIONS_WITH_VALUES = frozenset({"--format", "--garmin-home", "--garth-home"})
 
 # Subcommand groups load on first use so `garmin --version` / `--help` never
 # pay for the Garmin backend import chain (garminconnect -> requests ->
@@ -41,23 +42,29 @@ _LAZY_SUBCOMMANDS: dict[str, tuple[str, str, str]] = {
 
 
 def _command_name_from_args(args: Sequence[str] | None) -> str:
-    if not args:
-        return "garmin-cli"
-    parts: list[str] = []
-    skip_next = False
-    for arg in args:
-        if skip_next:
-            skip_next = False
+    # Only known command names are echoed, never raw argv tokens: an option
+    # value (e.g. `login --password SECRET`) must not leak into the envelope.
+    # Runs inside the error handler, so it never imports a lazy group: an
+    # unloaded group reports just its bare name. A subcommand counts only
+    # directly after its group, so `login --password status` stays "login".
+    tokens = list(args or ())
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in _GLOBAL_OPTIONS_WITH_VALUES:
+            index += 2
             continue
-        if arg in _GLOBAL_OPTIONS_WITH_VALUES:
-            skip_next = True
+        if token.startswith("-"):
+            index += 1
             continue
-        if any(arg.startswith(f"{option}=") for option in _GLOBAL_OPTIONS_WITH_VALUES):
-            continue
-        if arg.startswith("-"):
-            continue
-        parts.append(arg)
-    return " ".join(parts[:2]) if parts else "garmin-cli"
+        if token not in _LAZY_SUBCOMMANDS and token not in cli.commands:
+            return "garmin-cli"
+        group = cli.commands.get(token)
+        following = tokens[index + 1] if index + 1 < len(tokens) else None
+        if isinstance(group, click.Group) and following in group.commands:
+            return f"{token} {following}"
+        return token
+    return "garmin-cli"
 
 
 def _json_requested(args: Sequence[str] | None) -> bool:
@@ -71,6 +78,23 @@ def _json_requested(args: Sequence[str] | None) -> bool:
         if arg.startswith("--format=") and arg.split("=", 1)[1].lower() == "json":
             return True
     return False
+
+
+def _fail(
+    raw_args: Sequence[str], error: str, error_code: str, plain: str | None = None
+) -> NoReturn:
+    """Report an error as a JSON envelope (--json) or plain text, then exit 1."""
+    if _json_requested(raw_args):
+        echo_json(
+            make_error_envelope(
+                command=_command_name_from_args(raw_args),
+                error=error,
+                error_code=error_code,
+            )
+        )
+    else:
+        click.echo(error if plain is None else plain, err=True)
+    raise SystemExit(1) from None
 
 
 class SafeGroup(click.Group):
@@ -109,46 +133,20 @@ class SafeGroup(click.Group):
         self, args: Sequence[str] | None = None, prog_name: str | None = None, **extra: Any
     ) -> Any:
         extra["standalone_mode"] = False
+        # The console script calls main() bare. click still gets args=None (it
+        # does its own argv handling, e.g. Windows wildcard expansion); the
+        # JSON error handlers below need the raw argv to see --json.
+        raw_args = sys.argv[1:] if args is None else args
         try:
             return super().main(args=args, prog_name=prog_name, **extra)
         except click.exceptions.Exit as exc:
             raise SystemExit(exc.exit_code) from None
         except GarminCliError as exc:
-            if _json_requested(args):
-                echo_json(
-                    make_error_envelope(
-                        command=_command_name_from_args(args),
-                        error=exc.error,
-                        error_code=exc.error_code,
-                    )
-                )
-            else:
-                click.echo(exc.error, err=True)
-            raise SystemExit(1) from None
-        except click.UsageError as exc:
-            if _json_requested(args):
-                echo_json(
-                    make_error_envelope(
-                        command=_command_name_from_args(args),
-                        error=str(exc),
-                        error_code="INVALID_INPUT",
-                    )
-                )
-            else:
-                click.echo(str(exc), err=True)
-            raise SystemExit(1) from None
+            _fail(raw_args, exc.error, exc.error_code)
+        except click.ClickException as exc:  # incl. UsageError and startup refusals
+            _fail(raw_args, str(exc), "INVALID_INPUT")
         except Exception as exc:
-            if _json_requested(args):
-                echo_json(
-                    make_error_envelope(
-                        command=_command_name_from_args(args),
-                        error=str(exc),
-                        error_code="INTERNAL_ERROR",
-                    )
-                )
-            else:
-                click.echo(f"Internal error: {exc}", err=True)
-            raise SystemExit(1) from None
+            _fail(raw_args, str(exc), "INTERNAL_ERROR", plain=f"Internal error: {exc}")
 
 
 @click.group(cls=SafeGroup)

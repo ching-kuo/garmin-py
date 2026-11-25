@@ -11,11 +11,7 @@ pytest.importorskip("mcp", reason="mcp extra not installed")
 
 from garmin_cli.exceptions import GarminCliError  # noqa: E402
 from garmin_cli.mcp_server import create_mcp_server  # noqa: E402
-from tests.test_mcp_tools.support import _call, _config  # noqa: E402
-
-
-def _tool_annotations(server: Any, name: str) -> Any:
-    return server._tool_manager.get_tool(name).annotations
+from tests.test_mcp_tools.support import _call, _config, _tool_annotations  # noqa: E402
 
 
 class TestCoachSnapshot:

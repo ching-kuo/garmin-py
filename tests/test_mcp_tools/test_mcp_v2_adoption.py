@@ -118,6 +118,7 @@ def test_activity_download_structured_content_round_trips(
     tmp_path: Path,
 ) -> None:
     module = "garmin_cli.mcp_tools.activities_write"
+    mocker.patch.dict("os.environ", {"GARMIN_MCP_FILE_ROOT": str(tmp_path)})
     mocker.patch(f"{module}.ensure_authenticated")
     mocker.patch(f"{module}.download_activity", return_value=b"FITDATA")
     mocker.patch(f"{module}._emit_write_log")

@@ -12,7 +12,7 @@ from typing import Callable
 from garmin_cli.auth import probe_session_status
 from garmin_cli.config import CliConfig
 from garmin_cli.error_contracts import error_contract
-from garmin_cli.mcp_cli import _MCP_BEARER_ENV
+from garmin_cli.bearer_token import BEARER_ENV, validate_bearer_token
 from garmin_cli.token_store import detect_legacy_tokens, has_tokenstore
 
 
@@ -123,11 +123,19 @@ def check_session(config: CliConfig) -> CheckResult:
 def check_write_surface(_config: CliConfig) -> CheckResult:
     # The bind host is a per-invocation CLI flag with no config fallback, so
     # only the bearer-token state can be diagnosed ahead of time.
-    token_configured = bool(os.environ.get(_MCP_BEARER_ENV, ""))
+    # Present-but-blank is a misconfiguration (HTTP binds refuse to start),
+    # not "unset".
+    raw_token = os.environ.get(BEARER_ENV)
+    if raw_token is not None:
+        try:
+            validate_bearer_token(raw_token)
+        except ValueError as exc:
+            return _failure("write_surface", str(exc), "INVALID_INPUT")
     detail = (
-        "MCP write tools are enabled. Stdio and loopback binds are trusted; "
-        f"non-loopback HTTP binds require a bearer token ({_MCP_BEARER_ENV}). "
-        f"Bearer token configured: {str(token_configured).lower()}."
+        "MCP write tools are enabled. Stdio is trusted; HTTP binds enforce the "
+        f"bearer token ({BEARER_ENV}) whenever it is present, and non-loopback "
+        "HTTP binds require it. "
+        f"Bearer token configured: {str(raw_token is not None).lower()}."
     )
     return CheckResult("write_surface", True, detail)
 

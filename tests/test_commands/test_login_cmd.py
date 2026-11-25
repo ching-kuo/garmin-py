@@ -286,6 +286,31 @@ class TestLoginCommandFailure:
         parsed = json.loads(result.output)
         assert parsed["error_code"] == "AUTH_FAILED"
 
+    def test_login_failure_json_command_never_echoes_option_values(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        result, _ = _run_login(
+            ["--json", "login", "--password", "SECRET-pw", "--email", "x@example.com"],
+            mocker,
+            garth_side_effect=Exception("invalid credentials"),
+            tmp_path=tmp_path,
+        )
+        parsed = json.loads(result.output)
+        assert parsed["command"] == "login"
+        assert "SECRET-pw" not in result.output
+        assert "x@example.com" not in result.output
+
+    def test_login_failure_json_password_equal_to_subcommand_not_echoed(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        result, _ = _run_login(
+            ["--json", "login", "--password", "status", "--email", "x@example.com"],
+            mocker,
+            garth_side_effect=Exception("invalid credentials"),
+            tmp_path=tmp_path,
+        )
+        assert json.loads(result.output)["command"] == "login"
+
 
 # ---------------------------------------------------------------------------
 # garmin-cli login status — session present

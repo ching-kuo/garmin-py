@@ -6,10 +6,13 @@ from typing import Any
 
 import click
 
+from garmin_cli.bearer_token import BEARER_ENV, validate_bearer_token
+from garmin_cli.exceptions import GarminCliError
+
 _MCP_SERVER_TRANSPORTS = ("stdio", "sse", "streamable-http")
 _MCP_DEFAULT_LOOPBACK_HOST = "127.0.0.1"
 _MCP_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
-_MCP_BEARER_ENV = "GARMIN_MCP_BEARER_TOKEN"
+_MCP_INSTALL_HINT = 'pip install "garmin-py[mcp]"'
 
 
 def _validate_http_path_option(value: str | None, option_name: str) -> str | None:
@@ -105,49 +108,62 @@ def _build_mcp_run_kwargs(
     return run_kwargs
 
 
-def _is_loopback_host(host: str | None) -> bool:
+def _normalize_bind_host(host: str | None) -> str:
+    """The one host value used for both the bind and the auth decision.
+
+    None means the loopback default. Brackets are stripped only from a
+    bracketed IPv6 literal (``[::1]``); empty, whitespace-only, or other
+    bracketed values are rejected, because an empty host would make the HTTP
+    server bind every interface while the auth check saw no host at all.
+    """
     if host is None:
-        return True  # default applied later is loopback
-    return host in _MCP_LOOPBACK_HOSTS
+        return _MCP_DEFAULT_LOOPBACK_HOST
+    value = host
+    if value.startswith("[") and value.endswith("]") and ":" in value[1:-1]:
+        value = value[1:-1]
+    if not value.strip() or "[" in value or "]" in value:
+        raise click.UsageError(f"Invalid --host value: {host!r}")
+    return value
 
 
-def _resolve_mcp_auth(
-    transport: str, host: str | None, port: int | None
-) -> tuple[Any, Any]:
-    """Resolve the (token_verifier, auth_settings) pair for the mcp-server bind.
+def _resolve_mcp_auth(host: str, port: int | None) -> tuple[Any, Any]:
+    """Resolve the (token_verifier, auth_settings) pair for an HTTP bind.
 
-    Loopback / stdio binds return (None, None). Non-loopback HTTP binds require
-    ``GARMIN_MCP_BEARER_TOKEN`` to be set non-empty; absence / emptiness raises
-    a ``click.ClickException`` to refuse start-up.
+    ``host`` comes from :func:`_normalize_bind_host`. The bearer token is
+    enforced whenever ``GARMIN_MCP_BEARER_TOKEN`` is present, loopback
+    included (a local reverse proxy or tunnel would otherwise expose the
+    server). Only an absent variable leaves a loopback bind unauthenticated;
+    non-loopback binds require it. A missing or invalid (blank, non-RFC 6750
+    characters, or shorter than 32 characters) required token raises a
+    ``click.ClickException`` to refuse start-up.
 
     The ``http://<host>:<port>`` URL fed into ``AuthSettings`` is a synthetic
     placeholder that the SDK requires for static-token mode; the scheme is
     fixed at ``http`` because TLS is expected to be terminated by a reverse
     proxy in front of the server.
     """
-    if transport == "stdio" or _is_loopback_host(host):
+    raw_token = os.environ.get(BEARER_ENV)
+    if host in _MCP_LOOPBACK_HOSTS and raw_token is None:
         return None, None
 
-    raw_token = os.environ.get(_MCP_BEARER_ENV, "")
     try:
-        from garmin_cli.mcp_auth import StaticBearerTokenVerifier
-    except ImportError as exc:
-        raise click.ClickException(
-            f'MCP auth support unavailable: {exc}. Install with: pip install "garmin-cli[mcp]"'
-        ) from exc
-
-    try:
-        verifier = StaticBearerTokenVerifier(raw_token)
+        token = validate_bearer_token(raw_token or "")
     except ValueError as exc:
         raise click.ClickException(
-            f"Refusing to bind {host!r} without a bearer token: {exc}. "
-            f"Set {_MCP_BEARER_ENV} or bind to a loopback host (127.0.0.1)."
+            f"Refusing to bind {host!r}: {exc}. "
+            f"Set a valid {BEARER_ENV}, or bind to a loopback host (127.0.0.1) "
+            "with it unset."
         ) from exc
 
+    # mcp_server_cmd already imported the mcp-backed server, so these succeed.
     from mcp.server.auth.settings import AuthSettings
 
+    from garmin_cli.mcp_auth import StaticBearerTokenVerifier
+
+    verifier = StaticBearerTokenVerifier(token)
     resolved_port = port if port is not None else 8000
-    base_url = f"http://{host}:{resolved_port}"
+    url_host = f"[{host}]" if ":" in host else host  # IPv6 literal
+    base_url = f"http://{url_host}:{resolved_port}"
     # pydantic coerces these str URLs to AnyHttpUrl at construction; mypy only
     # sees the strict annotation when the mcp SDK's types are resolvable.
     # The static token carries no audience claim, so resource validation stays
@@ -174,7 +190,8 @@ def _resolve_mcp_auth(
     default=None,
     help=(
         "Bind host for HTTP transports. Defaults to 127.0.0.1 (loopback). "
-        f"Non-loopback binds require {_MCP_BEARER_ENV} to be set."
+        f"Non-loopback binds require {BEARER_ENV}; when set, it is "
+        "enforced on loopback binds too."
     ),
 )
 @click.option(
@@ -236,14 +253,16 @@ def mcp_server_cmd(
     except ImportError as exc:
         if "mcp" not in str(exc):
             raise
-        click.echo(
-            'MCP support not installed. Run: pip install "garmin-cli[mcp]"',
-            err=True,
-        )
-        raise SystemExit(1)
-    if transport != "stdio" and host is None:
-        host = _MCP_DEFAULT_LOOPBACK_HOST
-    token_verifier, auth_settings = _resolve_mcp_auth(transport, host, port)
+        # Raised through SafeGroup so --json gets the error envelope.
+        raise GarminCliError(
+            error=f"MCP support not installed. Run: {_MCP_INSTALL_HINT}",
+            error_code="INTERNAL_ERROR",
+        ) from exc
+    token_verifier = auth_settings = None
+    if transport != "stdio":
+        # Normalized once so the bind and the auth decision use the same value.
+        host = _normalize_bind_host(host)
+        token_verifier, auth_settings = _resolve_mcp_auth(host, port)
     run_kwargs = _build_mcp_run_kwargs(
         transport=transport,
         host=host,

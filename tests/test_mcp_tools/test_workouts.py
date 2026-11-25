@@ -12,7 +12,7 @@ from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402
 
 from garmin_cli.exceptions import GarminCliError  # noqa: E402
 from garmin_cli.mcp_server import create_mcp_server  # noqa: E402
-from tests.test_mcp_tools.support import _call, _config  # noqa: E402
+from tests.test_mcp_tools.support import _call, _config, _tool_annotations  # noqa: E402
 
 
 class TestWorkoutTools:
@@ -214,14 +214,6 @@ class TestMcpWorkoutCreate:
 
         event = log.call_args.args[0]
         assert event.outcome == "failed-upstream"
-
-
-def _tool_annotations(server: Any, tool_name: str) -> Any:
-    tools = asyncio.run(server.list_tools())
-    for t in tools:
-        if t.name == tool_name:
-            return t.annotations
-    raise AssertionError(f"tool {tool_name!r} not registered")
 
 
 class TestMcpWorkoutSchedule:

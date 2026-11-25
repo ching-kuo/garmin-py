@@ -571,7 +571,7 @@ claude mcp add --transport stdio garmin -- garmin-cli --garmin-home /path/to/.ga
 
 ### HTTP transports (SSE / streamable-http)
 
-`--host` defaults to `127.0.0.1`. Non-loopback binds require the `GARMIN_MCP_BEARER_TOKEN` environment variable; when set, the MCP SDK gates every tool call (read and write) through `Authorization: Bearer <token>`.
+`--host` defaults to `127.0.0.1`. Non-loopback binds require the `GARMIN_MCP_BEARER_TOKEN` environment variable (at least 32 RFC 6750 token characters, e.g. `secrets.token_urlsafe(32)` output); whenever the variable is present (a blank value refuses to start), the MCP SDK gates every tool call (read and write) on every HTTP bind, loopback included, through `Authorization: Bearer <token>`.
 
 ```bash
 garmin-cli mcp-server --transport streamable-http --port 8000
@@ -595,7 +595,7 @@ Available prompts are `weekly_training_review`, `recovery_check`, `compare_recen
 
 ### Available tools
 
-Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, `workout_update`, `workout_delete`, `workout_unschedule`) and activities (`activity_download`, `activity_upload`, `activity_delete`, `activity_rename`, `activity_set_type`) are exposed. AI-coaching tools add bounded snapshots, plan reconciliation, read-only preview, and stateless application. Mutating write tools carry the SDK `destructive_hint` annotation; workout create and update accept `dry_run=True` for a no-write preview.
+Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, `workout_update`, `workout_delete`, `workout_unschedule`) and activities (`activity_download`, `activity_upload`, `activity_delete`, `activity_rename`, `activity_set_type`) are exposed. AI-coaching tools add bounded snapshots, plan reconciliation, read-only preview, and stateless application. Mutating write tools carry the SDK `destructive_hint` annotation; workout create and update accept `dry_run=True` for a no-write preview. The activity file tools are confined to `GARMIN_MCP_FILE_ROOT` (default `~/Downloads/garmin-py`, created 0700 on first download; a custom value must be an absolute path); the CLI `activity download` / `activity upload` commands are not.
 
 | Tool | Parameters | Returns |
 |------|-----------|---------|
@@ -631,8 +631,8 @@ Read tools plus write tools for workouts (`workout_create`, `workout_schedule`, 
 | `training_plan_preview` | `plan` | Strict validation (one entry per date, canonical YYYY-MM-DD) plus a live, normalized `create_template`/`schedule`/`keep`/`move`/`replace`/`unschedule` diff; conflicts report `source_schedule_changed` or `destination_occupied`. Already-applied moves and removals preview as `keep`/`no_op`. Performs no write. **Read-only.** |
 | `training_plan_apply` | `plan` | Revalidates and rereads live state, writes destinations first, removes sources last, and reports per-operation state plus `complete`, `no_op`, `compensated`, `partial`, or `unknown`. Compensation only touches identifiers returned by this call's own writes. No `confirm` parameter exists; client approval must precede invocation. **Destructive.** |
 | `training_plan_reschedule` | `schedule_id`, `new_date`, `expected_date` | Verifies the expected source date, schedules/verifies the destination before source removal, and compensates a failed move when possible. **Destructive.** |
-| `activity_download` | `activity_id`, `fmt?` (`original`\|`tcx`\|`gpx`\|`kml`\|`csv`), `output_path?`, `overwrite?` | `{count, rows}` — `ok: true, action: "downloaded", activity_id, format, path, size_bytes`. Writes the file to disk (default `activity_<id><ext>` in the cwd); raw bytes are never returned. Refuses to overwrite an existing file unless `overwrite=true`. |
-| `activity_upload` | `file_path` (.fit/.gpx/.tcx) | `{count, rows}` — `ok: true, action: "uploaded", status, activity_id`. `status` is `rejected` when Garmin declines the import (e.g. duplicate); `activity_id` is then null. |
+| `activity_download` | `activity_id`, `fmt?` (`original`\|`tcx`\|`gpx`\|`kml`\|`csv`), `output_path?`, `overwrite?` | `{count, rows}` — `ok: true, action: "downloaded", activity_id, format, path, size_bytes`. Writes the file inside `GARMIN_MCP_FILE_ROOT` (default `activity_<id><ext>` in `~/Downloads/garmin-py`); relative `output_path` is under the root, and escapes, `..`, or any symlinked path component are rejected; raw bytes are never returned. Refuses to overwrite an existing file unless `overwrite=true`. **Destructive** (overwrite can replace a file). |
+| `activity_upload` | `file_path` (.fit/.gpx/.tcx, inside `GARMIN_MCP_FILE_ROOT`; relative paths are under the root) | `{count, rows}` — `ok: true, action: "uploaded", status, activity_id`; a missing, outside-root, symlinked, or non-file path returns `File not available under GARMIN_MCP_FILE_ROOT`. `status` is `rejected` when Garmin declines the import (e.g. duplicate); `activity_id` is then null. |
 | `activity_delete` | `activity_id` | `{count, rows}` — `ok: true, action: "deleted", activity_id`. **Destructive.** |
 | `activity_rename` | `activity_id`, `name` | `{count, rows}` — `ok: true, action: "renamed", activity_id, name`. **Destructive** (replaces the stored title). |
 | `activity_set_type` | `activity_id`, `type_key` | `{count, rows}` — `ok: true, action: "type-updated", activity_id, type`. `type_key` is resolved against Garmin's live sport-type table; unknown keys are rejected before any write. **Destructive** (replaces the sport classification). |

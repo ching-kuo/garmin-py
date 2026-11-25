@@ -261,7 +261,7 @@ class TestImportGuard:
         runner = CliRunner(mix_stderr=False)
         result = runner.invoke(cli, ["mcp-server"])
         assert result.exit_code == 1
-        assert 'pip install "garmin-cli[mcp]"' in (result.output + (result.stderr or ""))
+        assert 'pip install "garmin-py[mcp]"' in (result.output + (result.stderr or ""))
 
 
 class TestCollectReportSections:

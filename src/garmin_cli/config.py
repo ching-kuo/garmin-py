@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from garmin_cli.token_store import DEFAULT_GARMIN_HOME
 
@@ -12,7 +12,7 @@ class CliConfig:
     """Immutable CLI configuration."""
 
     email: str | None = None
-    password: str | None = None
+    password: str | None = field(default=None, repr=False)
     garth_home: str = DEFAULT_GARMIN_HOME
     output_format: str = "table"
 

@@ -102,9 +102,9 @@ def create_mcp_server(
         config: CLI configuration (session home, credentials, etc.)
             captured by closure so every tool call has access.
         token_verifier: Optional bearer-token verifier; when supplied along
-            with ``auth`` the MCP SDK gates all tools on non-loopback
-            transports. Loopback / stdio callers should leave both as
-            ``None``.
+            with ``auth`` the MCP SDK gates all tools on the HTTP
+            transports. Stdio and unauthenticated loopback callers leave
+            both as ``None``.
         auth: Optional auth settings; required by the SDK when
             ``token_verifier`` is set.
     """

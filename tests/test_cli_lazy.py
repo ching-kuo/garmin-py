@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import importlib
+import json
 import subprocess
 import sys
+from typing import Any
 
 import click
 import pytest
 from click.testing import CliRunner
 
-from garmin_cli.cli import _LAZY_SUBCOMMANDS, cli
+from garmin_cli.cli import _LAZY_SUBCOMMANDS, _command_name_from_args, cli
+from garmin_cli.cli import main as cli_main
 
 # Modules that must NOT load for --version/--help: the Garmin backend chain.
 _HEAVY_MODULES = ("garminconnect", "requests", "curl_cffi")
@@ -64,3 +67,44 @@ class TestLazySubcommandLoading:
     def test_unknown_command_still_errors(self) -> None:
         result = CliRunner().invoke(cli, ["no-such-command"])
         assert result.exit_code != 0
+
+    def test_lazy_import_failure_still_emits_json_envelope(self, mocker: Any) -> None:
+        mocker.patch.dict(cli.commands)
+        cli.commands.pop("activity", None)
+        mocker.patch(
+            "garmin_cli.cli.importlib.import_module", side_effect=ImportError("boom")
+        )
+
+        result = CliRunner(mix_stderr=False).invoke(cli, ["--json", "activity", "list"])
+
+        assert result.exit_code == 1
+        parsed = json.loads(result.output)
+        assert parsed["error_code"] == "INTERNAL_ERROR"
+        assert parsed["command"] == "activity"
+
+
+def test_command_name_skips_global_option_values() -> None:
+    cli.get_command(click.Context(cli), "health")  # ensure the group is loaded
+
+    assert _command_name_from_args(["--garmin-home", "doctor", "health", "sleep"]) == (
+        "health sleep"
+    )
+    assert _command_name_from_args(["--format", "json", "health", "--days", "sleep"]) == (
+        "health"
+    )
+
+
+def test_console_entry_point_uses_sys_argv_for_json_errors(
+    mocker: Any, capsys: Any
+) -> None:
+    mocker.patch.object(sys, "argv", ["garmin-cli", "--json", "no-such-command"])
+    click_main = mocker.spy(click.Group, "main")
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli_main()
+
+    assert excinfo.value.code == 1
+    parsed = json.loads(capsys.readouterr().out)
+    assert parsed["error_code"] == "INVALID_INPUT"
+    # click keeps resolving argv itself (Windows wildcard expansion).
+    assert click_main.call_args.kwargs["args"] is None

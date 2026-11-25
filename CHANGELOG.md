@@ -1,5 +1,31 @@
 # Changelog
 
+## [Unreleased]
+
+### Breaking
+
+- `GARMIN_MCP_BEARER_TOKEN` must be at least 32 characters of the RFC 6750 token alphabet (`A-Z a-z 0-9 - . _ ~ + /`, optional trailing `=`); `mcp-server` refuses to start otherwise (generate one with `python -c "import secrets;print(secrets.token_urlsafe(32))"`).
+- `GARMIN_MCP_BEARER_TOKEN` is now enforced on loopback HTTP binds too whenever the variable is present; a present-but-blank value refuses to start on any HTTP bind. Only stdio and loopback binds with the variable absent stay unauthenticated.
+- MCP `activity_download` and `activity_upload` only read and write inside `GARMIN_MCP_FILE_ROOT` (default `~/Downloads/garmin-py`, created 0700 on first download); relative paths resolve under it, absolute paths must use the root's resolved form, no path component may be a symlink (even one pointing inside the root), and the download default moved there from the server's working directory. A custom value must be an absolute path (`~` allowed); one still containing an unexpanded `${...}` placeholder falls back to the default. The CLI `activity download` / `activity upload` commands are unchanged.
+
+### Security
+
+- JSON error envelopes no longer echo option values in `command` (for example `login --password <secret>` reported the password); only known command names are reported, and a subcommand only when it directly follows its group.
+- MCP `activity_download` rejects `..`, symlinked path components, and paths outside the file root, checks the root and target directory before signing in, creates files with `O_EXCL | O_NOFOLLOW` (0600) and removes a partial file if the write fails, overwrites atomically, and is now annotated `destructive_hint=True`.
+- MCP `activity_upload` returns one generic `File not available under GARMIN_MCP_FILE_ROOT` error for missing, outside-root, symlinked, or non-file paths, so it no longer reveals which host paths exist.
+- Requests whose bearer token contains non-ASCII characters get 401 instead of crashing the request.
+- `mcp-server --host` rejects empty, whitespace-only, and bracketed non-IPv6 values such as `[]`; they were treated as loopback (no token required) while the HTTP server bound every interface.
+- `CliConfig` no longer includes the password in its `repr`.
+- Install hints now say `pip install "garmin-py[mcp]"`; they named `garmin-cli`, an unrelated PyPI package.
+
+### Fixed
+
+- The installed `garmin-cli` command now prints JSON error envelopes for `--json` / `--format json` failures; it previously fell back to plain-text errors because the console entry point never passed its arguments to the error handler.
+- `doctor` fails the write-surface check for a `GARMIN_MCP_BEARER_TOKEN` that is present but blank, too short, or outside the RFC 6750 token alphabet, and its write-surface text describes the loopback enforcement.
+- `garmin-cli --json mcp-server` without the `mcp` extra now prints a JSON error envelope instead of plain text, and startup refusals (such as an invalid bearer token) report `INVALID_INPUT` instead of `INTERNAL_ERROR`.
+- `mcp-server --host [::1]` binds `::1`; the bracketed form previously reached the HTTP server unchanged.
+- HTTP binds on an IPv6 literal host (for example `--host ::1` with a token set) build a valid auth URL instead of failing at startup.
+
 ## [2.13.0] - 2026-11-09
 
 ### Added

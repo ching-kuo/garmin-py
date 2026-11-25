@@ -11,6 +11,7 @@ import pytest
 from click.testing import CliRunner
 
 from garmin_cli.auth import SessionProbeResult
+from garmin_cli.bearer_token import BEARER_ENV, BEARER_TOKEN_HINT, MIN_BEARER_TOKEN_LENGTH
 from garmin_cli.cli import cli
 from garmin_cli.config import CliConfig
 from garmin_cli.doctor import (
@@ -19,7 +20,6 @@ from garmin_cli.doctor import (
     check_write_surface,
     run_checks,
 )
-from garmin_cli.mcp_cli import _MCP_BEARER_ENV
 
 
 def _secure_home(path: Path, *, token: bool = True) -> None:
@@ -86,15 +86,35 @@ def test_failed_session_probe_is_captured(mocker: Any) -> None:
 
 
 def test_write_surface_reports_bearer_token_state(monkeypatch: Any) -> None:
-    monkeypatch.delenv(_MCP_BEARER_ENV, raising=False)
+    monkeypatch.delenv(BEARER_ENV, raising=False)
     without_token = check_write_surface(CliConfig())
-    monkeypatch.setenv(_MCP_BEARER_ENV, "x")
+    monkeypatch.setenv(BEARER_ENV, "x" * MIN_BEARER_TOKEN_LENGTH)
     with_token = check_write_surface(CliConfig())
 
     assert without_token.ok is True
     assert "Bearer token configured: false" in without_token.detail
     assert with_token.ok is True
     assert "Bearer token configured: true" in with_token.detail
+
+
+def test_write_surface_flags_short_bearer_token(monkeypatch: Any) -> None:
+    monkeypatch.setenv(BEARER_ENV, "x" * (MIN_BEARER_TOKEN_LENGTH - 1))
+    short = check_write_surface(CliConfig())
+
+    assert short.ok is False
+    assert f"at least {MIN_BEARER_TOKEN_LENGTH}" in short.detail
+    assert BEARER_TOKEN_HINT in short.detail
+
+
+@pytest.mark.parametrize(
+    "token", ["", "  \t ", "ä" * MIN_BEARER_TOKEN_LENGTH, "a b" * MIN_BEARER_TOKEN_LENGTH]
+)
+def test_write_surface_flags_blank_or_invalid_bearer_token(
+    monkeypatch: Any, token: str
+) -> None:
+    monkeypatch.setenv(BEARER_ENV, token)
+
+    assert check_write_surface(CliConfig()).ok is False
 
 
 _VersionInfo = namedtuple("_VersionInfo", "major minor micro releaselevel serial")
